@@ -4,14 +4,13 @@ import unittest
 import os
 import json
 
-from pymatgen.electronic_structure.band_structure.band_structure import Kpoint
-from pymatgen.core.structure import Lattice
+from pymatgen.electronic_structure.bandstructure import Kpoint
+from pymatgen import Lattice, __file__
 from pymatgen.electronic_structure.core import Spin
-from pymatgen.electronic_structure.band_structure.band_structure import BandStructureSymmLine
+from pymatgen.electronic_structure.bandstructure import BandStructureSymmLine
 
-import pymatgen
+test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'test_files')
 
-test_dir = os.path.join(os.path.dirname(os.path.abspath(pymatgen.__file__)), '..', 'test_files')
 
 class KpointTest(unittest.TestCase):
 
@@ -64,9 +63,9 @@ class BandStructureSymmLine_test(unittest.TestCase):
         self.assertEqual(self.one_kpoint.frac_coords[0], 0.5)
         self.assertEqual(self.one_kpoint.frac_coords[1], 0.25)
         self.assertEqual(self.one_kpoint.frac_coords[2], 0.75)
-        self.assertAlmostEqual(self.one_kpoint.cart_coords[0], 0.79508914)
-        self.assertAlmostEqual(self.one_kpoint.cart_coords[1], 0.45904494)
-        self.assertAlmostEqual(self.one_kpoint.cart_coords[2], 1.12442586)
+        self.assertAlmostEqual(self.one_kpoint.cart_coords[0], 0.64918757)
+        self.assertAlmostEqual(self.one_kpoint.cart_coords[1], 1.29837513)
+        self.assertAlmostEqual(self.one_kpoint.cart_coords[2], 0.0)
         self.assertEqual(self.one_kpoint.label, "W")
 
         self.assertAlmostEqual(self.bs.efermi, 2.6211967, "wrong fermi energy")

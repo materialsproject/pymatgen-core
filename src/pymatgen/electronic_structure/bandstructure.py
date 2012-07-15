@@ -17,9 +17,10 @@ import numpy as np
 import math
 from pymatgen.core.lattice import Lattice
 from pymatgen.electronic_structure.core import Spin
+from pymatgen.serializers.json_coders import MSONable
 
 
-class Kpoint(object):
+class Kpoint(MSONable):
     """
     Class to store kpoint objects. A kpoint is defined with a lattice and frac 
     or cartesian coordinates syntax similar than the site object in 
@@ -199,9 +200,10 @@ class BandStructure(object):
         True if the band structure is spin-polarized, False otherwise
         """
         return self._is_spin_polarized
+    
 
 
-class BandStructureSymmLine(BandStructure):
+class BandStructureSymmLine(BandStructure, MSONable):
     """
     This object stores band structures along selected (symmetry) lines in the
     Brillouin zone. We call the different symmetry lines (ex: \Gamma to Z) 
@@ -336,6 +338,9 @@ class BandStructureSymmLine(BandStructure):
                 'energy':
                     The energy of the VBM
         """
+        if self.is_metal():
+            return {'band_index':[], 'kpoint_index':[],
+                'kpoint':[], 'energy':None}
         max_tmp = -1000.0
         index = None
         kpointvbm = None
@@ -386,6 +391,9 @@ class BandStructureSymmLine(BandStructure):
                 'energy':
                     The energy of the CBM
         """
+        if self.is_metal():
+            return {'band_index':[], 'kpoint_index':[],
+                'kpoint':[], 'energy':None}
         max_tmp = 1000.0
         index = None
         kpointcbm = None
@@ -439,7 +447,7 @@ class BandStructureSymmLine(BandStructure):
 
         if cbm['kpoint'].label == vbm['kpoint'].label or np.linalg.norm(cbm['kpoint'].cart_coords - vbm['kpoint'].cart_coords) < 0.01:
             result['direct'] = True
-        result['transition'] = '-'.join([str(c.label) if c.label is not None else str(c.frac_coords) for c in [vbm['kpoint'], cbm['kpoint']]])
+        result['transition'] = '-'.join([str(c.label) if c.label is not None else str("(") + ','.join(['{0:.3f}'.format(c.frac_coords[i]) for i in range(3)]) + str(")") for c in [vbm['kpoint'], cbm['kpoint']]])
         return result
 
     def is_metal(self):
@@ -450,6 +458,7 @@ class BandStructureSymmLine(BandStructure):
         Returns:
             True if a metal, False if not
         """
+        #print self._efermi
         for i in range(self._nb_bands):
             below = False
             above = False
@@ -491,10 +500,10 @@ class BandStructureSymmLine(BandStructure):
         d['bands'] = { str(int(spin)) : self._bands[spin] for spin in self._bands}
         d['is_metal'] = self.is_metal()
         vbm = self.get_vbm()
-        d['VBM'] = {'energy':vbm['energy'], 'kpoint_index':vbm['kpoint_index'],
+        d['vbm'] = {'energy':vbm['energy'], 'kpoint_index':vbm['kpoint_index'],
                     'band_index':{str(int(spin)) : vbm['band_index'][spin] for spin in vbm['band_index']}}
         cbm = self.get_cbm()
-        d['CBM'] = {'energy':vbm['energy'], 'kpoint_index':cbm['kpoint_index'],
+        d['cbm'] = {'energy':vbm['energy'], 'kpoint_index':cbm['kpoint_index'],
                     'band_index':{str(int(spin)) : cbm['band_index'][spin] for spin in cbm['band_index']}}
         d['band_gap'] = self.get_band_gap()
         d['labels_dict'] = {}
@@ -513,10 +522,10 @@ class BandStructureSymmLine(BandStructure):
             A BandStructureSymmLine object
         """
         labels_dict = d['labels_dict']
-        return BandStructureSymmLine(d['kpoints'], {Spin.from_int(int(k)):d['bands'][k] for k in d['bands']}, Lattice.from_dict(d['lattice_rec']), d['efermi'], labels_dict)
+        return BandStructureSymmLine(d['kpoints'], {Spin.from_int(int(k)):d['bands'][k] for k in d['bands']}, Lattice(d['lattice_rec']['matrix']), d['efermi'], labels_dict)
 
 
-def get_reconstructed_band_structure(list_bs, efermi):
+def get_reconstructed_band_structure(list_bs, efermi = None):
         """
         This method takes a list of band structure (divided by branches)
         and reconstruct one band structure object from all of them
@@ -532,7 +541,7 @@ def get_reconstructed_band_structure(list_bs, efermi):
         Returns:
             A BandStructureSymmLine object
         """
-        if not efermi:
+        if efermi == None:
             efermi = sum([b.efermi for b in list_bs]) / len(list_bs)
 
         kpoints = []
