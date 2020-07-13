@@ -2,19 +2,22 @@
 # Copyright (c) Pymatgen Development Team.
 # Distributed under the terms of the MIT License.
 
-import unittest
-import os
 import json
-import warnings
-import numpy as np
+import os
 import tempfile
+import unittest
+import warnings
+
+import numpy as np
+
 from pymatgen import Structure
+from pymatgen.electronic_structure.core import Spin, Orbital
 from pymatgen.io.lobster import Cohpcar, Icohplist, Doscar, Charge, Lobsterout, Fatband, Lobsterin, Bandoverlaps, \
     Grosspop
+from pymatgen.io.lobster.inputs import get_all_possible_basis_combinations
 from pymatgen.io.vasp import Vasprun
-from pymatgen.electronic_structure.core import Spin, Orbital
-from pymatgen.util.testing import PymatgenTest
 from pymatgen.io.vasp.inputs import Incar, Kpoints, Potcar
+from pymatgen.util.testing import PymatgenTest
 
 __author__ = "Janine George, Marco Esters"
 __copyright__ = "Copyright 2017, The Materials Project"
@@ -23,9 +26,9 @@ __email__ = "janine.george@uclouvain.be, esters@uoregon.edu"
 __date__ = "Dec 10, 2017"
 
 test_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "..", "..", "..", "test_files", "cohp")
+                        "..", "..", "..", "..", "test_files", "cohp")
 test_dir_doscar = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "..", "..", "..", "test_files")
+                               "..", "..", "..", "..", "test_files")
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -244,6 +247,8 @@ class IcohplistTest(unittest.TestCase):
         self.icoop_bise = Icohplist(filename=os.path.join(test_dir, "ICOOPLIST.lobster.BiSe"),
                                     are_coops=True)
         self.icohp_fe = Icohplist(filename=os.path.join(test_dir, "ICOHPLIST.lobster"))
+        # allow gzipped files
+        self.icohp_gzipped = Icohplist(filename=os.path.join(test_dir, "ICOHPLIST.lobster.gz"))
         self.icoop_fe = Icohplist(filename=os.path.join(test_dir, "ICOHPLIST.lobster"), are_coops=True)
 
     def test_attributes(self):
@@ -358,7 +363,9 @@ class DoscarTest(unittest.TestCase):
         self.assertListEqual(tdos_up, self.DOSCAR_spin_pol.completedos.densities[Spin.up].tolist())
         self.assertListEqual(tdos_down, self.DOSCAR_spin_pol.completedos.densities[Spin.down].tolist())
         self.assertAlmostEqual(fermi, self.DOSCAR_spin_pol.completedos.efermi)
-        self.assertDictEqual(self.DOSCAR_spin_pol.completedos.structure.as_dict(), self.structure.as_dict())
+        for coords, coords2 in zip(self.DOSCAR_spin_pol.completedos.structure.frac_coords, self.structure.frac_coords):
+            for xyz, xyz2 in zip(coords, coords2):
+                self.assertAlmostEqual(xyz, xyz2)
         self.assertListEqual(self.DOSCAR_spin_pol.completedos.pdos[self.structure[0]]['2s'][Spin.up].tolist(),
                              PDOS_F_2s_up)
         self.assertListEqual(self.DOSCAR_spin_pol.completedos.pdos[self.structure[0]]['2s'][Spin.down].tolist(),
@@ -532,7 +539,7 @@ class ChargeTest(PymatgenTest):
                                                              'species': [{'occu': 1, 'element': 'Mn'}], 'label': 'Mn'}],
                            'charge': None, '@module': 'pymatgen.core.structure'}
         s2 = Structure.from_dict(structure_dict2)
-        self.assertEqual(s2, self.charge2.get_structure_with_charges(os.path.join(this_dir, "POSCAR.MnO")))
+        self.assertEqual(s2, self.charge2.get_structure_with_charges(os.path.join(this_dir, "../../tests/POSCAR.MnO")))
 
 
 class LobsteroutTest(PymatgenTest):
@@ -548,6 +555,7 @@ class LobsteroutTest(PymatgenTest):
         self.lobsterout_twospins = Lobsterout(filename=os.path.join(test_dir, "lobsterout.twospins"))
         self.lobsterout_GaAs = Lobsterout(filename=os.path.join(test_dir, "lobsterout.GaAs"))
         self.lobsterout_from_projection = Lobsterout(filename=os.path.join(test_dir, "lobsterout_from_projection"))
+        self.lobsterout_onethread = Lobsterout(filename=os.path.join(test_dir, "lobsterout.onethread"))
 
     def tearDown(self):
         warnings.simplefilter("default")
@@ -802,6 +810,8 @@ class LobsteroutTest(PymatgenTest):
                                                            'usertime': {'h': '0', 'min': '0', 's': '12', 'ms': '370'},
                                                            'sys_time': {'h': '0', 'min': '0', 's': '0', 'ms': '180'}})
         self.assertAlmostEqual(self.lobsterout_GaAs.totalspilling[0], [0.0859][0])
+
+        self.assertEqual(self.lobsterout_onethread.number_of_threads, 1)
 
     def test_get_doc(self):
         comparedict = {'restart_from_projection': False, 'lobster_version': 'v3.1.0', 'threads': 8,
@@ -1217,14 +1227,30 @@ class LobsterinTest(unittest.TestCase):
         potcar = Potcar.from_file(os.path.join(test_dir_doscar, "POTCAR.Fe3O4"))
         Potcar_names = [name["symbol"] for name in potcar.spec]
 
-        self.assertListEqual(lobsterin1._get_basis(Structure.from_file(os.path.join(test_dir_doscar, "Fe3O4.cif")),
-                                                   potcar_symbols=Potcar_names),
+        self.assertListEqual(lobsterin1.get_basis(Structure.from_file(os.path.join(test_dir_doscar, "Fe3O4.cif")),
+                                                  potcar_symbols=Potcar_names),
                              ['Fe 3d 4p 4s ', 'O 2p 2s '])
         potcar = Potcar.from_file(os.path.join(test_dir, "POTCAR.GaAs"))
         Potcar_names = [name["symbol"] for name in potcar.spec]
-        self.assertListEqual(lobsterin1._get_basis(Structure.from_file(os.path.join(test_dir, "POSCAR.GaAs")),
-                                                   potcar_symbols=Potcar_names),
+        self.assertListEqual(lobsterin1.get_basis(Structure.from_file(os.path.join(test_dir, "POSCAR.GaAs")),
+                                                  potcar_symbols=Potcar_names),
                              ['Ga 3d 4p 4s ', 'As 4p 4s '])
+
+    def test_get_all_possible_basis_functions(self):
+        potcar = Potcar.from_file(os.path.join(test_dir_doscar, "POTCAR.Fe3O4"))
+        Potcar_names = [name["symbol"] for name in potcar.spec]
+        result = Lobsterin.get_all_possible_basis_functions(
+            Structure.from_file(os.path.join(test_dir_doscar, "Fe3O4.cif")),
+            potcar_symbols=Potcar_names)
+        self.assertDictEqual(result[0], {'Fe': '3d 4s', 'O': '2p 2s'})
+        self.assertDictEqual(result[1], {'Fe': '3d 4s 4p', 'O': '2p 2s'})
+
+        potcar2 = Potcar.from_file(os.path.join(test_dir_doscar, "POT_GGA_PAW_PBE_54/POTCAR.Fe_pv.gz"))
+        Potcar_names2 = [name["symbol"] for name in potcar2.spec]
+        result2 = Lobsterin.get_all_possible_basis_functions(
+            Structure.from_file(os.path.join(test_dir_doscar, "Fe.cif")),
+            potcar_symbols=Potcar_names2)
+        self.assertDictEqual(result2[0], {'Fe': '3d 3p 4s'})
 
     def test_get_potcar_symbols(self):
         lobsterin1 = Lobsterin({})
@@ -1513,9 +1539,50 @@ class GrosspopTest(unittest.TestCase):
              'abc': [0.841096220194068, 0.5850993824105675, 0.8719852747855317],
              'xyz': [2.754744948452184, 2.5446504486493, 4.806321279926453], 'label': 'O',
              'properties': {'Total Mulliken GP': 7.18, 'Total Loewdin GP': 6.92}}]}
-        newstructure = self.grosspop1.get_structure_with_total_grosspop(os.path.join(test_dir, "POSCAR.SiO2"))
 
-        self.assertDictEqual(newstructure.as_dict(), struct_dict)
+        newstructure = self.grosspop1.get_structure_with_total_grosspop(os.path.join(test_dir, "POSCAR.SiO2"))
+        for coords, coords2 in zip(newstructure.frac_coords, Structure.from_dict(struct_dict).frac_coords):
+            for xyz, xyz2 in zip(coords, coords2):
+                self.assertAlmostEqual(xyz, xyz2)
+
+
+class TestUtils(PymatgenTest):
+
+    def test_get_all_possible_basis_combinations(self):
+        # this basis is just for testing (not correct)
+        min_basis = ['Li 1s 2s ', 'Na 1s 2s', 'Si 1s 2s']
+        max_basis = ['Li 1s 2p 2s ', 'Na 1s 2p 2s', 'Si 1s 2s']
+        combinations_basis = get_all_possible_basis_combinations(min_basis, max_basis)
+        self.assertListEqual(combinations_basis,
+                             [['Li 1s 2s', 'Na 1s 2s', 'Si 1s 2s'], ['Li 1s 2s', 'Na 1s 2s 2p', 'Si 1s 2s'],
+                              ['Li 1s 2s 2p', 'Na 1s 2s', 'Si 1s 2s'], ['Li 1s 2s 2p', 'Na 1s 2s 2p', 'Si 1s 2s']])
+
+        min_basis = ['Li 1s 2s']
+        max_basis = ['Li 1s 2s 2p 3s']
+        combinations_basis = get_all_possible_basis_combinations(min_basis, max_basis)
+        self.assertListEqual(combinations_basis, [['Li 1s 2s'], ['Li 1s 2s 2p'], ['Li 1s 2s 3s'], ['Li 1s 2s 2p 3s']])
+
+        min_basis = ['Li 1s 2s', 'Na 1s 2s']
+        max_basis = ['Li 1s 2s 2p 3s', 'Na 1s 2s 2p 3s']
+        combinations_basis = get_all_possible_basis_combinations(min_basis, max_basis)
+        self.assertListEqual(combinations_basis,
+                             [['Li 1s 2s', 'Na 1s 2s'], ['Li 1s 2s', 'Na 1s 2s 2p'], ['Li 1s 2s', 'Na 1s 2s 3s'],
+                              ['Li 1s 2s', 'Na 1s 2s 2p 3s'], ['Li 1s 2s 2p', 'Na 1s 2s'],
+                              ['Li 1s 2s 2p', 'Na 1s 2s 2p'], ['Li 1s 2s 2p', 'Na 1s 2s 3s'],
+                              ['Li 1s 2s 2p', 'Na 1s 2s 2p 3s'], ['Li 1s 2s 3s', 'Na 1s 2s'],
+                              ['Li 1s 2s 3s', 'Na 1s 2s 2p'], ['Li 1s 2s 3s', 'Na 1s 2s 3s'],
+                              ['Li 1s 2s 3s', 'Na 1s 2s 2p 3s'], ['Li 1s 2s 2p 3s', 'Na 1s 2s'],
+                              ['Li 1s 2s 2p 3s', 'Na 1s 2s 2p'], ['Li 1s 2s 2p 3s', 'Na 1s 2s 3s'],
+                              ['Li 1s 2s 2p 3s', 'Na 1s 2s 2p 3s']])
+
+        min_basis = ['Si 1s 2s 2p', 'Na 1s 2s']
+        max_basis = ['Si 1s 2s 2p 3s', 'Na 1s 2s 2p 3s']
+        combinations_basis = get_all_possible_basis_combinations(min_basis, max_basis)
+        self.assertListEqual(combinations_basis, [['Si 1s 2s 2p', 'Na 1s 2s'], ['Si 1s 2s 2p', 'Na 1s 2s 2p'],
+                                                  ['Si 1s 2s 2p', 'Na 1s 2s 3s'], ['Si 1s 2s 2p', 'Na 1s 2s 2p 3s'],
+                                                  ['Si 1s 2s 2p 3s', 'Na 1s 2s'], ['Si 1s 2s 2p 3s', 'Na 1s 2s 2p'],
+                                                  ['Si 1s 2s 2p 3s', 'Na 1s 2s 3s'],
+                                                  ['Si 1s 2s 2p 3s', 'Na 1s 2s 2p 3s']])
 
 
 if __name__ == "__main__":
