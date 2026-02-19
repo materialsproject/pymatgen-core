@@ -32,7 +32,7 @@ permissions:
 jobs:
   test:
     # Prevent this action from running on forks
-    if: github.repository == 'materialsproject/pymatgen'
+    if: github.repository == 'materialyzeai/pymatgen-core'
     defaults:
       run:
         shell: bash -leo pipefail {0} # Enable mamba env activation by reading bash profile
