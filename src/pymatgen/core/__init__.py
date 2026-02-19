@@ -26,7 +26,7 @@ __maintainer__ = "Shyue Ping Ong, Matthew Horton, Janosh Riebesell"
 __maintainer_email__ = "shyuep@gmail.com"
 
 try:
-    __version__ = version("pymatgen")
+    __version__ = version("pymatgen-core")
 except PackageNotFoundError:  # pragma: no cover
     # package is not installed
     pass
