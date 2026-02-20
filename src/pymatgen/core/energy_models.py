@@ -54,7 +54,7 @@ class EwaldElectrostaticModel(EnergyModel):
 
     def __init__(self, real_space_cut=None, recip_space_cut=None, eta=None, acc_factor=8.0):
         """Initialize the model. Args have the same definitions as in
-        pymatgen.analysis.ewald.EwaldSummation.
+        pymatgen.core.ewald.EwaldSummation.
 
         Args:
             real_space_cut (float): Real space cutoff radius dictating how

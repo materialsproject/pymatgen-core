@@ -8,9 +8,9 @@ import warnings
 import numpy as np
 from monty.serialization import loadfn
 
-from pymatgen.analysis.bond_valence import BVAnalyzer
-from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.core import Structure
+from pymatgen.core.bond_valence import BVAnalyzer
+from pymatgen.core.structure_matcher import StructureMatcher
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 bond_params = loadfn(f"{MODULE_DIR}/DLS_bond_params.yaml")

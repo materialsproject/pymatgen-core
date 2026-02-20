@@ -33,7 +33,7 @@ __date__ = "Aug 1 2012"
 @due.dcite(
     Doi("10.1016/0010-4655(96)00016-1"),
     description="Ewald summation techniques in perspective: a survey",
-    path="pymatgen.analysis.ewald.EwaldSummation",
+    path="pymatgen.core.ewald.EwaldSummation",
 )
 class EwaldSummation(MSONable):
     """

@@ -13,8 +13,8 @@ from monty.json import MSONable
 from pymatgen.alchemy.filters import RemoveDuplicatesFilter, RemoveExistingFilter
 from pymatgen.alchemy.materials import TransformedStructure
 from pymatgen.alchemy.transmuters import StandardTransmuter
-from pymatgen.analysis.structure_prediction.substitution_probability import SubstitutionProbability
 from pymatgen.core import get_el_sp
+from pymatgen.core.structure_prediction.substitution_probability import SubstitutionProbability
 from pymatgen.transformations.standard_transformations import SubstitutionTransformation
 from pymatgen.util.due import Doi, due
 

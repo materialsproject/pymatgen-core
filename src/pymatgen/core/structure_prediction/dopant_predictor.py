@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from pymatgen.analysis.structure_prediction.substitution_probability import SubstitutionPredictor
 from pymatgen.core import Element, Species
+from pymatgen.core.structure_prediction.substitution_probability import SubstitutionPredictor
 
 
 def get_dopants_from_substitution_probabilities(

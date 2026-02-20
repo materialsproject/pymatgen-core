@@ -117,7 +117,6 @@ optional = [
     "seekpath>=2.0.1",
     "tblite[ase]>=0.3.0; platform_system=='Linux' and python_version<'3.12'"
 ]
-prototypes = ["pyxtal>=1.0", "pymatgen[symmetry]"]
 # moyopy[interface] includes ase
 symmetry = ["moyopy[interface]>=0.3"]
 # tblite only support Python 3.12+ through conda-forge
