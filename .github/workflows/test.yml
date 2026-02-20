@@ -111,6 +111,7 @@ jobs:
         run: |
           pytest --cov=pymatgen --cov-report=xml tests --color=yes
       - name: Codecov
+        if: github.ref == 'refs/heads/main'
         uses: codecov/codecov-action@v5
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
