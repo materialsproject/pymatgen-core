@@ -11,7 +11,7 @@ from pymatgen.symmetry.kpath import KPathSeek
 from pymatgen.util.testing import MatSciTest
 
 seekpath = pytest.importorskip("seekpath", reason="seekpath not installed")
-if not sys.platform.startswith("win"):
+if sys.platform.startswith("win"):
     pytest.skip("seekpath not supported on Windows", allow_module_level=True)
 
 
