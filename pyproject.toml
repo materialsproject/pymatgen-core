@@ -79,7 +79,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "requests>=2.32.5",
 ]
-version = "2025.10.7"
+version = "2026.2.24"
 
 [project.urls]
 Homepage = "https://pymatgen.org"
