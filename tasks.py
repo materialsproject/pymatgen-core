@@ -137,7 +137,7 @@ def release_github(ctx: Context, version: str) -> None:
         "prerelease": False,
     }
     response = requests.post(
-        "https://api.github.com/repos/materialsproject/pymatgen/releases",
+        "https://api.github.com/repos/materialyzeai/pymatgen-core/releases",
         data=json.dumps(payload),
         headers={"Authorization": f"token {os.environ['GITHUB_RELEASES_TOKEN']}"},
         timeout=60,
@@ -163,7 +163,7 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
     ignored_commits = []
     for line in output.decode("utf-8").strip().split("\n"):
         re_match = re.match(r".*\(\#(\d+)\)", line)
-        if re_match and "materialsproject/dependabot/pip" not in line:
+        if re_match and "materialyzeai/dependabot/pip" not in line:
             pr_number = re_match[1].strip()
             headers = {}
             if token := os.getenv("GITHUB_ACCESS_TOKEN"):
@@ -173,7 +173,7 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
                 }
 
             response = requests.get(
-                f"https://api.github.com/repos/materialsproject/pymatgen/pulls/{pr_number}",
+                f"https://api.github.com/repos/materialyzeai/pymatgen-core/pulls/{pr_number}",
                 headers=headers,
                 timeout=60,
             )

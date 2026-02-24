@@ -6,6 +6,11 @@ nav_order: 4
 
 # Changelog
 
+## v2026.2.24
+- First version of pymatgen-core, which includes all basic functionality of pymatgen. 
+- Some refactoring of certain modules, e.g., `structure_matcher`,  `molecule_matcher`, `elasticity`, etc. into
+  `pymatgen/core`.
+
 ## v2025.10.7
 
 - PR #4503 Replace print statements with logging across library code and tests (by @DanielYang59)
