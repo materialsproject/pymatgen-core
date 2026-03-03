@@ -144,6 +144,7 @@ include = ["pymatgen", "pymatgen.*"]
 "pymatgen.util" = ["*.json", "structures/*.json"]
 "pymatgen.io.lammps" = ["CoeffsDataType.yaml", "templates/*.template"]
 "pymatgen.symmetry" = ["*.json", "*.sqlite", "*.yaml"]
+"pymatgen.io.lobster" = ["lobster_basis/*.yaml", "future/lobster_basis/*.yaml"]
 
 [tool.cibuildwheel.linux]
 archs = ["auto64"]
