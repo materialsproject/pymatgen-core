@@ -84,9 +84,9 @@ version = "2026.2.24"
 [project.urls]
 Homepage = "https://pymatgen.org"
 Documentation = "https://pymatgen.org"
-Repository = "https://github.com/materialsproject/pymatgen"
-Issues = "https://github.com/materialsproject/pymatgen/issues"
-Pypi = "https://pypi.org/project/pymatgen"
+Repository = "https://github.com/materialsproject/pymatgen-core"
+Issues = "https://github.com/materialsproject/pymatgen-core/issues"
+Pypi = "https://pypi.org/project/pymatgen-core"
 
 [project.optional-dependencies]
 abinit = ["netcdf4>=1.7.2"]
@@ -105,12 +105,7 @@ optional = [
     "netcdf4>=1.7.2",
     "ase>=3.27.0",
     "beautifulsoup4",
-    #"pymatgen-analysis-alloys",
-    # PR4347: BoltzTraP2 needs to bump cmake version for spglib build
-    # "BoltzTraP2>=24.9.4",
-    "chemview>=0.6",
     "f90nml>=1.1.2",
-    "galore>=0.6.1",
     "h5py>=3.11.0",
     "hiphive>=1.3.1",
     "phonopy>=2.33.3",
@@ -245,10 +240,6 @@ filterwarnings = [
 [tool.coverage.run]
 parallel = true
 omit = [
-    "pymatgen/cli/feff_*.py",
-    "pymatgen/cli/pmg_config.py",
-    "pymatgen/cli/pmg_plot.py",
-    "pymatgen/cli/pmg_potcar.py",
     "pymatgen/dao.py",
 ]
 
@@ -266,7 +257,7 @@ ignore_missing_imports = true
 namespace_packages = true
 no_implicit_optional = false
 disable_error_code = ["annotation-unchecked", "override", "operator", "attr-defined", "union-attr", "call-overload", "index"]
-exclude = ['src/pymatgen/analysis', 'src/pymatgen/io/cp2k', 'src/pymatgen/io/lammps']
+exclude = ['src/pymatgen/io/cp2k', 'src/pymatgen/io/lammps']
 
 [[tool.mypy.overrides]]
 module = ["requests.*", "tabulate.*", "monty.*", "matplotlib.*"]
@@ -319,7 +310,7 @@ lint = [
     "ruff>=0.11.3",
 ]
 docs = [
-  "sphinx>=8.1.3",
-  "sphinx-rtd-theme>=3.0.2",
-  "sphinx-markdown-builder>=0.6.8",
+    "sphinx>=8.1.3",
+    "sphinx-rtd-theme>=3.0.2",
+    "sphinx-markdown-builder>=0.6.8",
 ]
