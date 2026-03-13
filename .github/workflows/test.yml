@@ -68,7 +68,7 @@ jobs:
           submodules: recursive
 
       - name: Create mamba environment
-        uses: mamba-org/setup-micromamba@main
+        uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: pmg
           cache-environment: true
@@ -83,7 +83,7 @@ jobs:
             # openff-toolkit # TODO: doesn't support Python 3.13 yet
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Install pymatgen and dependencies via uv
         run: |
