@@ -17,7 +17,7 @@ from pymatgen.io.lammps.data import CombinedData, LammpsData
 from pymatgen.io.lammps.inputs import LammpsInputFile
 
 if TYPE_CHECKING:
-    from typing import Self
+    from typing_extensions import Self
 
     from pymatgen.util.typing import PathLike
 
@@ -48,6 +48,7 @@ class LammpsInputSet(InputSet):
         data: LammpsData | CombinedData,
         calc_type: str = "",
         template_file: PathLike = "",
+        additional_data: dict | None = None,
         keep_stages: bool = False,
     ) -> None:
         """
@@ -68,8 +69,13 @@ class LammpsInputSet(InputSet):
         self.calc_type = calc_type
         self.template_file = template_file
         self.keep_stages = keep_stages
+        self.additional_data = additional_data
 
-        super().__init__(inputs={"in.lammps": self.inputfile, "system.data": self.data})
+        inputs = {"in.lammps": self.inputfile, "input.data": self.data}
+        if self.additional_data:
+            inputs.update(self.additional_data)
+
+        super().__init__(inputs=inputs)
 
     @classmethod
     def from_directory(cls, directory: PathLike, keep_stages: bool = False) -> Self:
