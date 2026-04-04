@@ -5,12 +5,12 @@ import gzip
 import json
 import logging
 import os
-import xml
 from pathlib import Path
 from shutil import copyfile, copyfileobj
 
 import numpy as np
 import pytest
+from lxml import etree as ET
 from monty.io import zopen
 from monty.shutil import decompress_file
 from numpy.testing import assert_allclose
@@ -142,7 +142,7 @@ class TestVasprun(MatSciTest):
         assert "unlabelled" in vr.dielectric_data
 
     def test_bad_vasprun(self):
-        with pytest.raises(xml.etree.ElementTree.ParseError):
+        with pytest.raises(ET.XMLSyntaxError):
             Vasprun(f"{VASP_OUT_DIR}/vasprun.bad.xml.gz")
 
         with pytest.warns(

@@ -16,10 +16,10 @@ from glob import glob
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from xml.etree import ElementTree as ET
 
 import numpy as np
 import orjson
+from lxml import etree as ET
 from monty.dev import requires
 from monty.io import reverse_readfile, zopen
 from monty.json import MSONable, jsanitize
@@ -55,8 +55,7 @@ if TYPE_CHECKING:
     from typing import Literal, Self, TypeAlias
 
     # Avoid name conflict with pymatgen.core.Element
-    from xml.etree.ElementTree import Element as XML_Element
-
+    from lxml.etree import _Element as XML_Element
     from numpy.typing import NDArray
 
     from pymatgen.util.typing import Kpoint, PathLike
@@ -228,10 +227,8 @@ class BandgapProps(MSONable):
 
 class Vasprun(MSONable):
     """
-    Vastly improved cElementTree-based parser for vasprun.xml files. Uses
-    iterparse to support incremental parsing of large files.
-    Speedup over Dom is at least 2x for smallish files (~1 Mb) to orders of
-    magnitude for larger files (~10 Mb).
+    Parser for vasprun.xml files. Uses lxml with explicit tags with iterparsing to reduce callback
+    overhead. Speedup over Dom is at least 2-3x for 10-430MB files.
 
     **VASP results**
 
@@ -356,30 +353,31 @@ class Vasprun(MSONable):
         self.separate_spins = separate_spins
         self.exception_on_bad_xml = exception_on_bad_xml
 
-        with zopen(filename, mode="rt", encoding="utf-8") as file:
-            if ionic_step_skip or ionic_step_offset:
+        if ionic_step_skip or ionic_step_offset:
+            with zopen(filename, mode="rb") as file:
                 # Remove parts of the xml file and parse the string
-                content: str = file.read()  # type:ignore[assignment]
-                steps: list[str] = content.split("<calculation>")
+                content: bytes = file.read()
+                steps: list[bytes] = content.split(b"<calculation>")
 
                 # The text before the first <calculation> is the preamble!
-                preamble: str = steps.pop(0)
+                preamble: bytes = steps.pop(0)
                 self.nionic_steps: int = len(steps)
                 new_steps = steps[ionic_step_offset :: int(ionic_step_skip or 1)]
 
                 # Add the tailing information in the last step from the run
-                to_parse: str = "<calculation>".join(new_steps)
+                to_parse: bytes = b"<calculation>".join(new_steps)
                 if steps[-1] != new_steps[-1]:
-                    to_parse = f"{preamble}<calculation>{to_parse}{steps[-1].split('</calculation>')[-1]}"
+                    to_parse = preamble + b"<calculation>" + to_parse + steps[-1].split(b"</calculation>")[-1]
                 else:
-                    to_parse = f"{preamble}<calculation>{to_parse}"
+                    to_parse = preamble + b"<calculation>" + to_parse
                 self._parse(
-                    BytesIO(to_parse.encode("utf-8")),
+                    BytesIO(to_parse),
                     parse_dos=parse_dos,
                     parse_eigen=parse_eigen,
                     parse_projected_eigen=parse_projected_eigen,
                 )
-            else:
+        else:
+            with zopen(filename, mode="rb") as file:
                 self._parse(
                     file,
                     parse_dos=parse_dos,
@@ -454,7 +452,25 @@ class Vasprun(MSONable):
             # whether they are nested within another block. This is why we
             # must read both start and end tags and have flags to tell us
             # when we have entered or left a block. (2024-01-26)
-            for event, elem in ET.iterparse(stream, events=["start", "end"]):
+            _TAGS = [
+                "atominfo",
+                "calculation",
+                "dielectricfunction",
+                "dos",
+                "dynmat",
+                "eigenvalues",
+                "eigenvalues_kpoints_opt",
+                "energy",
+                "generator",
+                "incar",
+                "kpoints",
+                "parameters",
+                "projected",
+                "projected_kpoints_opt",
+                "structure",
+                "varray",
+            ]
+            for event, elem in ET.iterparse(stream, events=["start", "end"], tag=_TAGS):
                 tag = elem.tag
                 if event == "start":
                     # The start event tells us when we have entered blocks
@@ -603,7 +619,7 @@ class Vasprun(MSONable):
                             if "kinetic" in d:
                                 md_data[-1]["energy"] = {i.attrib["name"]: float(i.text) for i in elem.findall("i")}  # type:ignore[arg-type]
 
-        except ET.ParseError:
+        except ET.XMLSyntaxError:
             if self.exception_on_bad_xml:
                 raise
             warnings.warn(
@@ -1843,7 +1859,7 @@ class BSVasprun(Vasprun):
         self.occu_tol = occu_tol
         self.separate_spins = separate_spins
 
-        with zopen(filename, mode="rt", encoding="utf-8") as file:
+        with zopen(filename, mode="rb") as file:
             self.efermi = None
             parsed_header = False
             in_kpoints_opt = False
