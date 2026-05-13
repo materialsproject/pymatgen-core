@@ -2364,11 +2364,15 @@ class GrainBoundaryGenerator:
         if len(index) == 1:
             miller[index[0]] = 1
         else:
-            min_index = np.argmin([i for i in vec if i != 0])
-            true_index = index[min_index]
-            index.pop(min_index)
-            frac = [Fraction(vec[value] / vec[true_index]).limit_denominator(100) for value in index]
-
+            true_index = min(index, key=lambda i: abs(vec[i]))
+            index.remove(true_index)
+            frac = []
+            for value in index:
+                ratio = vec[value] / vec[true_index]
+                approx = Fraction(ratio).limit_denominator(100)
+                if abs(ratio - float(approx)) > 1.0e-8:
+                    raise ValueError(f"Cannot convert vector {vec} to a valid Miller index within tolerance.")
+                frac.append(approx)
             if len(index) == 1:
                 miller[true_index] = frac[0].denominator
                 miller[index[0]] = frac[0].numerator
