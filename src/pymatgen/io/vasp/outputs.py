@@ -3816,38 +3816,61 @@ class VolumetricData(BaseVolumetricData):
         # for holding any strings in input that are not Poscar
         # or VolumetricData (typically augmentation charges)
         all_dataset_aug: dict[int, list[str]] = {}
-        dim: list[int] = []
-        ngrid_pts = 0
         poscar = None
+        dim: list[int] | None = None
         with zopen(filename, mode="rt", encoding="utf-8") as file:
             while True:
-                line = file.readline().strip()
+                original_line = file.readline()
+                if not original_line:
+                    break
+                line = original_line.strip()
                 if poscar is None:
                     if line != "" or len(poscar_string) == 0:
                         poscar_string.append(line)
                     else:
                         poscar = Poscar.from_str("\n".join(poscar_string))
-                elif not dim:
+                    continue
+
+                if not line:
+                    continue
+
+                dim = [int(i) for i in line.split()]
+                break
+
+            if poscar is None or dim is None:
+                raise ValueError(f"Failed to parse VASP volumetric header from {filename}")
+
+            ngrid_pts = dim[0] * dim[1] * dim[2]
+            rows, remainder = divmod(ngrid_pts, 5)
+            block_chars = rows * 91 + (remainder * 18 + 3 if remainder else 0)
+            dimline = " ".join(map(str, dim))
+
+            while True:
+                flat = np.fromstring(file.read(block_chars), sep=" ", count=ngrid_pts)
+                if flat.size != ngrid_pts:
+                    raise ValueError(
+                        "Unexpected volumetric grid size while parsing VASP volumetric data: "
+                        f"expected {ngrid_pts} values, got {flat.size}"
+                    )
+                # VASP data is F-order, we normalize to C-order
+                # to preserve legacy indexing semantics without exposing non-default memory layout.
+                all_dataset.append(np.ascontiguousarray(flat.reshape(dim, order="F")))
+                key = len(all_dataset) - 1
+
+                while True:
+                    original_line = file.readline()
+                    if not original_line:
+                        break
+                    line = original_line.strip()
                     if not line:
                         continue
-                    dim = [int(i) for i in line.split()]
-                    ngrid_pts = dim[0] * dim[1] * dim[2]
-                    rows, remainder = divmod(ngrid_pts, 5)
-                    nchars = rows * 91
-                    if remainder:
-                        nchars += remainder * 18 + 3
-                    flat = np.fromstring(file.read(nchars), sep=" ", count=ngrid_pts)
-                    # VASP data is F-order, we normalize to C-order
-                    # to preserve legacy indexing semantics without exposing non-default memory layout.
-                    all_dataset.append(np.ascontiguousarray(flat.reshape(dim, order="F"))
-)
-                elif not line:
-                    break
-                else:
-                    key = len(all_dataset) - 1
+                    if " ".join(line.split()) == dimline:
+                        break
                     if key not in all_dataset_aug:
                         all_dataset_aug[key] = []
-                    all_dataset_aug[key].append(line)  # type:ignore[arg-type]
+                    all_dataset_aug[key].append(original_line)  # type:ignore[arg-type]
+                if not original_line:
+                    break
 
         if len(all_dataset) == 4:
             # Construct a "diff" dict for scalar-like magnetization density,
@@ -3859,14 +3882,20 @@ class VolumetricData(BaseVolumetricData):
             # TODO: does CHGCAR change with different SAXIS?
             total, diff_x, diff_y, diff_z = all_dataset
             ref_sign = np.sign(diff_x * 1.01 + diff_y * 1.02 + diff_z * 1.03)
-            diff = np.sqrt(data["diff_x"] ** 2 + data["diff_y"] ** 2 + data["diff_z"] ** 2) * ref_sign
+            diff = np.sqrt(diff_x**2 + diff_y**2 + diff_z**2) * ref_sign
             data = {
                 "total": total,
                 "diff_x": diff_x,
                 "diff_y": diff_y,
                 "diff_z": diff_z,
                 "diff": diff,
-                }
+            }
+            data_aug = {
+                "total": all_dataset_aug.get(0),
+                "diff_x": all_dataset_aug.get(1),
+                "diff_y": all_dataset_aug.get(2),
+                "diff_z": all_dataset_aug.get(3),
+            }
         elif len(all_dataset) == 2:
             data = {"total": all_dataset[0], "diff": all_dataset[1]}
             data_aug = {
