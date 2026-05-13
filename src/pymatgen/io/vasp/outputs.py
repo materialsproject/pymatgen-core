@@ -3801,13 +3801,14 @@ class VolumetricData(BaseVolumetricData):
     """
 
     @staticmethod
-    def parse_file(filename: PathLike) -> tuple[Poscar, dict, dict]:
+    def parse_file(filename: PathLike, llong: bool = True) -> tuple[Poscar, dict, dict]:
         """
         Parse a generic volumetric data file in the VASP like format.
         Used by subclasses for parsing files.
 
         Args:
             filename (PathLike): Path of file to parse.
+            llong (bool): Matches VASP's internal OUTCHG ``LLONG`` flag.
 
         Returns:
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
@@ -3842,9 +3843,18 @@ class VolumetricData(BaseVolumetricData):
                 raise ValueError(f"Failed to parse VASP volumetric header from {filename}")
 
             ngrid_pts = dim[0] * dim[1] * dim[2]
-            rows, remainder = divmod(ngrid_pts, 5)
-            block_chars = rows * 91 + (remainder * 18 + 3 if remainder else 0)
             dimline = " ".join(map(str, dim))
+            vals_per_line = 5 if llong else 10
+            chars_per_val = 18 if llong else 12
+            # VASP OUTCHG writes:
+            # - LLONG = .TRUE.  -> FORM='(1X,E17.11)', NWRITE=5
+            # - LLONG = .FALSE. -> FORM='(1X,G11.5)' , NWRITE=10
+            # Full lines therefore occupy NWRITE * field_width + newline chars.
+            # Partial trailing lines are terminated by WRITE(IU,*)' ', which adds 3 chars.
+            rows, remainder = divmod(ngrid_pts, vals_per_line)
+            block_chars = rows * (vals_per_line * chars_per_val + 1) + (
+                remainder * chars_per_val + 3 if remainder else 0
+            )
 
             while True:
                 flat = np.fromstring(file.read(block_chars), sep=" ", count=ngrid_pts)
@@ -3853,8 +3863,6 @@ class VolumetricData(BaseVolumetricData):
                         "Unexpected volumetric grid size while parsing VASP volumetric data: "
                         f"expected {ngrid_pts} values, got {flat.size}"
                     )
-                # VASP data is F-order, we normalize to C-order
-                # to preserve legacy indexing semantics without exposing non-default memory layout.
                 all_dataset.append(np.ascontiguousarray(flat.reshape(dim, order="F")))
                 key = len(all_dataset) - 1
 
@@ -4019,7 +4027,7 @@ class Locpot(VolumetricData):
         Returns:
             Locpot
         """
-        poscar, data, _data_aug = VolumetricData.parse_file(filename)
+        poscar, data, _data_aug = VolumetricData.parse_file(filename, llong=True)
         return cls(poscar, data, **kwargs)
 
 
@@ -4065,7 +4073,7 @@ class Chgcar(VolumetricData):
         Returns:
             Chgcar
         """
-        poscar, data, data_aug = VolumetricData.parse_file(filename)
+        poscar, data, data_aug = VolumetricData.parse_file(filename, llong=True)
         return cls(poscar, data, data_aug=data_aug)  # type:ignore[arg-type]
 
     @property
@@ -4122,7 +4130,7 @@ class Elfcar(VolumetricData):
         Returns:
             Elfcar
         """
-        poscar, data, _data_aug = VolumetricData.parse_file(filename)
+        poscar, data, _data_aug = VolumetricData.parse_file(filename, llong=False)
         return cls(poscar, data)
 
     def get_alpha(self) -> VolumetricData:
