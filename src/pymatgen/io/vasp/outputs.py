@@ -3799,6 +3799,7 @@ class VolumetricData(BaseVolumetricData):
     """Container for volumetric data that allows
     for reading/writing with Poscar-type data.
     """
+
     @staticmethod
     def parse_file(filename: PathLike) -> tuple[Poscar, dict, dict]:
         """
