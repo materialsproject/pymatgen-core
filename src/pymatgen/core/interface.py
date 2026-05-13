@@ -2344,7 +2344,7 @@ class GrainBoundaryGenerator:
         return mat
 
     @staticmethod
-    def vec_to_surface(vec: tuple[float, float, float]) -> tuple[int, ...]:
+    def vec_to_surface(vec: tuple[float, float, float] | NDArray) -> tuple[int, ...]:
         """Transform a float vector to a surface miller index with integers.
 
         Args:
