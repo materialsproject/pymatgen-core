@@ -3812,104 +3812,101 @@ class VolumetricData(BaseVolumetricData):
         Returns:
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
         """
-        poscar_read = False
         poscar_string: list[str] = []
-        dataset: NDArray = np.zeros((1, 1, 1))
         all_dataset: list[NDArray] = []
         # for holding any strings in input that are not Poscar
         # or VolumetricData (typically augmentation charges)
         all_dataset_aug: dict[int, list[str]] = {}
-        dim: list[int] = []
-        dimline = ""
-        read_dataset = False
-        ngrid_pts = 0
-        data_count = 0
         poscar = None
+        dim: list[int] | None = None
         with zopen(filename, mode="rt", encoding="utf-8") as file:
-            for line in file:
-                original_line = line
-                line = line.strip()
-                if read_dataset:
-                    for tok in line.split():
-                        if data_count < ngrid_pts:
-                            # This complicated procedure is necessary because
-                            # VASP outputs x as the fastest index, followed by y
-                            # then z.
-                            no_x = data_count // dim[0]
-                            dataset[data_count % dim[0], no_x % dim[1], no_x // dim[1]] = float(tok)
-                            data_count += 1
-                    if data_count >= ngrid_pts:
-                        read_dataset = False
-                        data_count = 0
-                        all_dataset.append(dataset)
-
-                elif not poscar_read:
+            while True:
+                original_line = file.readline()
+                if not original_line:
+                    break
+                line = original_line.strip()
+                if poscar is None:
                     if line != "" or len(poscar_string) == 0:
                         poscar_string.append(line)  # type:ignore[arg-type]
-                    elif line == "":
+                    else:
                         poscar = Poscar.from_str("\n".join(poscar_string))
-                        poscar_read = True
+                    continue
 
-                elif not dim:
-                    dim = [int(i) for i in line.split()]
-                    ngrid_pts = dim[0] * dim[1] * dim[2]
-                    dimline = line  # type:ignore[assignment]
-                    read_dataset = True
-                    dataset = np.zeros(dim)
+                if not line:
+                    continue
 
-                elif line == dimline:
-                    # when line == dimline, expect volumetric data to follow
-                    # so set read_dataset to True
-                    read_dataset = True
-                    dataset = np.zeros(dim)
+                dim = [int(i) for i in line.split()]
+                break
 
-                else:
-                    # store any extra lines that were not part of the
-                    # volumetric data so we know which set of data the extra
-                    # lines are associated with
-                    key = len(all_dataset) - 1
+            if poscar is None or dim is None:
+                raise ValueError(f"Failed to parse VASP volumetric header from {filename}")
+
+            ngrid_pts = dim[0] * dim[1] * dim[2]
+            rows, remainder = divmod(ngrid_pts, 5)
+            block_chars = rows * 91 + (remainder * 18 + 3 if remainder else 0)
+            dimline = " ".join(map(str, dim))
+
+            while True:
+                flat = np.fromstring(file.read(block_chars), sep=" ", count=ngrid_pts)
+                if flat.size != ngrid_pts:
+                    raise ValueError(
+                        "Unexpected volumetric grid size while parsing VASP volumetric data: "
+                        f"expected {ngrid_pts} values, got {flat.size}"
+                    )
+                # VASP data is F-order, we normalize to C-order
+                # to preserve legacy indexing semantics without exposing non-default memory layout.
+                all_dataset.append(np.ascontiguousarray(flat.reshape(dim, order="F")))
+                key = len(all_dataset) - 1
+
+                while True:
+                    original_line = file.readline()
+                    if not original_line:
+                        break
+                    line = original_line.strip()
+                    if not line:
+                        continue
+                    if " ".join(line.split()) == dimline:
+                        break
                     if key not in all_dataset_aug:
                         all_dataset_aug[key] = []
                     all_dataset_aug[key].append(original_line)  # type:ignore[arg-type]
+                if not original_line:
+                    break
 
-            if len(all_dataset) == 4:
-                data = {
-                    "total": all_dataset[0],
-                    "diff_x": all_dataset[1],
-                    "diff_y": all_dataset[2],
-                    "diff_z": all_dataset[3],
-                }
-                data_aug = {
-                    "total": all_dataset_aug.get(0),
-                    "diff_x": all_dataset_aug.get(1),
-                    "diff_y": all_dataset_aug.get(2),
-                    "diff_z": all_dataset_aug.get(3),
-                }
-
-                # Construct a "diff" dict for scalar-like magnetization density,
-                # referenced to an arbitrary direction (using same method as
-                # pymatgen.electronic_structure.core.Magmom, see
-                # Magmom documentation for justification for this)
-                # TODO: re-examine this, and also similar behavior in
-                # Magmom - @mkhorton
-                # TODO: does CHGCAR change with different SAXIS?
-                diff_xyz = np.array([data["diff_x"], data["diff_y"], data["diff_z"]])
-                diff_xyz = diff_xyz.reshape((3, dim[0] * dim[1] * dim[2]))
-                ref_direction = np.array([1.01, 1.02, 1.03])
-                ref_sign = np.sign(np.dot(ref_direction, diff_xyz))
-                diff = np.multiply(np.linalg.norm(diff_xyz, axis=0), ref_sign)
-                data["diff"] = diff.reshape((dim[0], dim[1], dim[2]))
-
-            elif len(all_dataset) == 2:
-                data = {"total": all_dataset[0], "diff": all_dataset[1]}
-                data_aug = {
-                    "total": all_dataset_aug.get(0),
-                    "diff": all_dataset_aug.get(1),
-                }
-            else:
-                data = {"total": all_dataset[0]}
-                data_aug = {"total": all_dataset_aug.get(0)}
-            return poscar, data, data_aug  # type: ignore[return-value]
+        if len(all_dataset) == 4:
+            # Construct a "diff" dict for scalar-like magnetization density,
+            # referenced to an arbitrary direction (using same method as
+            # pymatgen.electronic_structure.core.Magmom, see
+            # Magmom documentation for justification for this)
+            # TODO: re-examine this, and also similar behavior in
+            # Magmom - @mkhorton
+            # TODO: does CHGCAR change with different SAXIS?
+            total, diff_x, diff_y, diff_z = all_dataset
+            ref_sign = np.sign(diff_x * 1.01 + diff_y * 1.02 + diff_z * 1.03)
+            diff = np.sqrt(diff_x**2 + diff_y**2 + diff_z**2) * ref_sign
+            data = {
+                "total": total,
+                "diff_x": diff_x,
+                "diff_y": diff_y,
+                "diff_z": diff_z,
+                "diff": diff,
+            }
+            data_aug = {
+                "total": all_dataset_aug.get(0),
+                "diff_x": all_dataset_aug.get(1),
+                "diff_y": all_dataset_aug.get(2),
+                "diff_z": all_dataset_aug.get(3),
+            }
+        elif len(all_dataset) == 2:
+            data = {"total": all_dataset[0], "diff": all_dataset[1]}
+            data_aug = {
+                "total": all_dataset_aug.get(0),
+                "diff": all_dataset_aug.get(1),
+            }
+        else:
+            data = {"total": all_dataset[0]}
+            data_aug = {"total": all_dataset_aug.get(0)}
+        return poscar, data, data_aug  # type: ignore[return-value]
 
     def write_file(
         self,
