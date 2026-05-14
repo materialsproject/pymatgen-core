@@ -1649,7 +1649,7 @@ class BSPlotterProjected(BSPlotter):
                 2 columns.
 
         Returns:
-            A pyplot object with different subfigures for different projections.
+            An array of plt.Axes with different subplots for different projections.
             The blue and red colors lines are bands
             for spin up and spin down. The green and cyan dots are projections
             for spin up and spin down. The bigger
@@ -1670,7 +1670,7 @@ class BSPlotterProjected(BSPlotter):
             )
 
         band_linewidth = 0.5
-        fig_main = plt.figure(figsize=w_h_size)
+        fig_main = pretty_plot(*w_h_size).figure
         proj_br_d, dictio_d, dictpa_d, branches = self._get_projections_by_branches_patom_pmorb(
             dictio, dictpa, sum_atoms, sum_morbs, selected_branches
         )
@@ -1688,19 +1688,19 @@ class BSPlotterProjected(BSPlotter):
                     count += 1
                     if num_column is None:
                         if n_figs == 1:
-                            ax=plt.subplot(1, 1, 1)
+                            ax = plt.subplot(1, 1, 1)
                         else:
                             row = n_figs // 2
                             if n_figs % 2 == 0:
-                                ax=plt.subplot(row, 2, count)
+                                ax = plt.subplot(row, 2, count)
                             else:
-                                ax=plt.subplot(row + 1, 2, count)
+                                ax = plt.subplot(row + 1, 2, count)
                     elif isinstance(num_column, int):
                         row = n_figs // num_column
                         if n_figs % num_column == 0:
-                            ax=plt.subplot(row, num_column, count)
+                            ax = plt.subplot(row, num_column, count)
                         else:
-                            ax=plt.subplot(row + 1, num_column, count)
+                            ax = plt.subplot(row + 1, num_column, count)
                     else:
                         raise ValueError("The invalid 'num_column' is assigned. It should be an integer.")
 
