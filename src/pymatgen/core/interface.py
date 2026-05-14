@@ -2369,8 +2369,10 @@ class GrainBoundaryGenerator:
             frac = []
             for value in index:
                 ratio = vec[value] / vec[true_index]
+                # The denominator limit of 100 is a deliberate sanity bound for Miller indices.
                 approx = Fraction(ratio).limit_denominator(100)
-                if abs(ratio - float(approx)) > 1.0e-8:
+                tol = 1e-8 * max(abs(ratio), 1)
+                if abs(ratio - float(approx)) > tol:
                     raise ValueError(f"Cannot convert vector {vec} to a valid Miller index within tolerance.")
                 frac.append(approx)
             if len(index) == 1:
@@ -2381,7 +2383,7 @@ class GrainBoundaryGenerator:
                 miller[true_index] = com_lcm
                 miller[index[0]] = frac[0].numerator * round(com_lcm / frac[0].denominator)
                 miller[index[1]] = frac[1].numerator * round(com_lcm / frac[1].denominator)
-        return cast("tuple[int, int, int]", miller)
+        return cast("tuple[int, int, int]", tuple(miller))
 
 
 def fix_pbc(structure: Structure, matrix: NDArray = None) -> Structure:

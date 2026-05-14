@@ -332,7 +332,7 @@ class TestGrainBoundaryGenerator(MatSciTest):
         assert_allclose(close_angle, angle)
 
     def test_vec_to_surface_negative_components(self):
-        assert GrainBoundaryGenerator.vec_to_surface([-100, 3, 2]) == [-100, 3, 2]
+        assert GrainBoundaryGenerator.vec_to_surface([-100, 3, 2]) == (-100, 3, 2)
 
     def test_vec_to_surface_invalid_fractional_approximation(self):
         with pytest.raises(ValueError, match="Cannot convert vector"):
