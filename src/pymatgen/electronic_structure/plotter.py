@@ -3771,7 +3771,7 @@ class CohpPlotter:
 
     def __init__(self, zero_at_efermi=True, are_coops=False, are_cobis=False) -> None:
         """Initialize a CohpPlotter.
-        
+
         Args:
             zero_at_efermi: Whether to shift all populations to have zero
                 energy at the Fermi level. Defaults to True.
