@@ -15,7 +15,7 @@ import numpy as np
 
 cimport cython
 cimport numpy as np
-from libc.math cimport fabs, round
+from libc.math cimport fabs, floor, round
 from libc.stdlib cimport free, malloc
 
 np.import_array()
@@ -31,35 +31,65 @@ images = images_t.reshape((27, 3))
 
 cdef np.float_t[:, ::1] images_view = images
 
+
+# ---------------------------------------------------------------------------
+# (N, 3) @ (3, 3) specialized matmul.
+# The lattice matrix in pymatgen is always 3x3, so dot_2d / dot_2d_mod are
+# called only in this shape. Hand-unrolling the inner two dims:
+#   - holds the lattice in 9 scalar locals (registers)
+#   - makes the i-loop unit-stride on both read and write
+#   - lets the compiler auto-vectorize the outer N-loop
+# This replaces the previous generic ijk loop, which had a non-unit-stride
+# inner loop for row-major C arrays.
+# ---------------------------------------------------------------------------
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef void dot_2d(np.float_t[:, ::1] a, np.float_t[:, ::1] b, np.float_t[:, ::1] o) nogil:
-    cdef int i, j, k, I, J, K
-    I = a.shape[0]
-    J = b.shape[1]
-    K = a.shape[1]
+cdef void dot_2d_3x3(
+    np.float_t[:, ::1] a,
+    np.float_t[:, ::1] b,
+    np.float_t[:, ::1] o,
+) noexcept nogil:
+    cdef int i, I = a.shape[0]
+    cdef double a0, a1, a2
+    cdef double b00 = b[0, 0], b01 = b[0, 1], b02 = b[0, 2]
+    cdef double b10 = b[1, 0], b11 = b[1, 1], b12 = b[1, 2]
+    cdef double b20 = b[2, 0], b21 = b[2, 1], b22 = b[2, 2]
+    for i in range(I):
+        a0 = a[i, 0]
+        a1 = a[i, 1]
+        a2 = a[i, 2]
+        o[i, 0] = a0 * b00 + a1 * b10 + a2 * b20
+        o[i, 1] = a0 * b01 + a1 * b11 + a2 * b21
+        o[i, 2] = a0 * b02 + a1 * b12 + a2 * b22
 
-    for j in range(J):
-        for i in range(I):
-            o[i, j] = 0
-        for k in range(K):
-            for i in range(I):
-                o[i, j] += a[i, k] * b[k, j]
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef void dot_2d_mod(np.float_t[:, ::1] a, np.float_t[:, ::1] b, np.float_t[:, ::1] o) nogil:
-    cdef int i, j, k, I, J, K
-    I = a.shape[0]
-    J = b.shape[1]
-    K = a.shape[1]
+cdef void dot_2d_mod_3x3(
+    np.float_t[:, ::1] a,
+    np.float_t[:, ::1] b,
+    np.float_t[:, ::1] o,
+) noexcept nogil:
+    """Same as dot_2d_3x3 but applies a mod-1 to each input frac coord first.
 
-    for j in range(J):
-        for i in range(I):
-            o[i, j] = 0
-        for k in range(K):
-            for i in range(I):
-                o[i, j] += a[i, k] % 1 * b[k, j]
+    Implemented as ``a - floor(a)`` (numpy ``np.mod(a, 1)`` semantics — always
+    in [0, 1) for any real input) rather than ``a % 1``: the latter compiles to
+    a slow Python-style helper on cdef double and has C-vs-Python sign
+    differences for negative inputs.
+    """
+    cdef int i, I = a.shape[0]
+    cdef double a0, a1, a2
+    cdef double b00 = b[0, 0], b01 = b[0, 1], b02 = b[0, 2]
+    cdef double b10 = b[1, 0], b11 = b[1, 1], b12 = b[1, 2]
+    cdef double b20 = b[2, 0], b21 = b[2, 1], b22 = b[2, 2]
+    for i in range(I):
+        a0 = a[i, 0] - floor(a[i, 0])
+        a1 = a[i, 1] - floor(a[i, 1])
+        a2 = a[i, 2] - floor(a[i, 2])
+        o[i, 0] = a0 * b00 + a1 * b10 + a2 * b20
+        o[i, 1] = a0 * b01 + a1 * b11 + a2 * b21
+        o[i, 2] = a0 * b02 + a1 * b12 + a2 * b22
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -93,7 +123,7 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
     cdef int n_pbc_im = int(3 ** n_pbc)
 
     cdef np.float_t[:, ::1] frac_im
-    cdef int i, j, k, l, I, J
+    cdef int i, j, k, l, I, J, bestk = 0
 
     if n_pbc == 3:
         fcoords1 = lattice.get_lll_frac_coords(fcoords1)
@@ -135,9 +165,9 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
         ftol = np.asarray(lll_frac_tol, dtype=np.float64, order="C")
 
 
-    dot_2d_mod(fc1, lat, cart_f1)
-    dot_2d_mod(fc2, lat, cart_f2)
-    dot_2d(frac_im, lat, cart_im)
+    dot_2d_mod_3x3(fc1, lat, cart_f1)
+    dot_2d_mod_3x3(fc2, lat, cart_f2)
+    dot_2d_3x3(frac_im, lat, cart_im)
 
     vectors = np.empty((I, J, 3))
     d2 = np.empty((I, J))
@@ -145,7 +175,10 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
     cdef np.float_t[:, ::1] ds = d2
     cdef np.float_t best, d, da, db, dc, fdist
     cdef bint within_frac = True
-    cdef np.float_t[:] pre_im = <np.float_t[:3]> malloc(3 * sizeof(np.float_t))
+    # 3-element scratch buffer for the per-(i,j) preimage. Heap-alloc just for
+    # 24 bytes is wasteful and the memoryview indirection prevents the compiler
+    # from holding these in registers; a stack array is faster and simpler.
+    cdef double pre_im[3]
 
     for i in range(I):
         for j in range(J):
@@ -159,9 +192,11 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
                             within_frac = False
                             break
                 if within_frac:
-                    for l in range(3):
-                        pre_im[l] = cart_f2[j, l] - cart_f1[i, l]
+                    pre_im[0] = cart_f2[j, 0] - cart_f1[i, 0]
+                    pre_im[1] = cart_f2[j, 1] - cart_f1[i, 1]
+                    pre_im[2] = cart_f2[j, 2] - cart_f1[i, 2]
                     best = 1e100
+                    bestk = 0
                     for k in range(n_pbc_im):
                         # compilers have a hard time unrolling this
                         da = pre_im[0] + cart_im[k, 0]
@@ -172,19 +207,20 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
                             best = d
                             bestk = k
                     ds[i, j] = best
-                    for l in range(3):
-                        vs[i, j, l] = pre_im[l] + cart_im[bestk, l]
+                    vs[i, j, 0] = pre_im[0] + cart_im[bestk, 0]
+                    vs[i, j, 1] = pre_im[1] + cart_im[bestk, 1]
+                    vs[i, j, 2] = pre_im[2] + cart_im[bestk, 2]
             if not within_frac:
                 ds[i, j] = 1e20
-                for l in range(3):
-                    vs[i, j, l] = 1e20
+                vs[i, j, 0] = 1e20
+                vs[i, j, 1] = 1e20
+                vs[i, j, 2] = 1e20
 
     if not (n_pbc == 3):
         free(&frac_im[0,0])
     free(&cart_f1[0,0])
     free(&cart_f2[0,0])
     free(&cart_im[0,0])
-    free(&pre_im[0])
 
     if return_d2:
         return vectors, d2
@@ -216,7 +252,8 @@ def is_coord_subset_pbc(subset, superset, atol, mask, pbc=(True, True, True)):
 
     cdef int i, j, k, len_fc1, len_fc2
     cdef np.float_t d
-    cdef bint ok, pbc_int[3]
+    cdef bint ok
+    cdef bint pbc_int[3]
 
     pbc_int = pbc
 
@@ -265,7 +302,8 @@ def coord_list_mapping_pbc(subset, superset, atol=1e-8, pbc=(True, True, True)):
     cdef np.float_t[:] t = atol
     cdef np.int64_t[:] c_inds = inds
     cdef np.float_t d
-    cdef bint ok_inner, ok_outer, pbc_int[3]
+    cdef bint ok_inner, ok_outer
+    cdef bint pbc_int[3]
 
     pbc_int = pbc
 
