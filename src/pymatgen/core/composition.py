@@ -12,7 +12,7 @@ import re
 import string
 import warnings
 from collections import defaultdict
-from functools import total_ordering
+from functools import cached_property, lru_cache, total_ordering
 from itertools import combinations_with_replacement, product
 from typing import TYPE_CHECKING
 
@@ -33,6 +33,53 @@ if TYPE_CHECKING:
     from pymatgen.util.typing import SpeciesLike
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Pre-compiled patterns used by the formula parser. Compiling once at module load
+# avoids re-compilation on every call into _parse_formula (which dominates Composition
+# construction from strings).
+_FORMULA_INVALID_RE = re.compile(r"[\s\d.*/]*$")
+_FORMULA_GROUP_RE = re.compile(r"([A-Z][a-z]*)\s*([-*\.e\d]*)")
+_FORMULA_PAREN_RE = re.compile(r"\(([^\(\)]+)\)\s*([\.e\d]*)")
+
+
+@lru_cache(maxsize=512)
+def _parse_formula_cached(formula: str, strict: bool = True) -> tuple[tuple[str, float], ...]:
+    """Cached formula -> ((symbol, amount), ...) parser.
+
+    Returns an immutable tuple of items so the cached value cannot be mutated by callers.
+    :meth:`Composition._parse_formula` wraps this with ``dict(...)`` for the public API.
+    """
+    if strict and _FORMULA_INVALID_RE.match(formula):
+        raise ValueError(f"Invalid formula={formula!r}")
+
+    # For Metallofullerene like "Y3N@C80"
+    formula = formula.replace("@", "")
+    # Square brackets / curly braces are normalized to parens (gh-3583 + nested cases).
+    formula = formula.translate(str.maketrans("[]{}", "()()"))
+
+    def get_sym_dict(form: str, factor: float) -> dict[str, float]:
+        sym_dict: dict[str, float] = defaultdict(float)
+        for match in _FORMULA_GROUP_RE.finditer(form):
+            el = match[1]
+            amt = 1.0
+            if match[2].strip() != "":
+                amt = float(match[2])
+            sym_dict[el] += amt * factor
+            form = form.replace(match.group(), "", 1)
+        if form.strip():
+            raise ValueError(f"{form} is an invalid formula!")
+        return sym_dict
+
+    match = _FORMULA_PAREN_RE.search(formula)
+    while match:
+        factor = 1.0
+        if match[2] != "":
+            factor = float(match[2])
+        unit_sym_dict = get_sym_dict(match[1], factor)
+        expanded_sym = "".join(f"{el}{amt}" for el, amt in unit_sym_dict.items())
+        formula = formula.replace(match.group(), expanded_sym, 1)
+        match = _FORMULA_PAREN_RE.search(formula)
+    return tuple(get_sym_dict(formula, 1).items())
 
 
 @total_ordering
@@ -319,12 +366,12 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """Get the same output as __str__() but without spaces."""
         return re.sub(r"\s+", "", str(self))
 
-    @property
+    @cached_property
     def average_electroneg(self) -> float:
         """Average electronegativity of the composition."""
         return sum((el.X * abs(amt) for el, amt in self.items())) / self.num_atoms
 
-    @property
+    @cached_property
     def total_electrons(self) -> float:
         """Total number of electrons in composition."""
         return sum((el.Z * abs(amt) for el, amt in self.items()))
@@ -351,7 +398,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 return False
         return True
 
-    @property
+    @cached_property
     def is_element(self) -> bool:
         """True if composition is an element."""
         return len(self) == 1
@@ -360,7 +407,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """A copy of the composition."""
         return type(self)(self, allow_negative=self.allow_negative)
 
-    @property
+    @cached_property
     def formula(self) -> str:
         """A formula string, with elements sorted by electronegativity,
         e.g. Li4 Fe4 P4 O16.
@@ -370,14 +417,14 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         formula = [f"{s}{formula_double_format(sym_amt[s], ignore_ones=False)}" for s in syms]
         return " ".join(formula)
 
-    @property
+    @cached_property
     def alphabetical_formula(self) -> str:
         """A formula string, with elements sorted by alphabetically
         e.g. Fe4 Li4 O16 P4.
         """
         return " ".join(sorted(self.formula.split()))
 
-    @property
+    @cached_property
     def iupac_formula(self) -> str:
         """A formula string, with elements sorted by the IUPAC
         electronegativity ordering defined in Table VI of "Nomenclature of
@@ -392,12 +439,12 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         formula = [f"{s}{formula_double_format(sym_amt[s], ignore_ones=False)}" for s in syms]
         return " ".join(formula)
 
-    @property
+    @cached_property
     def element_composition(self) -> Self:
         """The composition replacing any species by the corresponding element."""
         return type(self)(self.get_el_amt_dict(), allow_negative=self.allow_negative)
 
-    @property
+    @cached_property
     def fractional_composition(self) -> Self:
         """The normalized composition in which the amounts of each species sum to
         1.
@@ -405,7 +452,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """
         return self / self._n_atoms
 
-    @property
+    @cached_property
     def reduced_composition(self) -> Self:
         """The reduced composition, i.e. amounts normalized by greatest common denominator.
         E.g. "Fe4 P4 O16".reduced_composition = "Fe P O4".
@@ -486,14 +533,14 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             factor /= 2
         return formula, factor * _gcd
 
-    @property
+    @cached_property
     def reduced_formula(self) -> str:
         """A normalized formula, i.e., "LiFePO4" instead of
         "Li4Fe4P4O16".
         """
         return self.get_reduced_formula_and_factor()[0]
 
-    @property
+    @cached_property
     def hill_formula(self) -> str:
         """The Hill system (or Hill notation) is a system of writing empirical chemical
         formulas, molecular chemical formulas and components of a condensed formula such
@@ -527,7 +574,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """The set of elements in the Composition. E.g. {"O", "Si"} for SiO2."""
         return {el.symbol for el in self.elements}
 
-    @property
+    @cached_property
     def chemical_system(self) -> str:
         """The chemical system of a Composition, for example "O-Si" for
         SiO2. Chemical system is a string of a list of elements
@@ -543,7 +590,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """
         return self._n_atoms
 
-    @property
+    @cached_property
     def weight(self) -> FloatWithUnit:
         """Total molecular weight of Composition."""
         return Mass(sum(amount * el.atomic_mass for el, amount in self.items()), _PT_UNIT["Atomic mass"])  # type: ignore[misc]
@@ -608,46 +655,14 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         Notes:
             In the case of Metallofullerene formula (e.g. Y3N@C80),
             the @ mark will be dropped and passed to parser.
+
+        The cached implementation lives in :func:`_parse_formula_cached`; we copy the
+        result into a fresh dict so callers can freely mutate it without poisoning the
+        cache.
         """
-        # Raise error if formula contains special characters or only spaces and/or numbers
-        if strict and re.match(r"[\s\d.*/]*$", formula):
-            raise ValueError(f"Invalid {formula=}")
+        return dict(_parse_formula_cached(formula, strict))
 
-        # For Metallofullerene like "Y3N@C80"
-        formula = formula.replace("@", "")
-        # Square brackets are used in formulas to denote coordination complexes (gh-3583)
-        formula = formula.replace("[", "(")
-        formula = formula.replace("]", ")")
-        # next 2 lines covered by test_curly_bracket_deeply_nested_formulas
-        formula = formula.replace("{", "(")
-        formula = formula.replace("}", ")")
-
-        def get_sym_dict(form: str, factor: float) -> dict[str, float]:
-            sym_dict: dict[str, float] = defaultdict(float)
-            for match in re.finditer(r"([A-Z][a-z]*)\s*([-*\.e\d]*)", form):
-                el = match[1]
-                amt = 1.0
-                if match[2].strip() != "":
-                    amt = float(match[2])
-                sym_dict[el] += amt * factor
-                form = form.replace(match.group(), "", 1)
-            if form.strip():
-                raise ValueError(f"{form} is an invalid formula!")
-            return sym_dict
-
-        match = re.search(r"\(([^\(\)]+)\)\s*([\.e\d]*)", formula)
-        while match:
-            factor = 1.0
-            if match[2] != "":
-                factor = float(match[2])
-            unit_sym_dict = get_sym_dict(match[1], factor)
-            expanded_sym = "".join(f"{el}{amt}" for el, amt in unit_sym_dict.items())
-            expanded_formula = formula.replace(match.group(), expanded_sym, 1)
-            formula = expanded_formula
-            match = re.search(r"\(([^\(\)]+)\)\s*([\.e\d]*)", formula)
-        return get_sym_dict(formula, 1)
-
-    @property
+    @cached_property
     def anonymized_formula(self) -> str:
         """An anonymized formula. Unique species are arranged in ordering of
         increasing amounts and assigned ascending alphabets. Useful for
@@ -669,7 +684,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             anon += f"{elem}{amt_str}"
         return anon
 
-    @property
+    @cached_property
     def valid(self) -> bool:
         """True if Composition contains valid elements or species and
         False if the Composition contains any dummy species.
