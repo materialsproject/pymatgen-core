@@ -51,7 +51,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from typing import Literal, Self, TypeAlias
+    from typing import IO, Literal, Self, TypeAlias
 
     from h5py import File as H5File
     from h5py import Group as H5Group
@@ -3799,7 +3799,7 @@ class VolumetricData(BaseVolumetricData):
     """
 
     @staticmethod
-    def _plain_loadtxt(file: IO[str], nelem: int) -> NDArray:
+    def _plain_loadtxt(file: IO[bytes], nelem: int) -> NDArray:
         now = file.tell()
         ncol = len(file.readline().split())
         nrow, remainer = divmod(nelem, ncol)
@@ -3821,8 +3821,7 @@ class VolumetricData(BaseVolumetricData):
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
         """
         with zopen(filename, mode="rb") as file:
-            #parse poscar
-            filesize = os.fstat(file.fileno()).st_size
+            # parse poscar
             poscar = None
             poscar_string: list[bytes] = []
 
@@ -3842,7 +3841,7 @@ class VolumetricData(BaseVolumetricData):
             all_dataset: list[NDArray] = []
             all_dataset_aug: list[dict[int, NDArray]] = []
 
-            #parse volumetric data
+            # parse volumetric data
             while True:
                 line = file.readline()
                 if not line:
@@ -3850,7 +3849,7 @@ class VolumetricData(BaseVolumetricData):
                 line = line.strip()
                 if not line:
                     continue
-                elif line.startswith(b"augmentation occupancies (imaginary part)"):
+                if line.startswith(b"augmentation occupancies (imaginary part)"):
                     _, k, n = line.rsplit(maxsplit=2)
                     arr = VolumetricData._plain_loadtxt(file, int(n))
                     key = int(k)
@@ -3871,9 +3870,20 @@ class VolumetricData(BaseVolumetricData):
 
             if len(all_dataset) == 4:
                 ref_sign = np.sign(all_dataset[1] * 1.01 + all_dataset[2] * 1.02 + all_dataset[3] * 1.03)
-                diff = np.sqrt(all_dataset[1]**2 + all_dataset[2]**2 + all_dataset[3]**2) * ref_sign
-                data = {"total": all_dataset[0], "diff_x": all_dataset[1], "diff_y": all_dataset[2], "diff_z": all_dataset[3], "diff": diff}
-                data_aug = {"total": all_dataset_aug[0], "diff_x": all_dataset_aug[1], "diff_y": all_dataset_aug[2], "diff_z": all_dataset_aug[3]}
+                diff = np.sqrt(all_dataset[1] ** 2 + all_dataset[2] ** 2 + all_dataset[3] ** 2) * ref_sign
+                data = {
+                    "total": all_dataset[0],
+                    "diff_x": all_dataset[1],
+                    "diff_y": all_dataset[2],
+                    "diff_z": all_dataset[3],
+                    "diff": diff,
+                }
+                data_aug = {
+                    "total": all_dataset_aug[0],
+                    "diff_x": all_dataset_aug[1],
+                    "diff_y": all_dataset_aug[2],
+                    "diff_z": all_dataset_aug[3],
+                }
 
             elif len(all_dataset) == 2:
                 data = {"total": all_dataset[0], "diff": all_dataset[1]}

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from pymatgen.io.vasp.outputs import Locpot
 
-
 LOCPOT_PATH = Path(__file__).resolve().parents[2] / "test-files" / "io" / "vasp" / "outputs" / "LOCPOT.gz"
 
 
@@ -32,4 +31,3 @@ def test_print_locpot_read_baseline() -> None:
     print(f"\nLOCPOT read timings (ms): {timings_ms}")
     print(f"LOCPOT read mean (ms): {mean_ms:.3f}")
     print(f"LOCPOT read median (ms): {median_ms:.3f}")
-

@@ -1770,6 +1770,27 @@ class TestElfcar(MatSciTest):
         elfcar_copy = elfcar.copy()
         assert type(elfcar_copy) is type(elfcar)
 
+    def test_round_trip_write(self):
+        elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
+        out_path = f"{self.tmp_path}/ELFCAR_pmg"
+        elfcar.write_file(out_path)
+        reloaded = Elfcar.from_file(out_path)
+        assert_allclose(reloaded.data["total"], elfcar.data["total"])
+        assert_allclose(reloaded.data["diff"], elfcar.data["diff"])
+        assert reloaded.poscar.structure == elfcar.poscar.structure
+
+    def test_truncated_file(self):
+        elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
+        out_path = f"{self.tmp_path}/ELFCAR_truncated"
+        elfcar.write_file(out_path)
+        with open(out_path, encoding="utf-8") as file:
+            truncated = file.read()
+        truncated = truncated.rsplit("\n", 20)[0]
+        with open(out_path, "w", encoding="utf-8") as file:
+            file.write(truncated)
+        with pytest.raises(ValueError, match=r"cannot reshape array of size|number of columns changed"):
+            Elfcar.from_file(out_path)
+
     def test_alpha(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
         alpha = elfcar.get_alpha()
