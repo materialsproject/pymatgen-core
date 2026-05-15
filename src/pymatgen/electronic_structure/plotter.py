@@ -1763,7 +1763,7 @@ class BSPlotterProjected(BSPlotter):
                     else:
                         ax.set_ylim(ylim)
                     ax.set_title(f"{elt} {numa} {o}")
-        axs = plt.figure(fig_main).get_axes()
+        axs = fig_main.get_axes()
         return axs
 
     @classmethod
