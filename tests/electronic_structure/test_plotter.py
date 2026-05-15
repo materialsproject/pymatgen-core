@@ -214,7 +214,7 @@ class TestBSPlotterProjected:
         # Test if num_column other than 2 works correctly
         axs_col = self.plotter_Cu2O.get_projected_plots_dots_patom_pmorb(
                 {"Cu": ["dxy", "s", "px"], "O": ["px", "py", "pz"]},
-                {"Cu": [3, 5], "O": [1]}, num_column = 3)
+                {"Cu": [3, 5], "O": [1]}, num_column=3)
         axs_spec = axs_col[2].get_subplotspec()
         assert axs_spec.rowspan.start == 0 and axs_spec.colspan.start == 2
 
