@@ -1648,10 +1648,11 @@ class TestChgcar(MatSciTest):
 
     def test_write(self):
         self.chgcar_spin.write_file(out_path := f"{self.tmp_path}/CHGCAR_pmg")
-        with open(out_path, encoding="utf-8") as file:
-            for idx, line in enumerate(file):
-                if idx in (22130, 44255):
-                    assert line == "augmentation occupancies   1  15\n"
+        chgcar_from_file = Chgcar.from_file(out_path)
+        assert_allclose(chgcar_from_file.data["total"], self.chgcar_spin.data["total"])
+        assert_allclose(chgcar_from_file.data["diff"], self.chgcar_spin.data["diff"])
+        assert_allclose(chgcar_from_file.data_aug["total"][1], self.chgcar_spin.data_aug["total"][1])
+        assert_allclose(chgcar_from_file.data_aug["diff"][1], self.chgcar_spin.data_aug["diff"][1])
 
     def test_soc_chgcar(self):
         assert set(self.chgcar_NiO_soc.data) == {
@@ -1678,6 +1679,12 @@ class TestChgcar(MatSciTest):
         self.chgcar_NiO_soc.write_file(out_path := f"{self.tmp_path}/CHGCAR_pmg_soc")
         chg_from_file = Chgcar.from_file(out_path)
         assert chg_from_file.is_soc
+        assert_allclose(chg_from_file.data["total"], self.chgcar_NiO_soc.data["total"])
+        assert_allclose(chg_from_file.data["diff"], self.chgcar_NiO_soc.data["diff"])
+        assert_allclose(chg_from_file.data_aug["total"][1], self.chgcar_NiO_soc.data_aug["total"][1])
+        assert_allclose(chg_from_file.data_aug["diff_x"][1], self.chgcar_NiO_soc.data_aug["diff_x"][1])
+        assert_allclose(chg_from_file.data_aug["diff_y"][1], self.chgcar_NiO_soc.data_aug["diff_y"][1])
+        assert_allclose(chg_from_file.data_aug["diff_z"][1], self.chgcar_NiO_soc.data_aug["diff_z"][1])
 
     @pytest.mark.skipif(h5py is None, reason="h5py required for HDF5 support.")
     def test_hdf5(self):
