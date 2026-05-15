@@ -497,7 +497,7 @@ class TestTrajectory(MatSciTest):
         except ImportError:
             with pytest.raises(
                 ImportError,
-                match="ASE is required to read .traj files. pip install ase",
+                match=re.escape("ASE is required to read .traj files. pip install ase"),
             ):
                 Trajectory.from_file(f"{TEST_DIR}/LiMnO2_chgnet_relax.traj")
 
@@ -570,6 +570,6 @@ class TestTrajectory(MatSciTest):
         except ImportError:
             with pytest.raises(
                 ImportError,
-                match="ASE is required to write .traj files. pip install ase",
+                match=re.escape("ASE is required to write .traj files. pip install ase"),
             ):
                 ase_traj = traj.to_ase()

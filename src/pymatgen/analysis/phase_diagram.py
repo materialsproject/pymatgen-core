@@ -837,7 +837,7 @@ class PhaseDiagram(MSONable):
 
         try:
             decomp, hull_energy = self.get_decomp_and_hull_energy_per_atom(entry.composition)
-        except Exception as exc:
+        except (ValueError, RuntimeError, KeyError) as exc:
             if on_error == "raise":
                 raise ValueError(f"Unable to get decomposition for {entry}") from exc
             if on_error == "warn":

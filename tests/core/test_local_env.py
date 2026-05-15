@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from shutil import which
 from typing import get_args
 
@@ -1294,12 +1295,12 @@ class TestCrystalNN(MatSciTest):
 
         with pytest.raises(
             ValueError,
-            match="Site 0 has no majority species, the max species is Fe with occupancy 0.4",
+            match=re.escape("Site 0 has no majority species, the max species is Fe with occupancy 0.4"),
         ):
             cnn.get_cn(self.disordered_struct, 0, on_disorder="take_majority_strict")
         with pytest.raises(
             ValueError,
-            match="enerating StructureGraphs for disordered Structures is unsupported. Pass on_disorder=",
+            match=re.escape("enerating StructureGraphs for disordered Structures is unsupported. Pass on_disorder="),
         ):
             cnn.get_cn(self.disordered_struct, 0, on_disorder="error")
 
@@ -1320,7 +1321,7 @@ class TestCrystalNN(MatSciTest):
 
         with pytest.raises(
             ValueError,
-            match="Site 0 has no majority species, the max species is Fe with occupancy 0.4",
+            match=re.escape("Site 0 has no majority species, the max species is Fe with occupancy 0.4"),
         ):
             cnn.get_bonded_structure(self.disordered_struct, 0, on_disorder="take_majority_strict")
 

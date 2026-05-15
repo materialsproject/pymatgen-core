@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import warnings
 from pathlib import Path
 
@@ -138,7 +139,7 @@ class TestDftSet(MatSciTest):
         dft_set |= {"force_eval": {"dft": {"kpoints": {}}}}
         with pytest.raises(
             Cp2kValidationError,
-            match="CP2K v2022.1: Does not support hartree fock with kpoints",
+            match=re.escape("CP2K v2022.1: Does not support hartree fock with kpoints"),
         ):
             dft_set.validate()
 

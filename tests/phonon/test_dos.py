@@ -169,7 +169,7 @@ class TestPhononDos(MatSciTest):
         # test exceptions
         with pytest.raises(
             ValueError,
-            match="Cannot compute similarity index. When normalize=True, then please set metric=cosine-sim",
+            match=re.escape("Cannot compute similarity index. When normalize=True, then please set metric=cosine-sim"),
         ):
             self.dos.get_dos_fp_similarity(dos_fp, dos_fp2, col=1, metric="tanimoto", normalize=True)
 

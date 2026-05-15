@@ -550,6 +550,11 @@ class TestDopingTransformation(MatSciTest):
         assert find_codopant(Species("Fe", 2), 1) == Species("Cu", 1)
         assert find_codopant(Species("Fe", 2), 3) == Species("In", 3)
 
+    def test_find_codopant_no_candidates(self):
+        # No species has oxidation state +99 with a known ionic radius
+        with pytest.raises(ValueError, match="No species found with oxidation state 99"):
+            find_codopant(Species("Fe", 2), 99)
+
 
 class TestSlabTransformation(MatSciTest):
     def test_apply_transformation(self):

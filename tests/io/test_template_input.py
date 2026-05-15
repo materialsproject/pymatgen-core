@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -37,7 +38,7 @@ class TestTemplateInputGen(MatSciTest):
         assert len(list(input_set.inputs)) == 1
         assert isinstance(input_set.inputs["hello_world.in"], str)
 
-        with pytest.raises(FileExistsError, match="hello_world.in"):
+        with pytest.raises(FileExistsError, match=re.escape("hello_world.in")):
             input_set.write_input(self.tmp_path, overwrite=False)
 
         input_set.write_input(self.tmp_path, overwrite=True)
