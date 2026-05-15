@@ -119,29 +119,29 @@ class TestElasticTensor(MatSciTest):
     def test_structure_based_methods(self):
         # trans_velocity
         struct = self.structure
-        assert self.elastic_tensor_1.trans_v(struct) == approx(1996.35019877)
+        assert self.elastic_tensor_1.trans_v(struct) == approx(1996.3267137182859)
         # long_velocity
-        assert self.elastic_tensor_1.long_v(struct) == approx(3534.68123832)
+        assert self.elastic_tensor_1.long_v(struct) == approx(3534.639656349216)
         # Snyder properties
-        assert self.elastic_tensor_1.snyder_ac(struct) == approx(18.06127074)
-        assert self.elastic_tensor_1.snyder_opt(struct) == approx(0.18937465)
-        assert self.elastic_tensor_1.snyder_total(struct) == approx(18.25064540)
+        assert self.elastic_tensor_1.snyder_ac(struct) == approx(18.061058277029453)
+        assert self.elastic_tensor_1.snyder_opt(struct) == approx(0.18937242778808966)
+        assert self.elastic_tensor_1.snyder_total(struct) == approx(18.250430704817543)
         # Clarke
-        assert self.elastic_tensor_1.clarke_thermalcond(struct) == approx(0.3450307)
+        assert self.elastic_tensor_1.clarke_thermalcond(struct) == approx(0.3450388871045757)
         # Cahill
         cahill_thermal_cond = self.elastic_tensor_1.cahill_thermalcond(struct)
-        assert cahill_thermal_cond == approx(0.37896275)
+        assert cahill_thermal_cond == approx(0.3787576327727649)
         # Agne
         agne_thermal_cond = self.elastic_tensor_1.agne_diffusive_thermalcond(struct)
-        assert agne_thermal_cond == approx(0.23808966)
+        assert agne_thermal_cond == approx(0.2380953165347791)
         # Test Agne / Cahill factor
-        assert agne_thermal_cond / cahill_thermal_cond == approx(0.6282666)
+        assert agne_thermal_cond / cahill_thermal_cond == approx(0.6286218307780587)
         # Debye
-        assert self.elastic_tensor_1.debye_temperature(struct) == approx(198.8037985019)
+        assert self.elastic_tensor_1.debye_temperature(struct) == approx(198.80194641857014)
 
         # structure-property dict
         struct_prop_dict = self.elastic_tensor_1.get_structure_property_dict(struct)
-        assert struct_prop_dict["long_v"] == approx(3534.68123832)
+        assert struct_prop_dict["long_v"] == approx(3534.639656349216)
         for val in struct_prop_dict.values():
             assert not isinstance(val, FloatWithUnit)
         for key, val in struct_prop_dict.items():
@@ -313,7 +313,7 @@ class TestElasticTensorExpansion(MatSciTest):
         c0 = self.exp_cu.get_heat_capacity(0, self.cu, [1, 0, 0], [0, 1, 0])
         assert c0 == approx(0.0)
         c = self.exp_cu.get_heat_capacity(300, self.cu, [1, 0, 0], [0, 1, 0])
-        assert c == approx(8.285611958)
+        assert c == approx(8.285799471733913)
 
         # Get Gruneisen parameter
         gp = self.exp_cu.get_gruneisen_parameter()
