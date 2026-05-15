@@ -307,7 +307,7 @@ class ElasticTensor(NthOrderElasticTensor):
         n_sites = len(structure)
         site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
         return (
-            SNYDER_OPTICAL_CONST
+            SNYDER_OPTICAL_COEFF
             * (self.long_v(structure) + 2 * self.trans_v(structure))
             / 3.0
             / site_density ** (-2 / 3)
