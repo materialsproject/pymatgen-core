@@ -1649,7 +1649,7 @@ class BSPlotterProjected(BSPlotter):
                 2 columns.
 
         Returns:
-            An array of plt.Axes with different subplots for different projections.
+            A list of plt.Axes with different subplots for different projections.
             The blue and red colors lines are bands
             for spin up and spin down. The green and cyan dots are projections
             for spin up and spin down. The bigger
