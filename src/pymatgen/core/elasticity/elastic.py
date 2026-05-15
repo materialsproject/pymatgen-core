@@ -13,10 +13,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import sympy as sp
+from scipy.constants import N_A as N_a
+from scipy.constants import Boltzmann as kb
+from scipy.constants import R as R_gas
+from scipy.constants import hbar
 from scipy.integrate import quad
 from scipy.optimize import root
 from scipy.special import factorial
-from scipy.constants import Boltzmann as kb, hbar, N_A as N_a, R as R_gas
 
 from pymatgen.core.tensors import DEFAULT_QUAD, SquareTensor, Tensor, TensorCollection, get_uvec
 from pymatgen.core.units import Unit
@@ -45,7 +48,7 @@ __date__ = "July 24, 2018"
 
 # Thermal model coefficients
 CLARKE_COEFF = 0.87
-CAHILL_COEFF =  1 / 2 * (np.pi / 6) ** (1 / 3) # 2.48^-1
+CAHILL_COEFF = 1 / 2 * (np.pi / 6) ** (1 / 3)  # approx = 2.48^-1
 AGNE_COEFF = 0.76
 SNYDER_ACOUSTIC_COEFF = 0.38483
 SNYDER_OPTICAL_COEFF = 1.66914e-23
@@ -62,10 +65,11 @@ class NthOrderElasticTensor(Tensor):
 
     def __new__(cls, input_array, check_rank=None, tol: float = 1e-4) -> Self:
         """
+
         Args:
             input_array (np.ndarray): input array for tensor
             check_rank (int): rank of tensor to check
-            tol (float): tolerance for initial symmetry test of tensor
+            tol (float): tolerance for initial symmetry test of tensor.
         """
         obj = super().__new__(cls, input_array, check_rank=check_rank)
         if obj.rank % 2 != 0:
@@ -140,7 +144,7 @@ class ElasticTensor(NthOrderElasticTensor):
     This class extends Tensor to describe the 3x3x3x3 second-order elastic tensor,
     C_{ijkl}, with various methods for estimating other properties derived from the second
     order elastic tensor (e.g. bulk modulus, shear modulus, Young's modulus, Poisson's ratio).
-    Expects elastic tensor input with units of GPa. Using eV/A^3 will result in many derived properties 
+    Expects elastic tensor input with units of GPa. Using eV/A^3 will result in many derived properties
     having inconsistent units.
     """
 
@@ -250,7 +254,7 @@ class ElasticTensor(NthOrderElasticTensor):
         n_atoms = structure.composition.num_atoms
         weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
         volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
-        mass_density =  n_sites * weight / (n_atoms * volume)
+        mass_density = n_sites * weight / (n_atoms * volume)
         return (1e9 * self.g_vrh / mass_density) ** 0.5
 
     @raise_if_unphysical
@@ -268,7 +272,7 @@ class ElasticTensor(NthOrderElasticTensor):
         n_atoms = structure.composition.num_atoms
         weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
         volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
-        mass_density =  n_sites * weight / (n_atoms * volume)
+        mass_density = n_sites * weight / (n_atoms * volume)
         return (1e9 * (self.k_vrh + 4 / 3 * self.g_vrh) / mass_density) ** 0.5
 
     @raise_if_unphysical
@@ -283,7 +287,7 @@ class ElasticTensor(NthOrderElasticTensor):
         """
         n_sites = len(structure)
         n_atoms = structure.composition.num_atoms
-        site_density = n_sites / ( structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")) )
+        site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
         tot_mass = sum(spec.atomic_mass for spec in structure.species) * Unit("amu").get_conversion_factor(Unit("kg"))
         avg_mass = tot_mass / n_atoms
         return (
@@ -343,7 +347,7 @@ class ElasticTensor(NthOrderElasticTensor):
         weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
         volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
         avg_mass = tot_mass / n_atoms
-        mass_density =  n_sites * weight / (n_atoms * volume)
+        mass_density = n_sites * weight / (n_atoms * volume)
         return CLARKE_COEFF * kb * avg_mass ** (-2 / 3) * mass_density ** (1 / 6) * self.y_mod**0.5
 
     @raise_if_unphysical
