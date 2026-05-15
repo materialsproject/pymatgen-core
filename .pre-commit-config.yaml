@@ -42,10 +42,15 @@ repos:
     rev: v2.0.0
     hooks:
       - id: mypy
-        # mypy is given the explicit file list by pre-commit, which makes
-        # ``[tool.mypy] exclude = [...]`` in pyproject.toml a no-op for
-        # those files. Skip ``examples`` and ``tests`` at the hook level
-        # so mypy only sees ``src/matgl`` (matching pyproject.toml intent).
+        # Run mypy on the whole package once per hook invocation rather
+        # than letting pre-commit pass the staged-file list. With src/
+        # layout, passing individual files makes mypy resolve them under
+        # both ``pymatgen.<sub>`` and bare ``<sub>``, which then errors
+        # with "Source file found twice under different module names".
+        pass_filenames: false
+        args: [-p, pymatgen]
+        # ``exclude`` is unused when pass_filenames=false but kept here
+        # to document intent — examples/ and tests/ stay out of scope.
         exclude: ^(examples|tests)/
 
   - repo: https://github.com/codespell-project/codespell

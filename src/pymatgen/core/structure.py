@@ -623,7 +623,7 @@ class SiteCollection(collections.abc.Sequence, ABC):
                     new_sp = sp_mapping.get(sp, sp)
                     try:
                         comp += Composition(new_sp) * amt
-                    except Exception:
+                    except (ValueError, TypeError):
                         comp += {new_sp: amt}
                 site.species = comp
                 site.label = None  # type: ignore[assignment]
@@ -4899,23 +4899,17 @@ class Structure(IStructure, collections.abc.MutableSequence):
 
         Args:
             tol (float): Tolerance for distance to merge sites.
-            mode ("sum" | "delete" | "average"): Only first letter is considered at this moment.
-                - "delete": delete duplicate sites.
+            mode ("sum" | "delete" | "average"):
                 - "sum": sum the occupancies for the sites.
+                - "delete": delete duplicate sites.
                 - "average": delete the site but average the properties if it's numerical.
 
         Returns:
             Structure: Structure with merged sites.
         """
-        # TODO: change the code the allow full name after 2025-12-01
-        # TODO2: add a test for mode value, currently it only checks if first letter is "s/a"
-        if mode.lower() not in {"sum", "delete", "average"} and mode.lower()[0] in {"s", "d", "a"}:
-            warnings.warn(
-                "mode would only allow full name sum/delete/average after 2025-12-01", DeprecationWarning, stacklevel=2
-            )
-
-        if mode.lower()[0] not in {"s", "d", "a"}:
-            raise ValueError(f"Illegal {mode=}, should start with a/d/s.")
+        mode_low = mode.lower()
+        if mode_low not in {"sum", "delete", "average"}:
+            raise ValueError(f"Illegal {mode=}, must be one of 'sum', 'delete', 'average'.")
 
         dist_mat: NDArray[np.float64] = self.distance_matrix
         np.fill_diagonal(dist_mat, 0)
@@ -4933,15 +4927,14 @@ class Structure(IStructure, collections.abc.MutableSequence):
             props: dict = self[indexes[0]].properties
 
             for site_idx, clust_idx in enumerate(indexes[1:]):
-                # Sum occupancies in "sum" mode
-                if mode.lower()[0] == "s":
+                if mode_low == "sum":
                     species += self[clust_idx].species  # type:ignore[index]
 
                 offset = self[clust_idx].frac_coords - coords  # type:ignore[index]
                 coords += ((offset - np.round(offset)) / (site_idx + 2)).astype(coords.dtype)
                 for key, val in props.items():
                     if val is not None and not np.array_equal(self[clust_idx].properties[key], val):  # type:ignore[index]
-                        if mode.lower()[0] == "a" and isinstance(val, float | int):
+                        if mode_low == "average" and isinstance(val, float | int):
                             # update a running total
                             props[key] = val * (site_idx + 1) / (site_idx + 2) + self[clust_idx].properties[key] / (  # type:ignore[index]
                                 site_idx + 2

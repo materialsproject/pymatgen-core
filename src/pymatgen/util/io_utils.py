@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
@@ -54,8 +53,6 @@ def micro_pyawk(
     filename: str | Path,
     search: list[tuple[re.Pattern | str, Callable, Callable]],
     results: Any | None = None,
-    debug: Callable | None = None,
-    postdebug: Callable | None = None,
 ) -> Any:
     """Small awk-mimicking search routine.
 
@@ -73,20 +70,12 @@ def micro_pyawk(
         results: An object to store results. Default as an empty dictionary.
             Passing a results object let you interact with it via `run` and `test`.
             Hence, in many occasions it is clever to use the instance itself as results.
-        debug (Callable): Debug `run`.
-        postdebug (Callable): Post debug `run` after debug `run`.
 
     Returns:
         Any: The updated `results` object.
 
     Author: Rickard Armiento, Ioannis Petousis
     """
-    # TODO: remove `debug` and `postdebug` after 2025-11-09 if no one is opposing
-    if debug is not None:
-        warnings.warn("arg debug is scheduled for removal, see PR4160", DeprecationWarning, stacklevel=2)
-    if postdebug is not None:
-        warnings.warn("arg postdebug is scheduled for removal, see PR4160", DeprecationWarning, stacklevel=2)
-
     if results is None:
         results = {}
 
@@ -101,11 +90,6 @@ def micro_pyawk(
                 match = re.search(regex, line)
 
                 if match is not None and (test is None or test(results, line)):
-                    if debug is not None:
-                        debug(results, match)
-
                     run(results, match)
-                    if postdebug is not None:
-                        postdebug(results, match)
 
     return results

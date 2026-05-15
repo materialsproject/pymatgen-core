@@ -938,8 +938,13 @@ def find_codopant(
                 radius = sp.ionic_radius
                 if radius is not None:
                     candidates.append((radius, sp))
-        except Exception:
+        except (ValueError, KeyError):
             pass
+    if not candidates:
+        raise ValueError(
+            f"No species found with oxidation state {oxidation_state} and a known ionic radius "
+            f"(target: {target}, allowed_elements: {allowed_elements})."
+        )
     return min(candidates, key=lambda tup: abs(tup[0] / ref_radius - 1))[1]
 
 

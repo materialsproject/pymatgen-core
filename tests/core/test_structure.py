@@ -4,6 +4,7 @@ import itertools
 import json
 import math
 import os
+import re
 import warnings
 from fractions import Fraction
 from pathlib import Path
@@ -736,7 +737,8 @@ Direct
                     sites2 = [i[0] for i in nn_old]
                     assert set(sites1) == set(sites2)
                 break
-            except Exception:
+            except Exception:  # noqa: S110
+                # Retry across the candidate structures; only fail if none work.
                 pass
         else:
             raise ValueError("No valid structure tested.")
@@ -1019,7 +1021,7 @@ Direct
         # Test import error
         with (
             mock.patch.dict("sys.modules", {"moyopy": None}),
-            pytest.raises(ImportError, match="moyopy is not installed. Run pip install moyopy."),
+            pytest.raises(ImportError, match=re.escape("moyopy is not installed. Run pip install moyopy.")),
         ):
             self.struct.get_symmetry_dataset(backend="moyopy")
 
@@ -1224,7 +1226,7 @@ class TestStructure(MatSciTest):
         assert struct.symbol_set == ("H", "N", "O", "Si")
         with pytest.raises(
             ValueError,
-            match="Can't find functional group 'OH' in list. Provide explicit coordinates instead",
+            match=re.escape("Can't find functional group 'OH' in list. Provide explicit coordinates instead"),
         ):
             substituted = struct.substitute(2, "OH")
         # Distance between O and H
@@ -1350,7 +1352,7 @@ class TestStructure(MatSciTest):
         oxidation_states = {"Fe": 2}
         with pytest.raises(
             ValueError,
-            match="Oxidation states not specified for all elements, missing={'Si'}",
+            match=re.escape("Oxidation states not specified for all elements, missing={'Si'}"),
         ):
             self.struct.add_oxidation_state_by_element(oxidation_states)
 
@@ -1758,7 +1760,7 @@ class TestStructure(MatSciTest):
 
         with pytest.raises(
             ValueError,
-            match="Supplied lattice with parameters \\(.+\\) is incompatible with supplied spacegroup Pm-3m",
+            match=r"Supplied lattice with parameters \(.+\) is incompatible with supplied spacegroup Pm-3m",
         ):
             Structure.from_spacegroup(
                 "Pm-3m",
@@ -1839,8 +1841,12 @@ class TestStructure(MatSciTest):
         assert_allclose(struct[1].frac_coords, [0.5, 0.5, 0.5005])
 
         # Test illegal mode
-        with pytest.raises(ValueError, match="Illegal mode='illegal', should start with a/d/s"):
+        with pytest.raises(ValueError, match="Illegal mode='illegal', must be one of 'sum', 'delete', 'average'"):
             struct.merge_sites(mode="illegal")
+
+        # Test that single-letter modes are no longer accepted
+        with pytest.raises(ValueError, match="Illegal mode='s'"):
+            struct.merge_sites(mode="s")
 
         # Test for TaS2 with spacegroup 166 in 160 setting
         lattice = Lattice.hexagonal(3.374351, 20.308941)
@@ -2259,7 +2265,7 @@ class TestIMolecule(MatSciTest):
             [-0.513360, 0.889165, -0.363000],
             [-0.513360, 0.889165, -0.36301],
         ]
-        with pytest.raises(StructureError, match="sites that are less than 0.01 Angstrom"):
+        with pytest.raises(StructureError, match=re.escape("sites that are less than 0.01 Angstrom")):
             Molecule(["C", "H", "H", "H", "H", "H"], coords, validate_proximity=True)
 
     def test_get_angle_dihedral(self):
