@@ -14,6 +14,7 @@ import re
 import warnings
 from collections import Counter
 from enum import Enum, EnumMeta, unique
+from functools import cached_property
 from itertools import combinations, product
 from pathlib import Path
 from typing import TYPE_CHECKING, overload
@@ -42,6 +43,43 @@ _PT_UNIT: dict[str, str] = _RAW_PT_DATA.pop("_unit")
 _PT_DATA: dict[str, Any] = _RAW_PT_DATA
 
 _PT_ROW_SIZES: tuple[int, ...] = (2, 8, 8, 18, 18, 32, 32)
+
+# Set of attribute names served by Element.__getattr__ (in lieu of being defined as
+# explicit @property/@cached_property). Lifted to module level so it can be hot — and
+# so the Enum machinery does not interpret it as a new Element member.
+_ELEMENT_GETATTR_ITEMS: frozenset[str] = frozenset(
+    {
+        "mendeleev_no",
+        "electrical_resistivity",
+        "velocity_of_sound",
+        "reflectivity",
+        "refractive_index",
+        "poissons_ratio",
+        "molar_volume",
+        "thermal_conductivity",
+        "boiling_point",
+        "melting_point",
+        "critical_temperature",
+        "superconduction_temperature",
+        "liquid_range",
+        "bulk_modulus",
+        "youngs_modulus",
+        "brinell_hardness",
+        "rigidity_modulus",
+        "mineral_hardness",
+        "vickers_hardness",
+        "density_of_solid",
+        "atomic_radius_calculated",
+        "van_der_waals_radius",
+        "atomic_orbitals",
+        "coefficient_of_linear_thermal_expansion",
+        "ground_state_term_symbol",
+        "valence",
+        "ground_level",
+        "ionization_energies",
+        "metallic_radius",
+    }
+)
 
 # Madelung energy ordering rule (lower to higher energy)
 _MADELUNG: list[tuple[int, str]] = [
@@ -171,43 +209,19 @@ class ElementBase(Enum):
     def __getattr__(self, item: str) -> Any:
         """Key access to available element data.
 
+        The computed value is stashed in ``self.__dict__`` so subsequent accesses
+        bypass ``__getattr__`` entirely (Python's attribute lookup order checks
+        the instance dict first). This avoids the per-access string transform,
+        dict lookup, and FloatWithUnit allocation on hot paths like Element.X
+        consumers calling `el.thermal_conductivity` or `el.atomic_orbitals`.
+
         Args:
             item (str): Attribute name.
 
         Raises:
             AttributeError: If item not in _PT_DATA.
         """
-        if item not in {
-            "mendeleev_no",
-            "electrical_resistivity",
-            "velocity_of_sound",
-            "reflectivity",
-            "refractive_index",
-            "poissons_ratio",
-            "molar_volume",
-            "thermal_conductivity",
-            "boiling_point",
-            "melting_point",
-            "critical_temperature",
-            "superconduction_temperature",
-            "liquid_range",
-            "bulk_modulus",
-            "youngs_modulus",
-            "brinell_hardness",
-            "rigidity_modulus",
-            "mineral_hardness",
-            "vickers_hardness",
-            "density_of_solid",
-            "atomic_radius_calculated",
-            "van_der_waals_radius",
-            "atomic_orbitals",
-            "coefficient_of_linear_thermal_expansion",
-            "ground_state_term_symbol",
-            "valence",
-            "ground_level",
-            "ionization_energies",
-            "metallic_radius",
-        }:
+        if item not in _ELEMENT_GETATTR_ITEMS:
             raise AttributeError(f"Element has no attribute {item}!")
 
         prop_name: str = item.capitalize().replace("_", " ")
@@ -215,22 +229,29 @@ class ElementBase(Enum):
 
         if val is None:
             warnings.warn(f"No data available for {item} for {self.symbol}", stacklevel=2)
+            # Cache the None so we only warn once per element/attribute pair.
+            self.__dict__[item] = None
             return None
 
         if isinstance(val, list | dict):
+            self.__dict__[item] = val
             return val
 
         unit: str | None = _PT_UNIT.get(prop_name)
-
+        result: Any
         if unit is not None:
             if unit in SUPPORTED_UNIT_NAMES:
-                return FloatWithUnit(float(val), Unit(unit))
-            return FloatWithUnit(float(val), unit)
+                result = FloatWithUnit(float(val), Unit(unit))
+            else:
+                result = FloatWithUnit(float(val), unit)
+        else:
+            try:
+                result = float(val)
+            except ValueError:
+                result = val
 
-        try:
-            return float(val)
-        except ValueError:
-            return val
+        self.__dict__[item] = result
+        return result
 
     def __eq__(self, other: object) -> bool:
         return isinstance(self, Element) and isinstance(other, Element) and self.Z == other.Z and self.A == other.A
@@ -264,10 +285,13 @@ class ElementBase(Enum):
     def __deepcopy__(self, memo) -> Element:
         return Element(self.symbol)
 
-    @property
+    @cached_property
     def X(self) -> float:
         """Pauling electronegativity of element. Note that if an element does not
         have an Pauling electronegativity, a NaN float is returned.
+
+        Cached on first access; the missing-value warning fires at most once per
+        Element instance (caching ensures subsequent accesses bypass the descriptor).
         """
         if X := self._data.get("X"):
             return X
@@ -296,7 +320,7 @@ class ElementBase(Enum):
         """The atomic mass number of the element in amu."""
         return self._atomic_mass_number
 
-    @property
+    @cached_property
     def atomic_orbitals_eV(self) -> dict[str, float]:
         """The LDA energies in eV for neutral atoms, by orbital.
 
@@ -325,7 +349,7 @@ class ElementBase(Enum):
         """The amount of energy released when an electron is attached to a neutral atom."""
         return self._data["Electron affinity"]
 
-    @property
+    @cached_property
     def electronic_structure(self) -> str:
         """Electronic structure as string, with only valence electrons. The
         electrons are listed in order of increasing prinicpal quantum number
@@ -335,7 +359,7 @@ class ElementBase(Enum):
         """
         return self._data["Electronic structure"]["0"]
 
-    @property
+    @cached_property
     def average_ionic_radius(self) -> FloatWithUnit:
         """Average ionic radius for element (with units). The average is taken
         over all oxidation states of the element for which data is present.
@@ -347,7 +371,7 @@ class ElementBase(Enum):
             radius = 0.0
         return FloatWithUnit(radius, _PT_UNIT["Ionic radii"])
 
-    @property
+    @cached_property
     def average_cationic_radius(self) -> FloatWithUnit:
         """Average cationic radius for element (with units). The average is
         taken over all positive oxidation states of the element for which
@@ -357,7 +381,7 @@ class ElementBase(Enum):
             return FloatWithUnit(sum(radii) / len(radii), _PT_UNIT["Ionic radii"])
         return FloatWithUnit(0.0, _PT_UNIT["Ionic radii"])
 
-    @property
+    @cached_property
     def average_anionic_radius(self) -> FloatWithUnit:
         """Average anionic radius for element (with units). The average is
         taken over all negative oxidation states of the element for which
@@ -367,7 +391,7 @@ class ElementBase(Enum):
             return FloatWithUnit(sum(radii) / len(radii), _PT_UNIT["Ionic radii"])
         return FloatWithUnit(0.0, _PT_UNIT["Ionic radii"])
 
-    @property
+    @cached_property
     def ionic_radii(self) -> dict[int, FloatWithUnit]:
         """All ionic radii of the element as a dict of
         {oxidation state: ionic radii}. Radii are given in angstrom.
@@ -395,24 +419,24 @@ class ElementBase(Enum):
             return min(self._data["Oxidation states"])
         return 0
 
-    @property
+    @cached_property
     def oxidation_states(self) -> tuple[int, ...]:
         """Tuple of all known oxidation states."""
         return tuple(map(int, self._data.get("Oxidation states", ())))
 
-    @property
+    @cached_property
     def common_oxidation_states(self) -> tuple[int, ...]:
         """Tuple of common oxidation states."""
         return tuple(self._data.get("Common oxidation states", ()))
 
-    @property
+    @cached_property
     def icsd_oxidation_states(self) -> tuple[int, ...]:
         """Tuple of all oxidation states with at least 10 instances in
         ICSD database AND at least 1% of entries for that element.
         """
         return tuple(self._data.get("ICSD oxidation states", ()))
 
-    @property
+    @cached_property
     def full_electronic_structure(self) -> list[tuple[int, str, int]]:
         """Full electronic structure in order of increasing
         energy level (according to the Madelung rule). Therefore, the final
@@ -451,7 +475,7 @@ class ElementBase(Enum):
         # Sort the final electronic structure by increasing energy level
         return sorted(data, key=lambda x: _MADELUNG.index((x[0], x[1])))
 
-    @property
+    @cached_property
     def n_electrons(self) -> int:
         """Total number of electrons in the Element."""
         return sum(t[-1] for t in self.full_electronic_structure)
@@ -480,7 +504,7 @@ class ElementBase(Enum):
 
         return valence[0]
 
-    @property
+    @cached_property
     def term_symbols(self) -> list[list[str]]:
         """All possible Russell-Saunders term symbol of the Element.
         eg. L = 1, n_e = 2 (s2) returns [['1D2'], ['3P0', '3P1', '3P2'], ['1S0']].
@@ -526,7 +550,7 @@ class ElementBase(Enum):
                             del comb_counter[ML, MS]
         return term_symbols
 
-    @property
+    @cached_property
     def ground_state_term_symbol(self) -> str:
         """Ground state term symbol, selected based on Hund's Rule."""
         L_symbols = "SPDFGHIKLMNOQRTUVWXYZ"
@@ -640,7 +664,7 @@ class ElementBase(Enum):
         """
         return symbol in Element.__members__
 
-    @property
+    @cached_property
     def row(self) -> int:
         """The periodic table row of the element.
 
@@ -659,7 +683,7 @@ class ElementBase(Enum):
                 return idx
         return 8
 
-    @property
+    @cached_property
     def group(self) -> int:
         """The periodic table group of the element.
 
@@ -692,7 +716,7 @@ class ElementBase(Enum):
             return (z - 54) % 32 - 14
         return (z - 54) % 32
 
-    @property
+    @cached_property
     def block(self) -> Literal["s", "p", "d", "f"]:
         """The block character "s, p, d, f"."""
         if (self.is_actinoid or self.is_lanthanoid) and self.Z not in {71, 103}:
@@ -786,7 +810,7 @@ class ElementBase(Enum):
         """Check if this element can be quadrupolar."""
         return len(self.data.get("NMR Quadrupole Moment", {})) > 0
 
-    @property
+    @cached_property
     def nmr_quadrupole_moment(self) -> dict[str, FloatWithUnit]:
         """A dictionary the nuclear electric quadrupole moment in units of
         e*millibarns for various isotopes.
@@ -796,7 +820,7 @@ class ElementBase(Enum):
             for k, v in self.data.get("NMR Quadrupole Moment", {}).items()
         }
 
-    @property
+    @cached_property
     def iupac_ordering(self) -> int:
         """Ordering according to Table VI of "Nomenclature of Inorganic Chemistry
         (IUPAC Recommendations 2005)". This ordering effectively follows the

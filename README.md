@@ -53,7 +53,7 @@ Pymatgen is free to use. However, we also welcome your help to improve this libr
    `numpy`/`scipy`. This means that coordinate manipulations are fast. Pymatgen also comes with a complete system
    for handling periodic boundary conditions.
 5. **It will be around.** Pymatgen is not a pet research project. It is used in the well-established Materials
-   Project. It is also actively being developed and maintained by the [Materials Virtual Lab], the ABINIT group and
+   Project. It is also actively being developed and maintained by the [Materialyze Lab], the ABINIT group and
    many other research groups.
 6. **A growing ecosystem of developers and add-ons**. Pymatgen has contributions from materials scientists all over
    the world. We also now have an architecture to support add-ons that expand `pymatgen`'s functionality even
@@ -131,7 +131,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 
 ## About the Pymatgen Development Team
 
-Shyue Ping Ong (@shyuep) of the [Materials Virtual Lab] started Pymatgen in 2011 and is still the project lead.
+Shyue Ping Ong (@shyuep) of the [Materialyze Lab] started Pymatgen in 2011 and is still the project lead.
 Janosh Riebesell (@janosh) and Matthew Horton (@mkhorton) are co-maintainers.
 
 The [`pymatgen` development team] is the set of all contributors to the `pymatgen` project, including all subprojects.
@@ -148,4 +148,4 @@ commit message of the change, when they commit the change to one of the `pymatge
 [`pymatgen` docs]: https://pymatgen.org
 [materials project]: https://materialsproject.org
 [`pymatgen` development team]: https://pymatgen.org/team
-[materials virtual lab]: https://materialsvirtuallab.org
+[materialyze lab]: https://materialyze.ai

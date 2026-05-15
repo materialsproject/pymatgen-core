@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 __author__ = "Xiang-Guo Li"
-__copyright__ = "Copyright 2018, The Materials Virtual Lab"
+__copyright__ = "Copyright 2018, The Materialyze Lab"
 __version__ = "0.1"
 __maintainer__ = "Xiang-Guo Li"
 __email__ = "xil110@ucsd.edu"

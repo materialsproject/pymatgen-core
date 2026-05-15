@@ -12,10 +12,10 @@ from pymatgen.core.operations import SymmOp
 from pymatgen.symmetry.groups import SYMM_DATA, PointGroup, SpaceGroup
 
 __author__ = "Shyue Ping Ong"
-__copyright__ = "Copyright 2012, The Materials Virtual Lab"
+__copyright__ = "Copyright 2012, The Materialyze Lab"
 __version__ = "0.1"
 __maintainer__ = "Shyue Ping Ong"
-__email__ = "ongsp@ucsd.edu"
+__email__ = "shyue@nus.edu"
 __date__ = "4/10/14"
 
 ORDERED_SYMBOLS = (

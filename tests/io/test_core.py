@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -46,7 +47,7 @@ class FakeClass:
 
 class TestInputFile(MatSciTest):
     def test_file_io(self):
-        with pytest.raises(FileNotFoundError, match="No such file or directory: 'fakepath.cif'"):
+        with pytest.raises(FileNotFoundError, match=re.escape("No such file or directory: 'fakepath.cif'")):
             StructInputFile.from_file("fakepath.cif")
 
         sif = StructInputFile.from_file(f"{TEST_FILES_DIR}/cif/Li.cif")

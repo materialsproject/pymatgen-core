@@ -43,7 +43,7 @@ Pymatgen (Python Materials Genomics) is a robust, open-source Python library for
 2. **It is well documented.** A fairly comprehensive documentation has been written to help you get to grips with it quickly.
 3. **It is open.** You are free to use and contribute to pymatgen. It also means that pymatgen is continuously being improved. We will attribute any code you contribute to any publication you specify. Contributing to pymatgen means your research becomes more visible, which translates to greater impact.
 4. **It is fast.** Many of the core numerical methods in pymatgen have been optimized by vectorizing in `numpy`/`scipy`. This means that coordinate manipulations are fast. Pymatgen also comes with a complete system for handling periodic boundary conditions.
-5. **It will be around.** Pymatgen is not a pet research project. It is used in the well-established Materials Project. It is also actively being developed and maintained by the [Materials Virtual Lab], the ABINIT group and many other research groups.
+5. **It will be around.** Pymatgen is not a pet research project. It is used in the well-established Materials Project. It is also actively being developed and maintained by the [Materialyze Lab], the ABINIT group and many other research groups.
 6. **A growing ecosystem of developers and add-ons**. Pymatgen has contributions from materials scientists all over the world. We also now have an architecture to support add-ons that expand pymatgen's functionality even further. Check out the [contributing page](/contributing) and [add-ons page](/addons) for details and examples.
 
     *The code is mightier than the pen.*
@@ -251,7 +251,7 @@ For detailed documentation of all modules and classes, please refer to the [API 
 
 ### More resources
 
-The founder and maintainer of pymatgen, Shyue Ping Ong, has conducted several workshops (together with Anubhav Jain) on how to effectively use pymatgen (as well as the extremely useful [custodian] error management and [FireWorks] workflow software). The slides for these workshops are available on the [Materials Virtual Lab].
+The founder and maintainer of pymatgen, Shyue Ping Ong, has conducted several workshops (together with Anubhav Jain) on how to effectively use pymatgen (as well as the extremely useful [custodian] error management and [FireWorks] workflow software). The slides for these workshops are available on the [Materialyze Lab].
 
 ### `pmg` command line interface
 
@@ -307,7 +307,7 @@ Some add-ons are available for pymatgen today:
 
 1. The [pymatgen-db](https://pypi.python.org/pypi/pymatgen-db) add-on provides tools to create databases of calculated run data using pymatgen.
 2. The [custodian] package provides a JIT job management and error correction for calculations and is used by the Materials Project for high-throughput calculations.
-3. [pymatgen-analysis-diffusion](http://pypi.org/project/pymatgen-analysis-diffusion/) by the [Materials Virtual Lab] provides modules for diffusion analysis, including path determination for NEB calculations, analysis of MD trajectories (RDF, van Hove, Arrhenius plots, etc.)
+3. [pymatgen-analysis-diffusion](http://pypi.org/project/pymatgen-analysis-diffusion/) by the [Materialyze Lab] provides modules for diffusion analysis, including path determination for NEB calculations, analysis of MD trajectories (RDF, van Hove, Arrhenius plots, etc.)
 
 A comprehensive listing is provided at the [addons page](/addons).
 
@@ -341,7 +341,7 @@ In addition, some of pymatgen's functionality is based on scientific advances / 
 
 ### Soliciting contributions to an updated pymatgen paper
 
-If you are a long-standing `pymatgen` contributor and would like to be involved in working on an updated `pymatgen` publication, please contact the maintainers [@shyuep, @mkhorton and @janosh](mailto:ongsp@ucsd.edu,m.k.horton@gmail.com,janosh@lbl.gov?subject=Contributing%20to%20updated%20pymatgen%20paper).
+If you are a long-standing `pymatgen` contributor and would like to be involved in working on an updated `pymatgen` publication, please contact the maintainers [@shyuep, @mkhorton and @janosh](mailto:shyue@nus.edu,m.k.horton@gmail.com,janosh@lbl.gov?subject=Contributing%20to%20updated%20pymatgen%20paper).
 
 ## License
 
@@ -349,7 +349,7 @@ Pymatgen is released under the MIT License.
 
 ## Team
 
-Shyue Ping Ong of the [Materials Virtual Lab] started Pymatgen in 2011, and is still the project lead.
+Shyue Ping Ong of the [Materialyze Lab] started Pymatgen in 2011, and is still the project lead.
 
 The Pymatgen Development Team is the set of all contributors to the pymatgen project, including all subprojects.
 
@@ -364,7 +364,7 @@ Pymatgen uses a shared copyright model. Each contributor maintains copyright ove
 [custodian]: https://pypi.python.org/pypi/custodian
 [FireWorks]: https://materialsproject.github.io/fireworks
 [Materials Project]: https://materialsproject.org
-[Materials Virtual Lab]: http://materialsvirtuallab.org
+[Materialyze Lab]: https://materialyze.ai
 [pymatgen docs]: https://pymatgen.org
 [pymatgen development team]: https://pymatgen.org/team
 [matgenb]: https://matgenb.materialsvirtuallab.org/

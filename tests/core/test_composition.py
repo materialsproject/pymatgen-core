@@ -6,6 +6,8 @@ Created on Nov 10, 2012.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
@@ -87,7 +89,7 @@ class TestComposition(MatSciTest):
 
         # Test float in Composition
         comp = Composition({Element("Fe"): 2})
-        with pytest.raises(TypeError, match="Invalid key=1.5 for Composition"):
+        with pytest.raises(TypeError, match=re.escape("Invalid key=1.5 for Composition")):
             assert 1.5 in comp
 
         # Test DummySpecies in Composition
@@ -762,7 +764,7 @@ class TestComposition(MatSciTest):
         comp = Composition(formula)
         assert not comp.valid
 
-        with pytest.raises(ValueError, match="Composition is not valid, contains: Na, Cl, X0+"):
+        with pytest.raises(ValueError, match=re.escape("Composition is not valid, contains: Na, Cl, X0+")):
             Composition("NaClX", strict=True)
 
     def test_remove_charges(self):
@@ -920,7 +922,7 @@ class TestChemicalPotential:
         # test get_energy()
         assert pots.get_energy(fe_o2) == approx(5.2)
         assert fe_pot.get_energy(fe_o2, strict=False) == approx(1)
-        with pytest.raises(ValueError, match="Potentials not specified for {Element O}"):
+        with pytest.raises(ValueError, match=re.escape("Potentials not specified for {Element O}")):
             fe_pot.get_energy(fe_o2)
 
         # test multiplication

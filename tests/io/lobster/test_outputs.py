@@ -4,6 +4,7 @@ import copy
 import gzip
 import math
 import os
+import re
 
 import numpy as np
 import orjson
@@ -712,7 +713,7 @@ class TestCharge(MatSciTest):
 
     def test_exception(self):
         structure_file = f"{VASP_IN_DIR}/POSCAR.AlN"
-        with pytest.raises(ValueError, match="CHARGE.LCFO.lobster charges are not sorted site wise"):
+        with pytest.raises(ValueError, match=re.escape("CHARGE.LCFO.lobster charges are not sorted site wise")):
             self.charge_lcfo.get_structure_with_charges(structure_filename=structure_file)
 
     def test_msonable(self):
@@ -1357,7 +1358,7 @@ class TestFatband(MatSciTest):
             )
         with pytest.raises(
             ValueError,
-            match="The are two FATBAND files for the same atom and orbital. The program will stop",
+            match=re.escape("The are two FATBAND files for the same atom and orbital. The program will stop"),
         ):
             self.fatband_SiO2_p_x = Fatband(
                 filenames=[
@@ -1862,7 +1863,7 @@ class TestGrosspop:
 
     def test_exception(self):
         structure_file = f"{VASP_IN_DIR}/POSCAR.AlN"
-        with pytest.raises(ValueError, match="The GROSSPOP.LCFO.lobster data is not site wise"):
+        with pytest.raises(ValueError, match=re.escape("The GROSSPOP.LCFO.lobster data is not site wise")):
             self.grosspop_511_lcfo.get_structure_with_total_grosspop(structure_filename=structure_file)
 
     def test_msonable(self):

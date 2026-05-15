@@ -25,10 +25,10 @@ if TYPE_CHECKING:
     from pymatgen.util.typing import PathLike
 
 __author__ = "Shyue Ping Ong, Germain Salvato-Vallverdu, Xin Chen"
-__copyright__ = "Copyright 2013, The Materials Virtual Lab"
+__copyright__ = "Copyright 2013, The Materialyze Lab"
 __version__ = "0.1"
 __maintainer__ = "Shyue Ping Ong"
-__email__ = "ongsp@ucsd.edu"
+__email__ = "shyue@nus.edu"
 __date__ = "8/1/15"
 
 

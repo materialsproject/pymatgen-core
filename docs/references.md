@@ -21,7 +21,7 @@ migration in ionic materials. The Journal of Chemical Physics, 145(7),
 
 ## `pymatgen.core.surface and pymatgen.analysis.wulff`
 
-The surface generation code, which can automatically generate surfaces based on any crystal, and the Wulff code, which plots the Wulff shape given a crystal and surface energies, are written by the Materials Virtual Lab.
+The surface generation code, which can automatically generate surfaces based on any crystal, and the Wulff code, which plots the Wulff shape given a crystal and surface energies, are written by the Materialyze Lab.
 
 ```bib
 Tran, R.; Xu, Z.; Radhakrishnan, B.; Winston, D.; Sun, W.; Persson, K. A.;

@@ -1,6 +1,6 @@
 """
 This module defines the VaspInputSet abstract base class and a concrete implementation for the parameters developed
-and tested by the core team of pymatgen, including the Materials Virtual Lab, Materials Project and the MIT high
+and tested by the core team of pymatgen, including the Materialyze Lab, Materials Project and the MIT high
 throughput project. The basic concept behind an input set is to specify a scheme to generate a consistent set of VASP
 inputs from a structure without further user intervention. This ensures comparability across runs.
 
@@ -2702,7 +2702,7 @@ class MITMDSet(VaspInputSet):
 
 class NEBSet(VaspInputSet):
     """An input set for NEB calculations. These are based on NEB parameters that have been extensively tested by the
-    Materials Virtual Lab.
+    Materialyze Lab.
 
     Note that EDIFF is not on a per atom basis for this input set.
     """

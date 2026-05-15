@@ -13,7 +13,6 @@ from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from glob import glob
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -153,11 +152,11 @@ def _parse_vasp_array(elem) -> list[list[bool]] | NDArray[np.float64]:
 
 def _parse_from_incar(filename: PathLike, key: str) -> Any:
     """Helper function to parse a parameter from the INCAR."""
-    dirname = os.path.dirname(filename)
-    for fn in os.listdir(dirname):
-        if re.search("INCAR", fn):
+    dirname = Path(filename).parent
+    for path in dirname.iterdir():
+        if re.search("INCAR", path.name):
             warnings.warn(f"INCAR found. Using {key} from INCAR.", stacklevel=2)
-            incar = Incar.from_file(os.path.join(dirname, fn))
+            incar = Incar.from_file(path)
             return incar.get(key)
     return None
 
@@ -1043,12 +1042,9 @@ class Vasprun(MSONable):
         """
         use_kpoints_opt = not ignore_kpoints_opt and (getattr(self, "kpoints_opt_props", None) is not None)
         if not kpoints_filename:
-            kpts_path = os.path.join(
-                os.path.dirname(self.filename),
-                "KPOINTS_OPT" if use_kpoints_opt else "KPOINTS",
-            )
+            kpts_path = Path(self.filename).parent / ("KPOINTS_OPT" if use_kpoints_opt else "KPOINTS")
             kpoints_filename = zpath(kpts_path)
-        if kpoints_filename and not os.path.isfile(kpoints_filename) and line_mode:
+        if kpoints_filename and not Path(kpoints_filename).is_file() and line_mode:
             name = "KPOINTS_OPT" if use_kpoints_opt else "KPOINTS"
             raise VaspParseError(f"{name} not found but needed to obtain band structure along symmetry lines.")
 
@@ -3801,13 +3797,14 @@ class VolumetricData(BaseVolumetricData):
     """
 
     @staticmethod
-    def parse_file(filename: PathLike) -> tuple[Poscar, dict, dict]:
+    def parse_file(filename: PathLike, llong: bool = True) -> tuple[Poscar, dict, dict]:
         """
         Parse a generic volumetric data file in the VASP like format.
         Used by subclasses for parsing files.
 
         Args:
             filename (PathLike): Path of file to parse.
+            llong (bool): Matches VASP's internal OUTCHG ``LLONG`` flag.
 
         Returns:
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
@@ -3842,9 +3839,18 @@ class VolumetricData(BaseVolumetricData):
                 raise ValueError(f"Failed to parse VASP volumetric header from {filename}")
 
             ngrid_pts = dim[0] * dim[1] * dim[2]
-            rows, remainder = divmod(ngrid_pts, 5)
-            block_chars = rows * 91 + (remainder * 18 + 3 if remainder else 0)
             dimline = " ".join(map(str, dim))
+            vals_per_line = 5 if llong else 10
+            chars_per_val = 18 if llong else 12
+            # VASP OUTCHG writes:
+            # - LLONG = .TRUE.  -> FORM='(1X,E17.11)', NWRITE=5
+            # - LLONG = .FALSE. -> FORM='(1X,G11.5)' , NWRITE=10
+            # Full lines therefore occupy NWRITE * field_width + newline chars.
+            # Partial trailing lines are terminated by WRITE(IU,*)' ', which adds 3 chars.
+            rows, remainder = divmod(ngrid_pts, vals_per_line)
+            block_chars = rows * (vals_per_line * chars_per_val + 1) + (
+                remainder * chars_per_val + 3 if remainder else 0
+            )
 
             while True:
                 flat = np.fromstring(file.read(block_chars), sep=" ", count=ngrid_pts)
@@ -4019,7 +4025,7 @@ class Locpot(VolumetricData):
         Returns:
             Locpot
         """
-        poscar, data, _data_aug = VolumetricData.parse_file(filename)
+        poscar, data, _data_aug = VolumetricData.parse_file(filename, llong=True)
         return cls(poscar, data, **kwargs)
 
 
@@ -4065,7 +4071,7 @@ class Chgcar(VolumetricData):
         Returns:
             Chgcar
         """
-        poscar, data, data_aug = VolumetricData.parse_file(filename)
+        poscar, data, data_aug = VolumetricData.parse_file(filename, llong=True)
         return cls(poscar, data, data_aug=data_aug)  # type:ignore[arg-type]
 
     @property
@@ -4122,7 +4128,7 @@ class Elfcar(VolumetricData):
         Returns:
             Elfcar
         """
-        poscar, data, _data_aug = VolumetricData.parse_file(filename)
+        poscar, data, _data_aug = VolumetricData.parse_file(filename, llong=False)
         return cls(poscar, data)
 
     def get_alpha(self) -> VolumetricData:
@@ -4670,27 +4676,30 @@ def get_band_structure_from_vasp_multiple_branches(
         A BandStructure/BandStructureSymmLine Object.
         None if no vasprun.xml found in given directory and branch directory.
     """
-    if os.path.isdir(f"{dir_name}/branch_0"):
+    dir_path = Path(dir_name)
+    if (dir_path / "branch_0").is_dir():
         # Get and sort all branch directories
-        branch_dir_names = [os.path.abspath(d) for d in glob(f"{dir_name}/branch_*") if os.path.isdir(d)]
-        sorted_branch_dir_names = sorted(branch_dir_names, key=lambda x: int(x.split("_")[-1]))
+        branch_dirs = sorted(
+            (d.resolve() for d in dir_path.glob("branch_*") if d.is_dir()),
+            key=lambda d: int(d.name.split("_")[-1]),
+        )
 
         # Collect BandStructure from all branches
         bs_branches: list[BandStructure | BandStructureSymmLine] = []
-        for directory in sorted_branch_dir_names:
-            vasprun_file = f"{directory}/vasprun.xml"
-            if not os.path.isfile(vasprun_file):
+        for directory in branch_dirs:
+            vasprun_path = directory / "vasprun.xml"
+            if not vasprun_path.is_file():
                 raise FileNotFoundError(f"cannot find vasprun.xml in {directory=}")
 
-            run = Vasprun(vasprun_file, parse_projected_eigen=projections)
+            run = Vasprun(vasprun_path, parse_projected_eigen=projections)
             bs_branches.append(run.get_band_structure(efermi=efermi))
 
         return get_reconstructed_band_structure(bs_branches, efermi)
 
     # Read vasprun.xml directly if no branch head (branch_0) is found
     # TODO: remove this branch and raise error directly after 2026-06-01
-    vasprun_file = f"{dir_name}/vasprun.xml"
-    if os.path.isfile(vasprun_file):
+    vasprun_path = dir_path / "vasprun.xml"
+    if vasprun_path.is_file():
         warnings.warn(
             (
                 f"no branch dir found, reading directly from {dir_name=}\n"
@@ -4700,7 +4709,7 @@ def get_band_structure_from_vasp_multiple_branches(
             DeprecationWarning,
             stacklevel=2,
         )
-        return Vasprun(vasprun_file, parse_projected_eigen=projections).get_band_structure(
+        return Vasprun(vasprun_path, parse_projected_eigen=projections).get_band_structure(
             kpoints_filename=None, efermi=efermi
         )
 

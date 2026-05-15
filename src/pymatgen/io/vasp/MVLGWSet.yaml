@@ -1,4 +1,4 @@
-# Default VASP settings for GW calculations used by the Materials Virtual Lab.
+# Default VASP settings for GW calculations used by the Materialyze Lab.
 PARENT: VASPIncarBase
 INCAR:
   ALGO: Normal

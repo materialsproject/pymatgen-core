@@ -14,7 +14,7 @@ Please submit a pull request to update this page when if release a new add-on pa
 
 ## Add-ons for Analysis
 
-* [pymatgen-analysis-diffusion](http://pypi.org/project/pymatgen-analysis-diffusion): Provides modules for diffusion analysis, including path determination for NEB calculations, analysis of MD trajectories (RDF, van Hove, Arrhenius plots, etc.). This package is maintained by the Materials Virtual Lab.
+* [pymatgen-analysis-diffusion](http://pypi.org/project/pymatgen-analysis-diffusion): Provides modules for diffusion analysis, including path determination for NEB calculations, analysis of MD trajectories (RDF, van Hove, Arrhenius plots, etc.). This package is maintained by the Materialyze Lab.
 * [pymatgen-analysis-defects](https://pypi.org/project/pymatgen-analysis-defects): Provides functionality related to defect analysis. This package is maintained by Jimmy-Xuan Shen, and officially supported by the Materials Project.
 
 ## Add-ons for Input/Output

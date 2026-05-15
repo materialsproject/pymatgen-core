@@ -1,5 +1,5 @@
 title: pymatgen
-email: ongsp@ucsd.edu
+email: shyue@nus.edu
 description: >- # this means to ignore newlines until "baseurl:"
   Python Materials Genomics (pymatgen) is a robust materials analysis code that
   defines classes for structures and molecules with support for many electronic
