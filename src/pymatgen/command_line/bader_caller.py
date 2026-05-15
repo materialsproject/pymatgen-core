@@ -13,7 +13,7 @@ Bader decomposition of charge density", Comput. Mater. Sci. 36, 254-360 (2006).
 
 from __future__ import annotations
 
-import os
+import contextlib
 import shutil
 import subprocess
 import warnings
@@ -523,7 +523,7 @@ def bader_analysis_from_path(path: str, suffix: str = "") -> dict[str, Any]:
             # and this would give 'static' over 'relax2' over 'relax'
             # however, better to use 'suffix' kwarg to avoid this!
             paths.sort(reverse=True)
-            warnings.warn(f"Multiple files detected, using {os.path.basename(path)}", stacklevel=2)
+            warnings.warn(f"Multiple files detected, using {Path(path).name}", stacklevel=2)
         return paths[0]
 
     chgcar_path = _get_filepath("CHGCAR", "Could not find CHGCAR!")
@@ -574,61 +574,56 @@ def bader_analysis_from_objects(
     Returns:
         summary dict
     """
-    orig_dir = os.getcwd()
-    try:
-        with TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            if aeccar0 and aeccar2:
-                # construct reference file
-                chgref = aeccar0.linear_add(aeccar2)
-                chgref_path = f"{tmp_dir}/CHGCAR_ref"
-                chgref.write_file(chgref_path)
-            else:
-                chgref_path = ""
+    with TemporaryDirectory() as tmp_dir, contextlib.chdir(tmp_dir):
+        if aeccar0 and aeccar2:
+            # construct reference file
+            chgref = aeccar0.linear_add(aeccar2)
+            chgref_path = f"{tmp_dir}/CHGCAR_ref"
+            chgref.write_file(chgref_path)
+        else:
+            chgref_path = ""
 
-            chgcar.write_file("CHGCAR")
-            chgcar_path = f"{tmp_dir}/CHGCAR"
+        chgcar.write_file("CHGCAR")
+        chgcar_path = f"{tmp_dir}/CHGCAR"
 
-            if potcar:
-                potcar.write_file("POTCAR")
-                potcar_path = f"{tmp_dir}/POTCAR"
-            else:
-                potcar_path = ""
+        if potcar:
+            potcar.write_file("POTCAR")
+            potcar_path = f"{tmp_dir}/POTCAR"
+        else:
+            potcar_path = ""
 
+        ba = BaderAnalysis(
+            chgcar_filename=chgcar_path,
+            potcar_filename=potcar_path,
+            chgref_filename=chgref_path,
+        )
+
+        summary = {
+            "min_dist": [dct["min_dist"] for dct in ba.data],
+            "charge": [dct["charge"] for dct in ba.data],
+            "atomic_volume": [dct["atomic_vol"] for dct in ba.data],
+            "vacuum_charge": ba.vacuum_charge,
+            "vacuum_volume": ba.vacuum_volume,
+            "reference_used": bool(chgref_path),
+            "bader_version": ba.version,
+        }
+
+        if potcar:
+            charge_transfer = [ba.get_charge_transfer(idx) for idx in range(len(ba.data))]
+            summary["charge_transfer"] = charge_transfer
+
+        if chgcar.is_spin_polarized:
+            # write a CHGCAR containing magnetization density only
+            chgcar.data["total"] = chgcar.data["diff"]
+            chgcar.is_spin_polarized = False
+            chgcar.write_file("CHGCAR_mag")
+
+            chgcar_mag_path = f"{tmp_dir}/CHGCAR_mag"
             ba = BaderAnalysis(
-                chgcar_filename=chgcar_path,
+                chgcar_filename=chgcar_mag_path,
                 potcar_filename=potcar_path,
                 chgref_filename=chgref_path,
             )
-
-            summary = {
-                "min_dist": [dct["min_dist"] for dct in ba.data],
-                "charge": [dct["charge"] for dct in ba.data],
-                "atomic_volume": [dct["atomic_vol"] for dct in ba.data],
-                "vacuum_charge": ba.vacuum_charge,
-                "vacuum_volume": ba.vacuum_volume,
-                "reference_used": bool(chgref_path),
-                "bader_version": ba.version,
-            }
-
-            if potcar:
-                charge_transfer = [ba.get_charge_transfer(idx) for idx in range(len(ba.data))]
-                summary["charge_transfer"] = charge_transfer
-
-            if chgcar.is_spin_polarized:
-                # write a CHGCAR containing magnetization density only
-                chgcar.data["total"] = chgcar.data["diff"]
-                chgcar.is_spin_polarized = False
-                chgcar.write_file("CHGCAR_mag")
-
-                chgcar_mag_path = f"{tmp_dir}/CHGCAR_mag"
-                ba = BaderAnalysis(
-                    chgcar_filename=chgcar_mag_path,
-                    potcar_filename=potcar_path,
-                    chgref_filename=chgref_path,
-                )
-                summary["magmom"] = [dct["charge"] for dct in ba.data]
-    finally:
-        os.chdir(orig_dir)
+            summary["magmom"] = [dct["charge"] for dct in ba.data]
 
     return summary

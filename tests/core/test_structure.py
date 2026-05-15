@@ -1839,8 +1839,12 @@ class TestStructure(MatSciTest):
         assert_allclose(struct[1].frac_coords, [0.5, 0.5, 0.5005])
 
         # Test illegal mode
-        with pytest.raises(ValueError, match="Illegal mode='illegal', should start with a/d/s"):
+        with pytest.raises(ValueError, match="Illegal mode='illegal', must be one of 'sum', 'delete', 'average'"):
             struct.merge_sites(mode="illegal")
+
+        # Test that single-letter modes are no longer accepted
+        with pytest.raises(ValueError, match="Illegal mode='s'"):
+            struct.merge_sites(mode="s")
 
         # Test for TaS2 with spacegroup 166 in 160 setting
         lattice = Lattice.hexagonal(3.374351, 20.308941)

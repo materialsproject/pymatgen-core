@@ -137,6 +137,8 @@ def find_points_in_spheres(
         np.int64_t cube_index_temp
         np.int64_t link_index
         double d_temp2
+        double d0, d1, d2  # for inline 3D distance squared in inner loop
+        double _f  # scratch double for the val - floor(val) wrap
         double r2 = r * r
 
     if r < 0.1:
@@ -154,9 +156,13 @@ def find_points_in_spheres(
     for i_pt in range(n_total):
         for i_dim in range(3):
             if pbc[i_dim]:
-                # Only wrap atoms when this dimension is PBC
-                all_frac_coords[i_pt, i_dim] = offset_correction[i_pt, i_dim] % 1
-                offset_correction[i_pt, i_dim] = offset_correction[i_pt, i_dim] - all_frac_coords[i_pt, i_dim]
+                # Only wrap atoms when this dimension is PBC.
+                # Equivalent to (val % 1) in Python (always non-negative),
+                # but avoids Cython's generic % helper for cdef double.
+                _f = offset_correction[i_pt, i_dim]
+                _f = _f - floor(_f)
+                all_frac_coords[i_pt, i_dim] = _f
+                offset_correction[i_pt, i_dim] = offset_correction[i_pt, i_dim] - _f
             else:
                 all_frac_coords[i_pt, i_dim] = offset_correction[i_pt, i_dim]
                 offset_correction[i_pt, i_dim] = 0
@@ -314,7 +320,11 @@ def find_points_in_spheres(
             cube_index_temp = neighbor_map[center_indices1[i], j]
             link_index = head[cube_index_temp]
             while link_index != -1:
-                d_temp2 = distance2(expanded_coords, center_coords, link_index, i, 3)
+                # inlined 3D squared distance: avoids generic-size loop overhead
+                d0 = expanded_coords[link_index, 0] - center_coords[i, 0]
+                d1 = expanded_coords[link_index, 1] - center_coords[i, 1]
+                d2 = expanded_coords[link_index, 2] - center_coords[i, 2]
+                d_temp2 = d0 * d0 + d1 * d1 + d2 * d2
                 if d_temp2 < r2 + tol:
                     index_1[count] = i
                     index_2[count] = indices[link_index]
@@ -477,7 +487,8 @@ cdef int compute_offset_vectors(
         np.int64_t n
     ) nogil:
     cdef:
-        int i, j, k, ind
+        int i, j, k
+        unsigned int ind
         int count = 0
         double center[8][3] # center vertices coords
         double offset[8][3]  # offsetted vertices
@@ -567,33 +578,55 @@ cdef void matmul(
         double [:, ::1] out
     ) nogil:
     """
-    Matrix multiplication.
+    (N, 3) @ (3, 3) -> (N, 3) matrix multiplication.
+
+    Specialized for the only shape this is called with in this module
+    (Cartesian-to-fractional and back via the 3x3 lattice). Holding the
+    9 lattice elements in scalar locals lets the compiler keep them in
+    registers and writes the (N, 3) output with unit stride.
     """
     cdef:
-        int i, j, k
-        int m = m1.shape[0], n = m1.shape[1], l = m2.shape[1]
+        int i
+        int m = m1.shape[0]
+        double m2_00 = m2[0, 0], m2_01 = m2[0, 1], m2_02 = m2[0, 2]
+        double m2_10 = m2[1, 0], m2_11 = m2[1, 1], m2_12 = m2[1, 2]
+        double m2_20 = m2[2, 0], m2_21 = m2[2, 1], m2_22 = m2[2, 2]
+        double a, b, c
 
     for i in range(m):
-        for j in range(l):
-            out[i, j] = 0
-            for k in range(n):
-                out[i, j] += m1[i, k] * m2[k, j]
+        a = m1[i, 0]
+        b = m1[i, 1]
+        c = m1[i, 2]
+        out[i, 0] = a * m2_00 + b * m2_10 + c * m2_20
+        out[i, 1] = a * m2_01 + b * m2_11 + c * m2_21
+        out[i, 2] = a * m2_02 + b * m2_12 + c * m2_22
 
 cdef void matrix_inv(
         const double[:, ::1] matrix,
         double[:, ::1] inv
     ) nogil:
     """
-    Matrix inversion.
+    3x3 matrix inverse via hand-unrolled cofactor expansion.
     """
     cdef:
-        int i, j
-        double det = matrix_det(matrix)
+        double m00 = matrix[0, 0], m01 = matrix[0, 1], m02 = matrix[0, 2]
+        double m10 = matrix[1, 0], m11 = matrix[1, 1], m12 = matrix[1, 2]
+        double m20 = matrix[2, 0], m21 = matrix[2, 1], m22 = matrix[2, 2]
+        double inv_det = 1.0 / (
+            m00 * (m11 * m22 - m12 * m21)
+            + m01 * (m12 * m20 - m10 * m22)
+            + m02 * (m10 * m21 - m11 * m20)
+        )
 
-    for i in range(3):
-        for j in range(3):
-            inv[i, j] = (matrix[(j+1)%3, (i+1)%3] * matrix[(j+2)%3, (i+2)%3] -
-                matrix[(j+2)%3, (i+1)%3] * matrix[(j+1)%3, (i+2)%3]) / det
+    inv[0, 0] = (m11 * m22 - m12 * m21) * inv_det
+    inv[0, 1] = (m02 * m21 - m01 * m22) * inv_det
+    inv[0, 2] = (m01 * m12 - m02 * m11) * inv_det
+    inv[1, 0] = (m12 * m20 - m10 * m22) * inv_det
+    inv[1, 1] = (m00 * m22 - m02 * m20) * inv_det
+    inv[1, 2] = (m02 * m10 - m00 * m12) * inv_det
+    inv[2, 0] = (m10 * m21 - m11 * m20) * inv_det
+    inv[2, 1] = (m01 * m20 - m00 * m21) * inv_det
+    inv[2, 2] = (m00 * m11 - m01 * m10) * inv_det
 
 cdef double matrix_det(
         const double[:, ::1] matrix
@@ -613,13 +646,13 @@ cdef void get_max_rep(
         double r
     ) nogil:
     """
-    Get maximum repetition in each directions.
+    Get maximum repetition in each direction. Lattice is always 3x3 in pymatgen.
     """
     cdef:
         unsigned int i_dim
         double recp_len
 
-    for i_dim in range(3):  # TODO: is it ever not 3x3 for our cases?
+    for i_dim in range(3):
         recp_len = norm(reciprocal_lattice[i_dim, :])
         max_rep[i_dim] = ceil((r + 0.15) * recp_len / (2 * pi))
 
@@ -782,7 +815,9 @@ cdef void offset_cube(
         np.int64_t l,
         const double[8][3] (&offsetted)
     ) nogil:
-    cdef unsigned int i, j, k
+    cdef:
+        unsigned int i, j, k
+        unsigned int ind
 
     for i in range(2):
         for j in range(2):
