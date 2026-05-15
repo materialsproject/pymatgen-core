@@ -1670,7 +1670,7 @@ class BSPlotterProjected(BSPlotter):
             )
 
         band_linewidth = 0.5
-        fig_main = plt.figure(figsize=w_h_size) 
+        fig_main = plt.figure(figsize=w_h_size)
         proj_br_d, dictio_d, dictpa_d, branches = self._get_projections_by_branches_patom_pmorb(
             dictio, dictpa, sum_atoms, sum_morbs, selected_branches
         )
