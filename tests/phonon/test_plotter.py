@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import matplotlib.pyplot as plt
 import orjson
 import pytest
@@ -109,7 +111,7 @@ class TestPhononBSPlotter:
         assert [itm.get_text() for itm in ax.get_legend().get_texts()] == list(labels)
         colors = tuple(itm.get_color() for itm in ax.get_legend().get_lines())
         assert colors == ("blue", "red", "green")
-        with pytest.raises(ValueError, match="The two band structures are not compatible."):
+        with pytest.raises(ValueError, match=re.escape("The two band structures are not compatible.")):
             self.plotter.plot_compare(self.plotter_sto)
         ax = self.plotter.plot_compare(self.plotter_sto, on_incompatible="ignore")
         assert ax is None

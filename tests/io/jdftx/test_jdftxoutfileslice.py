@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import pytest
@@ -119,13 +120,13 @@ def test_set_pseudo_vars_t1():
         "",
     ]
     joutslice.total_electrons = None
-    with pytest.raises(ValueError, match="Total electrons and semicore electrons must be set."):
+    with pytest.raises(ValueError, match=re.escape("Total electrons and semicore electrons must be set.")):
         joutslice._set_pseudo_vars_t1(text)
     joutslice.atom_elements = None
-    with pytest.raises(ValueError, match="Atom elements not set yet."):
+    with pytest.raises(ValueError, match=re.escape("Atom elements not set yet.")):
         joutslice._set_pseudo_vars_t1(text)
     joutslice.atom_types = None
-    with pytest.raises(ValueError, match="Pseudopotential data cannot be allocated without atom types."):
+    with pytest.raises(ValueError, match=re.escape("Pseudopotential data cannot be allocated without atom types.")):
         joutslice._set_pseudo_vars_t1(text)
 
 
@@ -139,34 +140,42 @@ def test_set_orb_fillings_nobroad():
 def test_set_orb_fillings_broad():
     joutslice = JDFTXOutfileSlice._from_out_slice(ex_slice1)
     joutslice.lumo = None
-    with pytest.raises(ValueError, match="Cannot set orbital fillings with broadening with self.lumo as None"):
+    with pytest.raises(
+        ValueError, match=re.escape("Cannot set orbital fillings with broadening with self.lumo as None")
+    ):
         joutslice._set_orb_fillings()
     joutslice.homo = None
-    with pytest.raises(ValueError, match="Cannot set orbital fillings with broadening with self.homo as None"):
+    with pytest.raises(
+        ValueError, match=re.escape("Cannot set orbital fillings with broadening with self.homo as None")
+    ):
         joutslice._set_orb_fillings()
     joutslice.efermi = None
-    with pytest.raises(ValueError, match="Cannot set orbital fillings with broadening with self.efermi as None"):
+    with pytest.raises(
+        ValueError, match=re.escape("Cannot set orbital fillings with broadening with self.efermi as None")
+    ):
         joutslice._set_orb_fillings()
     joutslice.broadening = None
-    with pytest.raises(ValueError, match="Cannot set orbital fillings with broadening with self.broadening as None"):
+    with pytest.raises(
+        ValueError, match=re.escape("Cannot set orbital fillings with broadening with self.broadening as None")
+    ):
         joutslice._set_orb_fillings()
     joutslice.broadening_type = None
     joutslice.nspin = None
-    with pytest.raises(ValueError, match="Cannot set homo/lumo filling with self.nspin as None"):
+    with pytest.raises(ValueError, match=re.escape("Cannot set homo/lumo filling with self.nspin as None")):
         joutslice._set_orb_fillings()
 
 
 def test_set_lattice_vars():
     joutslice = JDFTXOutfileSlice._from_out_slice(ex_slice1)
     joutslice.jstrucs = None
-    with pytest.raises(ValueError, match="No structures found in out file."):
+    with pytest.raises(ValueError, match=re.escape("No structures found in out file.")):
         joutslice._set_lattice_vars([])
 
 
 def test_set_ecomponents():
     joutslice = JDFTXOutfileSlice._from_out_slice(ex_slice1)
     joutslice.jstrucs = None
-    with pytest.raises(ValueError, match="No structures found in out file."):
+    with pytest.raises(ValueError, match=re.escape("No structures found in out file.")):
         joutslice._set_ecomponents([])
 
 

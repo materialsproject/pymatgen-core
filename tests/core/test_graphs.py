@@ -767,7 +767,7 @@ class TestMoleculeGraph:
 
         with pytest.raises(
             MolGraphSplitError,
-            match="Cannot split molecule; MoleculeGraph is still connected.",
+            match=re.escape("Cannot split molecule; MoleculeGraph is still connected."),
         ):
             self.cyclohexene.split_molecule_subgraphs([(0, 1)])
 

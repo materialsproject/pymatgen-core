@@ -239,7 +239,7 @@ class BalancedReaction(MSONable):
         relevant_comp = [comp * abs(coeff) for coeff, comp in zip(self._coeffs, self._all_comp, strict=True)]
         comp: Composition = sum(relevant_comp, Composition())  # type: ignore[assignment]
 
-        entry = ComputedEntry(0.5 * comp, self.calculate_energy(energies))
+        entry = ComputedEntry(comp * 0.5, self.calculate_energy(energies))
         entry.name = str(self)
         return entry
 

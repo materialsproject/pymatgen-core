@@ -36,13 +36,15 @@ uv run invoke release          # full PyPI release flow (maintainer-only)
 - `pymatgen.util.coord_cython` (`src/pymatgen/util/coord_cython.pyx`) — periodic-BC coordinate ops
 - `pymatgen.optimization.neighbors` (`src/pymatgen/optimization/neighbors.pyx`) — neighbor finding
 
-After editing any `.pyx`, you must rebuild before tests will see the change. With an editable install:
+After editing any `.pyx`, rebuild before tests see the change:
 
 ```sh
 uv pip install -e . --no-build-isolation   # or: uv sync --reinstall-package pymatgen-core
 ```
 
-The compiled `.so` files live next to the `.pyx` sources (e.g. `src/pymatgen/optimization/neighbors.cpython-*.so`). If imports look stale after a `.pyx` edit, that's why.
+Worth knowing about how the rebuild works: **every invocation triggers a full rebuild, not just after `.pyx` edits**. uv copies the project into a temp build dir and invokes `setuptools.build_meta`, which runs `build_ext` (Cython → `.c` → `.so`) in that temp dir; the resulting `.so` files are then dropped next to the `.pyx` sources via the editable wheel install. Because the temp build dir starts empty, setuptools' incremental "only recompile if `.pyx` is newer than `.so`" check always misses — you pay a ~2.5 s rebuild every time. `--no-build-isolation` only skips uv's tmp-venv-with-build-deps setup, not the rebuild itself. (If you really want a true no-op when nothing changed, invoke `python setup.py build_ext --inplace` directly — but it's rarely worth it.)
+
+Compiled `.so` files live next to the `.pyx` sources (e.g. `src/pymatgen/optimization/neighbors.cpython-*.so`). If imports look stale after a `.pyx` edit, you forgot the rebuild — the `.so` is what gets imported.
 
 ## Tests — non-obvious bits
 
@@ -68,8 +70,6 @@ Conventions enforced across the codebase:
 - **Immutable vs mutable variants:** `IStructure`/`IMolecule` are immutable (hashable, suitable for dict keys / sets); `Structure`/`Molecule` are mutable subclasses. New analysis code that doesn't mutate should accept the `I*` form.
 - **Settings file:** `pymatgen.core.__init__` loads `~/.config/.pmgrc.yaml` (or `~/.pmgrc.yaml`, or `$PMG_CONFIG_FILE`). Settings like `PMG_VASP_PSP_DIR`, `PMG_MAPI_KEY`, `PMG_DEFAULT_FUNCTIONAL` come from there or from env vars of the same name.
 - **CLI entry point:** `pmg = "pymatgen.cli.pmg:main"` (declared in `pyproject.toml`). Wait — note: this CLI module is not in `pymatgen-core` itself; it's referenced for forward compatibility.
-
-The `dao.py` module (Data Access Object pattern, omitted from coverage) is intentionally not part of the public API.
 
 ## Style & lint
 

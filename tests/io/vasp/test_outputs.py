@@ -5,6 +5,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import tarfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -1558,7 +1559,7 @@ class TestGetBandStructureFromVaspMultipleBranches:
         """Test vasprun.xml missing from branch_*."""
         os.makedirs("no_vasp/branch_0", exist_ok=False)
 
-        with pytest.raises(FileNotFoundError, match="cannot find vasprun.xml in directory"):
+        with pytest.raises(FileNotFoundError, match=re.escape("cannot find vasprun.xml in directory")):
             get_band_structure_from_vasp_multiple_branches("no_vasp")
 
     def test_no_branch_head(self):
@@ -1573,7 +1574,7 @@ class TestGetBandStructureFromVaspMultipleBranches:
 
     def test_cannot_read_anything(self):
         """Test no branch_0/, no dir_name/vasprun.xml, no vasprun.xml at all."""
-        with pytest.raises(FileNotFoundError, match="failed to find any vasprun.xml in selected"):
+        with pytest.raises(FileNotFoundError, match=re.escape("failed to find any vasprun.xml in selected")):
             get_band_structure_from_vasp_multiple_branches(".")
 
 
@@ -1994,7 +1995,7 @@ class TestWavecar(MatSciTest):
         assert self.w_frac_encut.encut == approx(100.5)
 
         # Test malformed WAVECARs
-        with pytest.raises(ValueError, match="Invalid rtag=.+, must be one of"):
+        with pytest.raises(ValueError, match=r"Invalid rtag=.+, must be one of"):
             Wavecar(f"{VASP_OUT_DIR}/WAVECAR.N2.malformed")
 
         with pytest.raises(ValueError, match="invalid vasp_type='poop'"):
@@ -2848,7 +2849,7 @@ class TestVaspwave(MatSciTest):
         vaspwave = Vaspwave(filename)
         poscar = Poscar.from_file(f"{VASP_IN_DIR}/POSCAR")
 
-        with pytest.raises(NotImplementedError, match="Spin-resolved vaspwave.h5"):
+        with pytest.raises(NotImplementedError, match=re.escape("Spin-resolved vaspwave.h5")):
             vaspwave.get_parchg(poscar, 0, 0, spin=1)
 
         vaspwave_default = vaspwave.get_parchg(poscar, 0, 0).data["total"]
@@ -2871,7 +2872,7 @@ class TestVaspwave(MatSciTest):
         vaspwave = Vaspwave(filename)
         vaspwave.vasp_type = "unknown"
 
-        with pytest.raises(NotImplementedError, match="Unsupported vaspwave.h5 type"):
+        with pytest.raises(NotImplementedError, match=re.escape("Unsupported vaspwave.h5 type")):
             vaspwave.fft_mesh(0, 0)
 
     def test_unsupported_spin_setting_guard(self):
@@ -2880,7 +2881,7 @@ class TestVaspwave(MatSciTest):
         vaspwave = Vaspwave(filename)
         vaspwave.spin = 3
 
-        with pytest.raises(NotImplementedError, match="Unsupported vaspwave.h5 spin setting"):
+        with pytest.raises(NotImplementedError, match=re.escape("Unsupported vaspwave.h5 spin setting")):
             vaspwave.get_band_coeffs(0, 0, 0)
 
     @pytest.mark.skipif(
@@ -3228,7 +3229,7 @@ class TestVaspwave(MatSciTest):
         self._write_vaspwave_h5_from_wavecar(filename, wavecar, poscar.structure)
         vaspwave = Vaspwave(filename)
 
-        with pytest.raises(NotImplementedError, match="Spin-resolved vaspwave.h5"):
+        with pytest.raises(NotImplementedError, match=re.escape("Spin-resolved vaspwave.h5")):
             vaspwave.get_parchg(poscar, 0, 0, spin=1)
 
         vaspwave_default = vaspwave.get_parchg(poscar, 0, 0)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -97,14 +98,14 @@ class TestStructureNL:
         # An empty list should not work
         with pytest.raises(
             TypeError,
-            match="Invalid format for SNL reference! Should be empty string or BibTeX string.",
+            match=re.escape("Invalid format for SNL reference! Should be empty string or BibTeX string."),
         ):
             StructureNL(self.struct, self.hulk, references=[])
 
         # junk reference should not work
         with pytest.raises(
             ValueError,
-            match="Invalid format for SNL reference! Should be BibTeX string.",
+            match=re.escape("Invalid format for SNL reference! Should be BibTeX string."),
         ):
             StructureNL(self.struct, self.hulk, references=self.junk)
 

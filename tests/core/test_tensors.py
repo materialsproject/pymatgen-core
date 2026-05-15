@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import pytest
@@ -239,7 +240,7 @@ class TestTensor(MatSciTest):
     def test_from_voigt(self):
         with pytest.raises(
             ValueError,
-            match="The requested array has an inhomogeneous shape after 1 dimensions.",
+            match=re.escape("The requested array has an inhomogeneous shape after 1 dimensions."),
         ):
             Tensor.from_voigt(
                 [
@@ -501,7 +502,7 @@ class TestSquareTensor(MatSciTest):
             SquareTensor(non_sq_matrix)
         with pytest.raises(
             ValueError,
-            match="The requested array has an inhomogeneous shape after 1 dimensions.",
+            match=re.escape("The requested array has an inhomogeneous shape after 1 dimensions."),
         ):
             SquareTensor(bad_matrix)
         with pytest.raises(ValueError, match="SquareTensor input must be rank 2"):
