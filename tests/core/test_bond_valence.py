@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from pytest import approx
 
@@ -33,7 +35,7 @@ class TestBVAnalyzer(MatSciTest):
         # trigger ValueError Structure contains elements not in set of BV parameters
         with pytest.raises(
             ValueError,
-            match="Structure contains elements not in set of BV parameters: {Element Xe}",
+            match=re.escape("Structure contains elements not in set of BV parameters: {Element Xe}"),
         ):
             self.analyzer.get_valences(self.get_structure("Li10GeP2S12").replace_species({"Li": "Xe"}, in_place=False))
 

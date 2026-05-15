@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import re
 from itertools import combinations
 from numbers import Number
 from unittest.mock import patch
@@ -727,7 +728,7 @@ class TestPhaseDiagram(MatSciTest):
     def test_val_err_on_no_entries(self):
         # check that PhaseDiagram raises ValueError when building phase diagram with no entries
         for entries in [None, [], set(), ()]:
-            with pytest.raises(ValueError, match="Unable to build phase diagram without entries."):
+            with pytest.raises(ValueError, match=re.escape("Unable to build phase diagram without entries.")):
                 PhaseDiagram(entries=entries)
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -21,9 +22,9 @@ def test_get_start_lines():
     It tests the behavior to make sure the correct errors are raised on empty files and files without
     the pattern to find the start of the JDFTx calculations.
     """
-    with pytest.raises(ValueError, match="Outfile parser fed an empty file."):
+    with pytest.raises(ValueError, match=re.escape("Outfile parser fed an empty file.")):
         get_start_lines([])
-    with pytest.raises(ValueError, match="No JDFTx calculations found in file."):
+    with pytest.raises(ValueError, match=re.escape("No JDFTx calculations found in file.")):
         get_start_lines(["\n", "\n"])
     with open(noeigstats_outfile_path) as f:
         outfile_text = list.copy(list(f))
@@ -73,7 +74,7 @@ def test_find_jdftx_out_file(tmp_path):
     It tests the behavior to make sure the correct errors are raised on directories without and out file
     and directories with multiple out files. And out file must match "*.out" or "out" exactly.
     """
-    with pytest.raises(FileNotFoundError, match="No JDFTx out file found in directory."):
+    with pytest.raises(FileNotFoundError, match=re.escape("No JDFTx out file found in directory.")):
         _find_jdftx_out_file(tmp_path)
     write_mt_file(tmp_path, "test.out")
     assert _find_jdftx_out_file(tmp_path) == tmp_path / "test.out"
@@ -84,5 +85,5 @@ def test_find_jdftx_out_file(tmp_path):
     write_mt_file(tmp_path, "out")
     assert _find_jdftx_out_file(tmp_path) == tmp_path / "out"
     write_mt_file(tmp_path, "tinyout.out")
-    with pytest.raises(FileNotFoundError, match="Multiple JDFTx out files found in directory."):
+    with pytest.raises(FileNotFoundError, match=re.escape("Multiple JDFTx out files found in directory.")):
         _find_jdftx_out_file(tmp_path)
