@@ -45,7 +45,7 @@ __date__ = "July 24, 2018"
 
 # Thermal model coefficients
 CLARKE_COEFF = 0.87
-CAHILL_DIVISOR =  2 * (6 / np.pi) ** (1 / 3) # 2.48
+CAHILL_COEFF =  1 / 2 * (np.pi / 6) ** (1 / 3) # 2.48^-1
 AGNE_COEFF = 0.76
 SNYDER_ACOUSTIC_COEFF = 0.38483
 SNYDER_OPTICAL_COEFF = 1.66914e-23
@@ -358,7 +358,7 @@ class ElasticTensor(NthOrderElasticTensor):
         """
         n_sites = len(structure)
         site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
-        return kb / CAHILL_DIVISOR * site_density ** (2 / 3) * (self.long_v(structure) + 2 * self.trans_v(structure))
+        return kb * CAHILL_COEFF * site_density ** (2 / 3) * (self.long_v(structure) + 2 * self.trans_v(structure))
 
     @due.dcite(
         Doi("10.1039/C7EE03256K"),
