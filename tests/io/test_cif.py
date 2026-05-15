@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from io import StringIO
 
 import numpy as np
@@ -783,7 +784,7 @@ loop_
         parser = CifParser(filepath)
         with pytest.raises(
             ValueError,
-            match="No structure parsed for section 1 in CIF.\nOccupancy 1.556 exceeded tolerance.",
+            match=re.escape("No structure parsed for section 1 in CIF.\nOccupancy 1.556 exceeded tolerance."),
         ):
             parser.parse_structures(on_error="raise")
         parser = CifParser(filepath, occupancy_tolerance=2)

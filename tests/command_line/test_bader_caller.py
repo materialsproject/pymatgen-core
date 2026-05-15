@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import warnings
 
@@ -139,6 +140,6 @@ class TestBaderAnalysis(MatSciTest):
 
             with pytest.raises(
                 RuntimeError,
-                match="Requires bader or bader.exe to be in the PATH or the absolute path",
+                match=re.escape("Requires bader or bader.exe to be in the PATH or the absolute path"),
             ):
                 BaderAnalysis(chgcar_filename=f"{VASP_OUT_DIR}/CHGCAR.Fe3O4.gz")

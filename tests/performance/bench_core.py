@@ -18,6 +18,7 @@ import numpy as np
 
 from pymatgen.core import Composition, Element, Lattice, Species
 from pymatgen.core.periodic_table import get_el_sp
+from pymatgen.optimization.neighbors import find_points_in_spheres
 from pymatgen.util.coord_cython import is_coord_subset_pbc, pbc_shortest_vectors
 
 if TYPE_CHECKING:
@@ -175,6 +176,43 @@ def main() -> None:
     run(
         "is_coord_subset_pbc 16-in-128",
         lambda: is_coord_subset_pbc(fc_sub, fc128a, atol, sub_mask, pbc=(True, True, True)),
+    )
+
+    # --- neighbors.find_points_in_spheres ----------------------------------
+    print("\n[neighbors] find_points_in_spheres")
+    lat_mat = lattice.matrix
+    pbc_all = np.array([1, 1, 1], dtype=np.int64)
+
+    # Small: 32 atoms, 32 centers, cutoff 4 Å (typical short-range query).
+    cc32 = (rng.random((32, 3)) * 10.0).astype(np.float64)
+    ac32 = (rng.random((32, 3)) * 10.0).astype(np.float64)
+    run(
+        "find_points_in_spheres 32x32 r=4",
+        lambda: find_points_in_spheres(ac32, cc32, 4.0, pbc_all, lat_mat),
+    )
+
+    # Medium: 128 atoms, 128 centers, cutoff 5 Å.
+    cc128 = (rng.random((128, 3)) * 15.0).astype(np.float64)
+    ac128 = (rng.random((128, 3)) * 15.0).astype(np.float64)
+    lattice_med = Lattice.cubic(15.0).matrix
+    run(
+        "find_points_in_spheres 128x128 r=5",
+        lambda: find_points_in_spheres(ac128, cc128, 5.0, pbc_all, lattice_med),
+    )
+
+    # Large: 256 atoms, 256 centers, larger cutoff.
+    cc256 = (rng.random((256, 3)) * 20.0).astype(np.float64)
+    ac256 = (rng.random((256, 3)) * 20.0).astype(np.float64)
+    lattice_lg = Lattice.cubic(20.0).matrix
+    run(
+        "find_points_in_spheres 256x256 r=6",
+        lambda: find_points_in_spheres(ac256, cc256, 6.0, pbc_all, lattice_lg),
+    )
+
+    # Larger cutoff with same medium box (more periodic images visited).
+    run(
+        "find_points_in_spheres 128x128 r=8",
+        lambda: find_points_in_spheres(ac128, cc128, 8.0, pbc_all, lattice_med),
     )
 
 

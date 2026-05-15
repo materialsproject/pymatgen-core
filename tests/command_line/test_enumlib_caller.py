@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from shutil import which
 
 import numpy as np
@@ -124,5 +125,5 @@ class TestEnumlibAdaptor(MatSciTest):
 
         adaptor = EnumlibAdaptor(struct, max_cell_size=10, timeout=0.05)  # timeout in minute
 
-        with pytest.raises(TimeoutError, match="Enumeration took more than timeout 0.05 minutes"):
+        with pytest.raises(TimeoutError, match=re.escape("Enumeration took more than timeout 0.05 minutes")):
             adaptor.run()

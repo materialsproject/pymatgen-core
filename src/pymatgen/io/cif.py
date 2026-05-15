@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 import textwrap
 import warnings
@@ -812,13 +811,7 @@ class CifParser:
                         pass
 
                     try:
-                        cod_data = loadfn(
-                            os.path.join(
-                                os.path.dirname(os.path.dirname(__file__)),
-                                "symmetry",
-                                "symm_ops.json",
-                            )
-                        )
+                        cod_data = loadfn(Path(__file__).parents[1] / "symmetry" / "symm_ops.json")
                         for _data in cod_data:
                             if sg == re.sub(r"\s+", "", _data["hermann_mauguin"]):
                                 xyz = _data["symops"]

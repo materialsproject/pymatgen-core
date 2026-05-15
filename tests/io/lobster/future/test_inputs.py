@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 from pytest import approx
@@ -125,7 +127,7 @@ class TestLobsterIn(MatSciTest):
         # can only calculate nbands if basis functions are provided
         with pytest.raises(
             ValueError,
-            match="No basis functions are provided. The program cannot calculate nbands.",
+            match=re.escape("No basis functions are provided. The program cannot calculate nbands."),
         ):
             lobsterin2._get_nbands(structure=Structure.from_file(f"{VASP_IN_DIR}/POSCAR_Fe3O4"))
 
