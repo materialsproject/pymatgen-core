@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import sympy as sp
+from scipy.constants import N_A as N_a
+from scipy.constants import Boltzmann as kb
+from scipy.constants import R as R_gas
+from scipy.constants import hbar
 from scipy.integrate import quad
 from scipy.optimize import root
 from scipy.special import factorial
@@ -42,6 +46,13 @@ __email__ = "montoyjh@lbl.gov"
 __status__ = "Production"
 __date__ = "July 24, 2018"
 
+# Thermal model coefficients
+CLARKE_COEFF = 0.87
+CAHILL_COEFF = 1 / 2 * (np.pi / 6) ** (1 / 3)  # approx = 2.48^-1
+AGNE_COEFF = 0.76
+SNYDER_ACOUSTIC_COEFF = 0.38483
+SNYDER_OPTICAL_COEFF = 1.66914e-23
+
 
 class NthOrderElasticTensor(Tensor):
     """
@@ -54,6 +65,7 @@ class NthOrderElasticTensor(Tensor):
 
     def __new__(cls, input_array, check_rank=None, tol: float = 1e-4) -> Self:
         """
+
         Args:
             input_array (np.ndarray): input array for tensor
             check_rank (int): rank of tensor to check
@@ -73,7 +85,7 @@ class NthOrderElasticTensor(Tensor):
 
     def calculate_stress(self, strain):
         """
-        Calculate's a given elastic tensor's contribution to the
+        Calculates a given elastic tensors contribution to the
         stress using Einstein summation.
 
         Args:
@@ -131,8 +143,9 @@ class ElasticTensor(NthOrderElasticTensor):
     """
     This class extends Tensor to describe the 3x3x3x3 second-order elastic tensor,
     C_{ijkl}, with various methods for estimating other properties derived from the second
-    order elastic tensor (e.g. bulk modulus, shear modulus, Young's modulus, Poisson's ratio)
-    in units of eV/A^3.
+    order elastic tensor (e.g. bulk modulus, shear modulus, Young's modulus, Poisson's ratio).
+    Expects elastic tensor input with units of GPa. Using eV/A^3 will result in many derived properties
+    having inconsistent units.
     """
 
     def __new__(cls, input_array, tol: float = 1e-4) -> Self:
@@ -161,24 +174,24 @@ class ElasticTensor(NthOrderElasticTensor):
 
     @property
     def k_voigt(self) -> float:
-        """The K_v bulk modulus (in eV/A^3)."""
+        """The K_v bulk modulus (in GPa)."""
         return self.voigt[:3, :3].mean()
 
     @property
     def g_voigt(self) -> float:
-        """The G_v shear modulus (in eV/A^3)."""
+        """The G_v shear modulus (in GPa)."""
         return (
             2 * self.voigt[:3, :3].trace() - np.triu(self.voigt[:3, :3]).sum() + 3 * self.voigt[3:, 3:].trace()
         ) / 15.0
 
     @property
     def k_reuss(self) -> float:
-        """The K_r bulk modulus (in eV/A^3)."""
+        """The K_r bulk modulus (in GPa)."""
         return 1 / self.compliance_tensor.voigt[:3, :3].sum()
 
     @property
     def g_reuss(self) -> float:
-        """The G_r shear modulus (in eV/A^3)."""
+        """The G_r shear modulus (in GPa)."""
         return 15 / (
             8 * self.compliance_tensor.voigt[:3, :3].trace()
             - 4 * np.triu(self.compliance_tensor.voigt[:3, :3]).sum()
@@ -187,12 +200,12 @@ class ElasticTensor(NthOrderElasticTensor):
 
     @property
     def k_vrh(self) -> float:
-        """The K_vrh (Voigt-Reuss-Hill) average bulk modulus (in eV/A^3)."""
+        """The K_vrh (Voigt-Reuss-Hill) average bulk modulus (in GPa)."""
         return 0.5 * (self.k_voigt + self.k_reuss)
 
     @property
     def g_vrh(self) -> float:
-        """The G_vrh (Voigt-Reuss-Hill) average shear modulus (in eV/A^3)."""
+        """The G_vrh (Voigt-Reuss-Hill) average shear modulus (in GPa)."""
         return 0.5 * (self.g_voigt + self.g_reuss)
 
     @property
@@ -229,7 +242,7 @@ class ElasticTensor(NthOrderElasticTensor):
     def trans_v(self, structure: Structure) -> float:
         """
         Calculates transverse sound velocity using the
-        Voigt-Reuss-Hill average bulk modulus.
+        Voigt-Reuss-Hill average shear modulus.
 
         Args:
             structure: pymatgen structure object
@@ -239,16 +252,15 @@ class ElasticTensor(NthOrderElasticTensor):
         """
         n_sites = len(structure)
         n_atoms = structure.composition.num_atoms
-        weight = float(structure.composition.weight)
-        mass_density = 1.6605e3 * n_sites * weight / (n_atoms * structure.volume)
-        if self.g_vrh < 0:
-            raise ValueError("k_vrh or g_vrh is negative, sound velocity is undefined")
+        weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
+        volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
+        mass_density = n_sites * weight / (n_atoms * volume)
         return (1e9 * self.g_vrh / mass_density) ** 0.5
 
     @raise_if_unphysical
     def long_v(self, structure: Structure) -> float:
         """
-        Calculates longitudinal sound velocity using the Voigt-Reuss-Hill average bulk modulus.
+        Calculates longitudinal sound velocity using the Voigt-Reuss-Hill average bulk & shear moduli.
 
         Args:
             structure: pymatgen structure object
@@ -258,10 +270,9 @@ class ElasticTensor(NthOrderElasticTensor):
         """
         n_sites = len(structure)
         n_atoms = structure.composition.num_atoms
-        weight = float(structure.composition.weight)
-        mass_density = 1.6605e3 * n_sites * weight / (n_atoms * structure.volume)
-        if self.g_vrh < 0:
-            raise ValueError("k_vrh or g_vrh is negative, sound velocity is undefined")
+        weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
+        volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
+        mass_density = n_sites * weight / (n_atoms * volume)
         return (1e9 * (self.k_vrh + 4 / 3 * self.g_vrh) / mass_density) ** 0.5
 
     @raise_if_unphysical
@@ -276,11 +287,11 @@ class ElasticTensor(NthOrderElasticTensor):
         """
         n_sites = len(structure)
         n_atoms = structure.composition.num_atoms
-        site_density = 1e30 * n_sites / structure.volume
-        tot_mass = sum(spec.atomic_mass for spec in structure.species)
-        avg_mass = 1.6605e-27 * tot_mass / n_atoms
+        site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
+        tot_mass = sum(spec.atomic_mass for spec in structure.species) * Unit("amu").get_conversion_factor(Unit("kg"))
+        avg_mass = tot_mass / n_atoms
         return (
-            0.38483
+            SNYDER_ACOUSTIC_COEFF
             * avg_mass
             * ((self.long_v(structure) + 2 * self.trans_v(structure)) / 3) ** 3.0
             / (300 * site_density ** (-2 / 3) * n_sites ** (1 / 3))
@@ -298,9 +309,9 @@ class ElasticTensor(NthOrderElasticTensor):
             float: Snyder's optical sound velocity (in SI units)
         """
         n_sites = len(structure)
-        site_density = 1e30 * n_sites / structure.volume
+        site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
         return (
-            1.66914e-23
+            SNYDER_OPTICAL_COEFF
             * (self.long_v(structure) + 2 * self.trans_v(structure))
             / 3.0
             / site_density ** (-2 / 3)
@@ -331,12 +342,13 @@ class ElasticTensor(NthOrderElasticTensor):
             float: Clarke's thermal conductivity (in SI units)
         """
         n_sites = len(structure)
-        tot_mass = sum(spec.atomic_mass for spec in structure.species)
+        tot_mass = sum(spec.atomic_mass for spec in structure.species) * Unit("amu").get_conversion_factor(Unit("kg"))
         n_atoms = structure.composition.num_atoms
-        weight = float(structure.composition.weight)
-        avg_mass = 1.6605e-27 * tot_mass / n_atoms
-        mass_density = 1.6605e3 * n_sites * weight / (n_atoms * structure.volume)
-        return 0.87 * 1.3806e-23 * avg_mass ** (-2 / 3) * mass_density ** (1 / 6) * self.y_mod**0.5
+        weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))
+        volume = structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3"))
+        avg_mass = tot_mass / n_atoms
+        mass_density = n_sites * weight / (n_atoms * volume)
+        return CLARKE_COEFF * kb * avg_mass ** (-2 / 3) * mass_density ** (1 / 6) * self.y_mod**0.5
 
     @raise_if_unphysical
     def cahill_thermalcond(self, structure: Structure) -> float:
@@ -349,8 +361,8 @@ class ElasticTensor(NthOrderElasticTensor):
             float: Cahill's thermal conductivity (in SI units)
         """
         n_sites = len(structure)
-        site_density = 1e30 * n_sites / structure.volume
-        return 1.3806e-23 / 2.48 * site_density ** (2 / 3) * (self.long_v(structure) + 2 * self.trans_v(structure))
+        site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
+        return kb * CAHILL_COEFF * site_density ** (2 / 3) * (self.long_v(structure) + 2 * self.trans_v(structure))
 
     @due.dcite(
         Doi("10.1039/C7EE03256K"),
@@ -371,11 +383,11 @@ class ElasticTensor(NthOrderElasticTensor):
             float: Agne's diffusive thermal conductivity (in SI units)
         """
         n_sites = len(structure)
-        site_density = 1e30 * n_sites / structure.volume
+        site_density = n_sites / (structure.volume * Unit("ang^3").get_conversion_factor(Unit("m^3")))
         return (
-            0.76
+            AGNE_COEFF
             * (site_density ** (2 / 3))
-            * 1.3806e-23
+            * kb
             * ((1 / 3) * (2 * self.trans_v(structure) + self.long_v(structure)))
         )
 
@@ -389,10 +401,10 @@ class ElasticTensor(NthOrderElasticTensor):
         Returns:
             float: Debye temperature (in SI units)
         """
-        v0 = structure.volume * 1e-30 / len(structure)
+        v0 = structure.volume / len(structure) * Unit("ang^3").get_conversion_factor(Unit("m^3"))
         vl, vt = self.long_v(structure), self.trans_v(structure)
         vm = 3 ** (1 / 3) * (1 / vl**3 + 2 / vt**3) ** (-1 / 3)
-        return 1.05457e-34 / 1.38065e-23 * vm * (6 * np.pi**2 / v0) ** (1 / 3)
+        return hbar / kb * vm * (6 * np.pi**2 / v0) ** (1 / 3)
 
     @property
     def universal_anisotropy(self) -> float:
@@ -470,8 +482,8 @@ class ElasticTensor(NthOrderElasticTensor):
         strain in voigt notation.
 
         Args:
-            stresses (Nx3x3 array-like): list or array of stresses
             strains (Nx3x3 array-like): list or array of strains
+            stresses (Nx3x3 array-like): list or array of stresses
         """
         # convert the stress/strain to Nx6 arrays of voigt notation
         warnings.warn(
@@ -578,7 +590,7 @@ class ElasticTensorExpansion(TensorCollection):
 
     def calculate_stress(self, strain) -> float:
         """
-        Calculate's a given elastic tensor's contribution to the
+        Calculates a given elastic tensors contribution to the
         stress using Einstein summation.
         """
         return sum(c.calculate_stress(strain) for c in self)
@@ -601,7 +613,7 @@ class ElasticTensorExpansion(TensorCollection):
         )
 
     def get_tgt(self, temperature: float | None = None, structure: Structure = None, quad=None):
-        """Get the thermodynamic Gruneisen tensor (TGT) by via an
+        """Get the thermodynamic Gruneisen tensor (TGT) via
         integration of the GGT weighted by the directional heat
         capacity.
 
@@ -659,7 +671,7 @@ class ElasticTensorExpansion(TensorCollection):
 
         Args:
             temperature (float): Temperature in kelvin
-            structure (float): Structure to be used in directional heat
+            structure (Structure): Structure to be used in directional heat
                 capacity determination
             n (3x1 array-like): direction for Cv determination
             u (3x1 array-like): polarization direction, note that
@@ -667,14 +679,13 @@ class ElasticTensorExpansion(TensorCollection):
             cutoff (float): cutoff for scale of kt / (hbar * omega)
                 if lower than this value, returns 0
         """
-        k = 1.38065e-23
-        kt = k * temperature
-        hbar_w = 1.05457e-34 * self.omega(structure, n, u)
+        kt = kb * temperature
+        hbar_w = hbar * self.omega(structure, n, u)
         if hbar_w > kt * cutoff:
             return 0.0
-        c = k * (hbar_w / kt) ** 2
+        c = kb * (hbar_w / kt) ** 2
         c *= np.exp(hbar_w / kt) / (np.exp(hbar_w / kt) - 1) ** 2
-        return c * 6.022e23
+        return c * N_a
 
     def omega(self, structure: Structure, n, u):
         """Find directional frequency contribution to the heat
@@ -688,8 +699,8 @@ class ElasticTensorExpansion(TensorCollection):
                 no attempt for verification of eigenvectors is made
         """
         l0 = np.dot(np.sum(structure.lattice.matrix, axis=0), n)
-        l0 *= 1e-10  # in A
-        weight = float(structure.composition.weight) * 1.66054e-27  # in kg
+        l0 *= 1e-10  # in meters
+        weight = float(structure.composition.weight) * Unit("amu").get_conversion_factor(Unit("kg"))  # in kg
         vol = structure.volume * 1e-30  # in m^3
         vel = (1e9 * self[0].einsum_sequence([n, u, n, u]) / (weight / vol)) ** 0.5
         return vel / l0
@@ -698,7 +709,7 @@ class ElasticTensorExpansion(TensorCollection):
         self,
         structure: Structure,
         temperature: float,
-        mode: Literal["dulong - petit", "debye"] = "debye",
+        mode: Literal["dulong-petit", "debye"] = "debye",
     ):
         """Get thermal expansion coefficient from third-order constants.
 
@@ -720,14 +731,14 @@ class ElasticTensorExpansion(TensorCollection):
             def integrand(x):
                 return (x**4 * np.exp(x)) / (np.exp(x) - 1) ** 2
 
-            cv = 9 * 8.314 * t_ratio**3 * quad(integrand, 0, t_ratio**-1)[0]
+            cv = 9 * R_gas * t_ratio**3 * quad(integrand, 0, t_ratio**-1)[0]
         elif mode == "dulong-petit":
-            cv = 3 * 8.314
+            cv = 3 * R_gas
         else:
             raise ValueError(f"{mode=} must be debye or dulong-petit")
         tgt = self.get_tgt(temperature, structure)
         alpha = np.einsum("ijkl,ij", soec.compliance_tensor, tgt)
-        alpha *= cv / (1e9 * v0 * 6.022e23)
+        alpha *= cv / (1e9 * v0 * N_a)
         return SquareTensor(alpha)
 
     def get_compliance_expansion(self):
