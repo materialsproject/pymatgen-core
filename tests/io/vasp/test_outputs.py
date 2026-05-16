@@ -46,6 +46,7 @@ from pymatgen.io.vasp.outputs import (
     Wavecar,
     Waveder,
     Xdatcar,
+    _parse_from_incar,
     get_band_structure_from_vasp_multiple_branches,
 )
 from pymatgen.io.wannier90 import Unk
@@ -60,6 +61,16 @@ TEST_DIR = f"{TEST_FILES_DIR}/io/vasp"
 
 
 class TestVasprun(MatSciTest):
+    def test_parse_from_incar_bare_filename(self):
+        incar_path = Path(self.tmp_path) / "INCAR"
+        incar_path.write_text("ENCUT = 520\n", encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(self.tmp_path)
+        try:
+            assert _parse_from_incar("vasprun.xml", "ENCUT") == 520
+        finally:
+            os.chdir(cwd)
+
     def test_vasprun_soc(self):
         # Test that SOC vaspruns are parsed appropriately, giving just Spin.Up tdos, idos and pdos
         vasp_run = Vasprun(f"{VASP_OUT_DIR}/vasprun.int_Te_SOC.xml.gz")
@@ -1654,6 +1665,20 @@ class TestChgcar(MatSciTest):
         assert_allclose(chgcar_from_file.data_aug["total"][1], self.chgcar_spin.data_aug["total"][1])
         assert_allclose(chgcar_from_file.data_aug["diff"][1], self.chgcar_spin.data_aug["diff"][1])
 
+    def test_write_preserves_legacy_aug_lines(self):
+        legacy_aug = {
+            "total": [
+                "augmentation occupancies   1   3",
+                " 0.1000000000E+01 0.2000000000E+01 0.3000000000E+01 ",
+            ]
+        }
+        chgcar = Chgcar(self.chgcar_no_spin.structure, self.chgcar_no_spin.data, data_aug=legacy_aug)
+        out_path = f"{self.tmp_path}/CHGCAR_legacy_aug"
+        chgcar.write_file(out_path)
+        contents = Path(out_path).read_text(encoding="utf-8")
+        assert "augmentation occupancies   1   3" in contents
+        assert "0.1000000000E+01 0.2000000000E+01 0.3000000000E+01" in contents
+
     def test_soc_chgcar(self):
         assert set(self.chgcar_NiO_soc.data) == {
             "total",
@@ -1789,7 +1814,10 @@ class TestElfcar(MatSciTest):
             file.write(malformed)
         with pytest.raises(
             ValueError,
-            match=r"invalid literal for int|could not convert string|cannot reshape array of size",
+            match=(
+                r"invalid literal for int|could not convert string|cannot reshape array of size|"
+                r"Expected \d+ values, got \d+"
+            ),
         ):
             Elfcar.from_file(out_path)
 

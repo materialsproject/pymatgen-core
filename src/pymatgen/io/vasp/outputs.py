@@ -151,7 +151,7 @@ def _parse_vasp_array(elem) -> list[list[bool]] | NDArray[np.float64]:
 
 def _parse_from_incar(filename: PathLike, key: str) -> Any:
     """Helper function to parse a parameter from the INCAR."""
-    dirname = os.path.dirname(filename)
+    dirname = os.path.dirname(os.fspath(filename)) or "."
     for fn in os.listdir(dirname):
         if re.search("INCAR", fn):
             warnings.warn(f"INCAR found. Using {key} from INCAR.", stacklevel=2)
@@ -3807,6 +3807,8 @@ class VolumetricData(BaseVolumetricData):
         data = np.loadtxt(file, max_rows=nrow).flatten()
         if remainder:
             data = np.concatenate((data, np.loadtxt(file, max_rows=1).flatten()))
+        if data.size != nelem:
+            raise ValueError(f"Expected {nelem} values, got {data.size}")
         return data
 
     @staticmethod
@@ -3944,6 +3946,12 @@ class VolumetricData(BaseVolumetricData):
                 return
 
             aug_data = self.data_aug.get(data_type, {})
+
+            if isinstance(aug_data, (list, tuple)):
+                for line in aug_data:
+                    file.write(f"{line}\n")
+                return
+
             if not isinstance(aug_data, dict):
                 return
 
