@@ -1781,14 +1781,16 @@ class TestElfcar(MatSciTest):
 
     def test_truncated_file(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
-        out_path = f"{self.tmp_path}/ELFCAR_truncated"
+        out_path = f"{self.tmp_path}/ELFCAR_malformed"
         elfcar.write_file(out_path)
         with open(out_path, encoding="utf-8") as file:
-            truncated = file.read()
-        truncated = truncated.rsplit("\n", 20)[0]
+            malformed = file.read().replace("   18   18   70", "   18   18", 1)
         with open(out_path, "w", encoding="utf-8") as file:
-            file.write(truncated)
-        with pytest.raises(ValueError, match=r"cannot reshape array of size|number of columns changed"):
+            file.write(malformed)
+        with pytest.raises(
+            ValueError,
+            match=r"invalid literal for int|could not convert string|cannot reshape array of size",
+        ):
             Elfcar.from_file(out_path)
 
     def test_alpha(self):
@@ -3107,12 +3109,17 @@ class TestVaspwave(MatSciTest):
         with pytest.raises(ValueError, match="Expected /charge/charge to have 4 dimensions"):
             Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
 
-    def test_validate_volumetric_dataset_spin_polarized_not_implemented(self):
+    def test_validate_volumetric_dataset_spin_polarized_components(self):
         grid = np.array([2, 3, 4])
         data = np.zeros((2, 4, 3, 2))
+        data[0] = np.arange(24, dtype=float).reshape(4, 3, 2)
+        data[1] = 100.0 + np.arange(24, dtype=float).reshape(4, 3, 2)
 
-        with pytest.raises(NotImplementedError, match="Unsupported /charge/charge component count 2"):
-            Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
+        validated = Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
+
+        assert set(validated) == {"total", "diff"}
+        assert_allclose(validated["total"], np.transpose(data[0], (2, 1, 0)))
+        assert_allclose(validated["diff"], np.transpose(data[1], (2, 1, 0)))
 
     def test_validate_volumetric_dataset_soc_components(self):
         grid = np.array([2, 3, 4])
@@ -3375,6 +3382,40 @@ class TestVaspwave(MatSciTest):
             )
             assert_allclose(unk_h5_up.data[band], phase_up * unk_wavecar_up.data[band], atol=1e-6, rtol=1e-6)
             assert_allclose(unk_h5_dn.data[band], phase_dn * unk_wavecar_dn.data[band], atol=1e-6, rtol=1e-6)
+
+    @pytest.mark.skipif(
+        not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
+        reason="Bundled H2 std vaspwave fixtures are not available.",
+    )
+    def test_h2_ispin2_std_fixture_get_chgcar_matches_chgcar(self):
+        vaspwave = Vaspwave(self.ispin2_std_dir / "vaspwave.h5")
+        chgcar_h5 = vaspwave.get_chgcar()
+        chgcar = Chgcar.from_file(self.ispin2_std_dir / "CHGCAR")
+
+        assert chgcar_h5.structure == chgcar.structure
+        assert chgcar_h5.dim == chgcar.dim
+        assert chgcar_h5.is_spin_polarized
+        assert not chgcar_h5.is_soc
+        assert set(chgcar_h5.data) == {"total", "diff"}
+        assert_allclose(chgcar_h5.data["total"], chgcar.data["total"], atol=1e-6)
+        assert_allclose(chgcar_h5.data["diff"], chgcar.data["diff"], atol=1e-6)
+
+    @pytest.mark.skipif(
+        not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
+        reason="Bundled H2 std vaspwave fixtures are not available.",
+    )
+    def test_h2_ispin2_std_fixture_get_locpot_matches_locpot(self):
+        vaspwave = Vaspwave(self.ispin2_std_dir / "vaspwave.h5")
+        locpot_h5 = vaspwave.get_locpot()
+        locpot = Locpot.from_file(self.ispin2_std_dir / "LOCPOT")
+
+        assert locpot_h5.structure == locpot.structure
+        assert locpot_h5.dim == locpot.dim
+        assert locpot_h5.is_spin_polarized
+        assert not locpot_h5.is_soc
+        assert set(locpot_h5.data) == {"total", "diff"}
+        assert_allclose(locpot_h5.data["total"], locpot.data["total"], atol=8e-5)
+        assert_allclose(locpot_h5.data["diff"], locpot.data["diff"], atol=8e-5)
 
     @pytest.mark.skipif(
         not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),

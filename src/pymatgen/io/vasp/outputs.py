@@ -3802,10 +3802,10 @@ class VolumetricData(BaseVolumetricData):
     def _plain_loadtxt(file: IO[bytes], nelem: int) -> NDArray:
         now = file.tell()
         ncol = len(file.readline().split())
-        nrow, remainer = divmod(nelem, ncol)
+        nrow, remainder = divmod(nelem, ncol)
         file.seek(now)
         data = np.loadtxt(file, max_rows=nrow).flatten()
-        if remainer:
+        if remainder:
             data = np.concatenate((data, np.loadtxt(file, max_rows=1).flatten()))
         return data
 
@@ -3860,7 +3860,7 @@ class VolumetricData(BaseVolumetricData):
                     all_dataset_aug[-1][int(k)] = arr
                 elif b"." in line:
                     arr = np.loadtxt(BytesIO(line), max_rows=1)
-                    # No use?
+                    # This line's numeric payload is parsed for format alignment but not otherwise used.
                 else:
                     dims = np.loadtxt(BytesIO(line), max_rows=1, dtype=int)
                     arr = VolumetricData._plain_loadtxt(file, int(dims.prod())).reshape(dims, order="F")
@@ -6551,6 +6551,13 @@ class Vaspwave(Vasprun):
         return np.transpose(component, (2, 1, 0))
 
     @staticmethod
+    def _build_spin_polarized_volumetric_data(data: np.ndarray) -> dict[str, np.ndarray]:
+        """Build collinear spin-polarized volumetric data from a two-component HDF5 grid."""
+        total = Vaspwave._transpose_volumetric_component(data[0])
+        diff = Vaspwave._transpose_volumetric_component(data[1])
+        return {"total": total, "diff": diff}
+
+    @staticmethod
     def _build_noncollinear_volumetric_data(data: np.ndarray) -> dict[str, np.ndarray]:
         """Build noncollinear volumetric data from a four-component HDF5 grid."""
         total = Vaspwave._transpose_volumetric_component(data[0])
@@ -6584,6 +6591,8 @@ class Vaspwave(Vasprun):
 
         if data.shape[0] == 1:
             return {"total": Vaspwave._transpose_volumetric_component(data[0])}
+        if data.shape[0] == 2:
+            return Vaspwave._build_spin_polarized_volumetric_data(data)
         if data.shape[0] == 4:
             return Vaspwave._build_noncollinear_volumetric_data(data)
 
@@ -7506,7 +7515,3 @@ class Vaspout(Vasprun):
                 byte_data = fin.read()
             with zopen(filename, "wb") as fout:
                 fout.write(byte_data)
-
-
-if __name__ == "__main__":
-    Locpot.parse_file("/Users/supercgor/Downloads/pmg-benchmark/LOCPOT.vasp642.gz")
