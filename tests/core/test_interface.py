@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
@@ -329,6 +330,13 @@ class TestGrainBoundaryGenerator(MatSciTest):
         close_angle = [36.86989764584403, 143.13010235415598]
         angle = GrainBoundaryGenerator.get_rotation_angle_from_sigma(6, [1, 0, 0], lat_type="o", ratio=[270, 30, 29])
         assert_allclose(close_angle, angle)
+
+    def test_vec_to_surface_negative_components(self):
+        assert GrainBoundaryGenerator.vec_to_surface([-100, 3, 2]) == (-100, 3, 2)
+
+    def test_vec_to_surface_invalid_fractional_approximation(self):
+        with pytest.raises(ValueError, match="Cannot convert vector"):
+            GrainBoundaryGenerator.vec_to_surface([1, 3.141592653589793, 0])
 
 
 class TestInterface(MatSciTest):

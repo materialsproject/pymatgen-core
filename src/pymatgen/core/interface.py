@@ -2344,7 +2344,7 @@ class GrainBoundaryGenerator:
         return mat
 
     @staticmethod
-    def vec_to_surface(vec: tuple[float, float, float]) -> tuple[int, ...]:
+    def vec_to_surface(vec: tuple[float, float, float] | NDArray) -> tuple[int, ...]:
         """Transform a float vector to a surface miller index with integers.
 
         Args:
@@ -2364,11 +2364,17 @@ class GrainBoundaryGenerator:
         if len(index) == 1:
             miller[index[0]] = 1
         else:
-            min_index = np.argmin([i for i in vec if i != 0])
-            true_index = index[min_index]
-            index.pop(min_index)
-            frac = [Fraction(vec[value] / vec[true_index]).limit_denominator(100) for value in index]
-
+            true_index = min(index, key=lambda i: abs(vec[i]))
+            index.remove(true_index)
+            frac = []
+            for value in index:
+                ratio = vec[value] / vec[true_index]
+                # The denominator limit of 100 is a deliberate sanity bound for Miller indices.
+                approx = Fraction(ratio).limit_denominator(100)
+                tol = 1e-8 * max(abs(ratio), 1)
+                if abs(ratio - float(approx)) > tol:
+                    raise ValueError(f"Cannot convert vector {vec} to a valid Miller index within tolerance.")
+                frac.append(approx)
             if len(index) == 1:
                 miller[true_index] = frac[0].denominator
                 miller[index[0]] = frac[0].numerator
@@ -2377,7 +2383,7 @@ class GrainBoundaryGenerator:
                 miller[true_index] = com_lcm
                 miller[index[0]] = frac[0].numerator * round(com_lcm / frac[0].denominator)
                 miller[index[1]] = frac[1].numerator * round(com_lcm / frac[1].denominator)
-        return cast("tuple[int, int, int]", miller)
+        return cast("tuple[int, int, int]", tuple(miller))
 
 
 def fix_pbc(structure: Structure, matrix: NDArray = None) -> Structure:
