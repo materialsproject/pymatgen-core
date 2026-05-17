@@ -973,6 +973,8 @@ class SlabGenerator:
             reorient_lattice (bool): reorient the lattice such that
                 the c direction is parallel to the third lattice vector
         """
+        if normal_search_tol is not None and max_normal_search is None:
+            raise ValueError("normal_search_tol requires max_normal_search to be set.")
 
         def reduce_vector(vector: tuple[int, ...]) -> tuple[int, ...]:
             """Helper function to reduce vectors."""
@@ -1042,7 +1044,7 @@ class SlabGenerator:
             else:
                 index_range = sorted(
                     range(-max_normal_search, max_normal_search + 1),
-                    key=abs,
+                    key=lambda x: -abs(x),
                 )
                 candidates = []
                 for uvw in itertools.product(index_range, index_range, index_range):
@@ -1052,9 +1054,8 @@ class SlabGenerator:
                     osdm = np.linalg.norm(vec)
                     cosine = abs(np.dot(vec, normal) / osdm)
                     candidates.append((uvw, cosine, osdm))
-                    # When no threshold is set, stop as soon as a perfect match is found.
-                    # With ascending index order the first cosine=1 is also the smallest such vector.
-                    # When normal_search_tol is set we must collect all candidates first.
+                    # Stop searching if cosine equals 1 or -1 (unless normal_search_tol is set, in
+                    # which case we want to search for the most orthogonal vector within the tolerance).
                     if normal_search_tol is None and math.isclose(abs(cosine), 1, abs_tol=1e-8):
                         break
                 if normal_search_tol is not None:
@@ -1065,7 +1066,7 @@ class SlabGenerator:
                             "Try increasing max_normal_search or relaxing normal_search_tol."
                         )
                     # Among candidates meeting the threshold, prefer fewest atoms (smallest cell volume).
-                    uvw, cosine, osdm = min(valid, key=lambda x: abs(np.linalg.det([*slab_scale_factor, x[0]])))
+                    uvw, _, _ = min(valid, key=lambda x: abs(np.linalg.det([*slab_scale_factor, x[0]])))
                 else:
                     # We want the indices with the maximum absolute cosine,
                     # but smallest possible length.
@@ -1101,8 +1102,6 @@ class SlabGenerator:
         # Calculate the most reduced structure as OUC to minimize calculations
         self.oriented_unit_cell = Structure.from_sites(single, to_unit_cell=True)
 
-        if normal_search_tol is not None and max_normal_search is None:
-            raise ValueError("normal_search_tol requires max_normal_search to be set.")
         self.max_normal_search = max_normal_search
         self.normal_search_tol = normal_search_tol
         self.parent = initial_structure
