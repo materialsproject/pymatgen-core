@@ -12,9 +12,14 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 from monty.json import MSONable
 
-from pymatgen.electronic_structure.core import Magmom
+# pymatgen.electronic_structure.core.Magmom is imported lazily inside
+# SymmOp.operate_magmom. It's the only call site and the eager import
+# would pull electronic_structure.core into every `import pymatgen.core`.
 from pymatgen.util.due import Doi, due
 from pymatgen.util.string import transformation_to_string
+
+if TYPE_CHECKING:
+    from pymatgen.electronic_structure.core import Magmom
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -589,6 +594,8 @@ class MagSymmOp(SymmOp):
         Returns:
             Magnetic moment after operator applied as Magmom class
         """
+        from pymatgen.electronic_structure.core import Magmom
+
         # Type casting to handle lists as input
         magmom = Magmom(magmom)
 

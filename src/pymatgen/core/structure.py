@@ -43,8 +43,11 @@ from pymatgen.core.operations import SymmOp
 from pymatgen.core.periodic_table import _PT_UNIT, DummySpecies, Element, Species, get_el_sp
 from pymatgen.core.sites import PeriodicSite, Site
 from pymatgen.core.units import Length, Mass
-from pymatgen.electronic_structure.core import Magmom
-from pymatgen.symmetry.maggroups import MagneticSpaceGroup
+
+# Magmom and MagneticSpaceGroup are imported lazily inside
+# IStructure.from_magnetic_spacegroup; they're the only call site and the
+# eager imports drag in pymatgen.electronic_structure.core + symmetry.maggroups
+# + symmetry.groups (~6-10 ms) on every `from pymatgen.core import Structure`.
 from pymatgen.util.coord import all_distances, get_angle, lattice_points_in_supercell
 from pymatgen.util.due import Doi, due
 
@@ -62,6 +65,7 @@ if TYPE_CHECKING:
     from matgl.ext.ase import TrajectoryObserver
     from numpy.typing import ArrayLike, NDArray
 
+    from pymatgen.symmetry.maggroups import MagneticSpaceGroup
     from pymatgen.util.typing import CompositionLike, PathLike, SpeciesLike
 
 FileFormats: TypeAlias = Literal[
@@ -1449,6 +1453,9 @@ class IStructure(SiteCollection, MSONable):
         """
         if "magmom" not in site_properties:
             raise ValueError("Magnetic moments have to be defined.")
+
+        from pymatgen.electronic_structure.core import Magmom
+        from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 
         magmoms = [Magmom(m) for m in site_properties["magmom"]]
 
