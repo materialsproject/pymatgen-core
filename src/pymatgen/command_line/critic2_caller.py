@@ -56,6 +56,7 @@ from scipy.spatial import KDTree
 
 from pymatgen.core import DummySpecies
 from pymatgen.core.graphs import StructureGraph
+from pymatgen.core.units import bohr_to_angstrom
 from pymatgen.io.vasp.inputs import Potcar
 from pymatgen.io.vasp.outputs import Chgcar, VolumetricData
 from pymatgen.util.due import Doi, due
@@ -643,8 +644,6 @@ class Critic2Analysis(MSONable):
                     return "nucleus"
                 return "nnattr"
             return None
-
-        bohr_to_angstrom = 0.529177
 
         self.critical_points = [
             CriticalPoint(

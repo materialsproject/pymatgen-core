@@ -9,14 +9,16 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from pymatgen.core.units import bohr_to_angstrom, eV_to_Ha
+
 _SPECIAL_DATASET_INDICES = (":", "+", "?")
 _DATASET_INDICES = "".join([*string.digits, *_SPECIAL_DATASET_INDICES])
 _UNITS = {
     "bohr": 1.0,
-    "angstrom": 1.8897261328856432,
+    "angstrom": 1.0 / bohr_to_angstrom,
     "hartree": 1.0,
     "Ha": 1.0,
-    "eV": 0.03674932539796232,
+    "eV": eV_to_Ha,
 }
 
 

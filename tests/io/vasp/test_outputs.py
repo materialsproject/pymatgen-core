@@ -144,7 +144,7 @@ class TestVasprun(MatSciTest):
     def test_BSE(self):
         vasp_run = Vasprun(f"{VASP_OUT_DIR}/vasprun.BSE.xml.gz")
         absorption_coeff = vasp_run.optical_absorption_coeff
-        assert absorption_coeff[1] == approx(0.8327903762077188)
+        assert absorption_coeff[1] == approx(0.8327890433502937)
         assert vasp_run.final_structure == vasp_run.initial_structure
         assert "freq_dependent" in vasp_run.dielectric_data
 

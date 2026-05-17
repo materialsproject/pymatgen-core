@@ -27,6 +27,7 @@ from monty.re import regrep
 from tqdm import tqdm
 
 from pymatgen.core import Composition, Element, Lattice, Structure
+from pymatgen.core import constants as _const
 from pymatgen.core.entries import ComputedEntry, ComputedStructureEntry
 from pymatgen.core.trajectory import Trajectory
 from pymatgen.core.units import unitized
@@ -55,9 +56,6 @@ if TYPE_CHECKING:
 
     from h5py import File as H5File
     from h5py import Group as H5Group
-
-    # Avoid name conflict with pymatgen.core.Element
-    from lxml.etree import _Element as XML_Element
     from numpy.typing import NDArray
 
     from pymatgen.util.typing import Kpoint, PathLike
@@ -692,7 +690,7 @@ class Vasprun(MSONable):
                 """Calculate optical absorption coefficient,
                 the unit is cm^-1.
                 """
-                hc = 1.23984 * 1e-4  # plank constant times speed of light, in the unit of eV*cm
+                hc = _const.h * _const.c / _const.e * 100  # eV*cm (J*m -> eV*cm)
                 return 2 * 3.14159 * np.sqrt(np.sqrt(real**2 + imag**2) - real) * np.sqrt(2) / hc * freq
 
             return list(
@@ -1503,7 +1501,7 @@ class Vasprun(MSONable):
         dct["output"] = vout
         return jsanitize(dct, strict=True)
 
-    def _parse_params(self, elem: XML_Element) -> Incar:
+    def _parse_params(self, elem: ET.Element) -> Incar:
         """Parse INCAR parameters and more."""
         params: dict[str, Any] = {}
         for c in elem:
@@ -1537,7 +1535,7 @@ class Vasprun(MSONable):
         return Incar(params)
 
     @staticmethod
-    def _parse_atominfo(elem: XML_Element) -> tuple[list[str], list[str]]:
+    def _parse_atominfo(elem: ET.Element) -> tuple[list[str], list[str]]:
         """Parse atom symbols and POTCAR symbols."""
 
         def parse_atomic_symbol(symbol: str) -> str:
@@ -1567,7 +1565,7 @@ class Vasprun(MSONable):
 
     @staticmethod
     def _parse_kpoints(
-        elem: XML_Element,
+        elem: ET.Element,
     ) -> tuple[Kpoints, list[tuple[float, float, float]], list[float]]:
         """Parse Kpoints."""
         gen = elem.find("generation")
@@ -1611,7 +1609,7 @@ class Vasprun(MSONable):
             )
         return kpoint, actual_kpoints, weights  # type:ignore[return-value]
 
-    def _parse_structure(self, elem: XML_Element) -> Structure:
+    def _parse_structure(self, elem: ET.Element) -> Structure:
         """Parse Structure with lattice, positions and selective dynamics info."""
         lattice = _parse_vasp_array(elem.find("crystal").find("varray"))  # type: ignore[union-attr]
         pos = _parse_vasp_array(elem.find("varray"))
@@ -1623,7 +1621,7 @@ class Vasprun(MSONable):
         return struct
 
     @staticmethod
-    def _parse_diel(elem: XML_Element) -> tuple[list, list, list]:
+    def _parse_diel(elem: ET.Element) -> tuple[list, list, list]:
         """Parse dielectric properties."""
         real_elem = elem.find("real")
         imag_elem = elem.find("imag")
@@ -1640,7 +1638,7 @@ class Vasprun(MSONable):
         return [], [], []
 
     @staticmethod
-    def _parse_optical_transition(elem: XML_Element) -> tuple[NDArray, NDArray]:
+    def _parse_optical_transition(elem: ET.Element) -> tuple[NDArray, NDArray]:
         """Parse optical transitions."""
         for va in elem.findall("varray"):
             if va.attrib.get("name") == "opticaltransitions":
@@ -1652,7 +1650,7 @@ class Vasprun(MSONable):
 
         raise RuntimeError("Failed to parse optical transitions.")
 
-    def _parse_chemical_shielding(self, elem: XML_Element) -> list[dict[str, Any]]:
+    def _parse_chemical_shielding(self, elem: ET.Element) -> list[dict[str, Any]]:
         """Parse NMR chemical shielding."""
         istep: dict[str, Any] = {}
         # not all calculations have a structure
@@ -1686,7 +1684,7 @@ class Vasprun(MSONable):
         elem.clear()
         return calculation
 
-    def _parse_ionic_step(self, elem: XML_Element) -> dict[str, float]:
+    def _parse_ionic_step(self, elem: ET.Element) -> dict[str, float]:
         """Parse an ionic step."""
         try:
             ion_step: dict[str, Any] = {
@@ -1719,7 +1717,7 @@ class Vasprun(MSONable):
         return ion_step
 
     @staticmethod
-    def _parse_dos(elem: XML_Element) -> tuple[Dos, Dos, list[dict]]:
+    def _parse_dos(elem: ET.Element) -> tuple[Dos, Dos, list[dict]]:
         """Parse density of states (DOS)."""
         efermi = float(elem.find("i").text)  # type: ignore[union-attr, arg-type]
         energies: NDArray | None = None
@@ -1766,7 +1764,7 @@ class Vasprun(MSONable):
         )
 
     @staticmethod
-    def _parse_eigen(elem: XML_Element) -> dict[Spin, NDArray]:
+    def _parse_eigen(elem: ET.Element) -> dict[Spin, NDArray]:
         """Parse eigenvalues."""
         eigenvalues: dict[Spin, NDArray] = defaultdict(list)  # type:ignore[arg-type]
         for s in elem.find("array").find("set").findall("set"):  # type: ignore[union-attr]
@@ -1779,7 +1777,7 @@ class Vasprun(MSONable):
 
     @staticmethod
     def _parse_projected_eigen(
-        elem: XML_Element,
+        elem: ET.Element,
     ) -> tuple[dict[Spin, NDArray], NDArray | None]:
         """Parse projected eigenvalues."""
         root = elem.find("array").find("set")  # type: ignore[union-attr]
@@ -1810,7 +1808,7 @@ class Vasprun(MSONable):
         return proj_eigen, proj_mag
 
     @staticmethod
-    def _parse_dynmat(elem: XML_Element) -> tuple[list, list, list]:
+    def _parse_dynmat(elem: ET.Element) -> tuple[list, list, list]:
         """Parse dynamical matrix."""
         hessian: list[list[float]] = []
         eigenvalues: list[float] = []

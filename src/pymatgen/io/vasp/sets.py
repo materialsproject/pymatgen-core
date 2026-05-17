@@ -48,6 +48,7 @@ from monty.serialization import loadfn
 
 from pymatgen.core import Element, PeriodicSite, SiteCollection, Species, Structure
 from pymatgen.core.structure_matcher import StructureMatcher
+from pymatgen.core.units import Ry_to_eV, bohr_to_angstrom
 from pymatgen.io.core import InputGenerator
 from pymatgen.io.vasp.inputs import Incar, Kpoints, PmgVaspPspDirError, Poscar, Potcar, VaspInput
 from pymatgen.io.vasp.outputs import Outcar, Vasprun
@@ -1123,8 +1124,8 @@ class VaspInputSet(InputGenerator, abc.ABC):
         """
         # TODO throw error for Ultrasoft potentials
 
-        _RYTOEV = 13.605826
-        _AUTOA = 0.529177249
+        _RYTOEV = Ry_to_eV
+        _AUTOA = bohr_to_angstrom
 
         # TODO Only do this for VASP 6 for now. Older version require more advanced logic
 
