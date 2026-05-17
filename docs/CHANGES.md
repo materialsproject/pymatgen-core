@@ -1,8 +1,8 @@
 ---
-
-## layout: default
+layout: default
 title: Change Log
 nav_order: 4
+---
 
 # Changelog
 
@@ -27,9 +27,7 @@ nav_order: 4
 - PR #21 Add `_filter_kwargs` to `IStructure` for better kwargs handling (by @cogsworth37)
 - PR #53 Docstring and numerical accuracy fixes for `elasticity.elastic` (by @Elias-P-M)
 - Require `phonopy>=4.0.0`; restore v3 `primitive_matrix` semantics by passing `"P"` at every `Phonopy(...)` call site in `pymatgen.io.phonopy`
-
 **Features**
-
 - PR #35 Add `Vaspwave` support for `vaspwave.h5` outputs (by @hheei)
 - PR #34 `Outcar.read_vacuum_potentials` (by @ThomasWarford)
 - PR #39 `IStructure.get_primitive_structure`: refactor inner distance calculations to use `scipy.spatial.cKDTree`; validate tolerance (by @kavanase)
@@ -37,17 +35,6 @@ nav_order: 4
 - PR #29 `BztPlotter.plot_bands` / `plot_dos`: expose additional control arguments (by @deepanshuaggarwal51)
 - PR #43 Cover `HighSymmKpath` and `util.plotting` helpers; fix latent bugs (by @shyuep)
 - PR #41 Restore dropped `structure_analyzer` and `CohpPlotter` tests (by @shyuep)
-
-**Build, CI, packaging**
-
-- PR #33 Split NumPy version constraints at Python 3.13 (by @hheei)
-- PR #40 Bump GitHub Actions to Node 24 majors (by @shyuep)
-- CI: replace micromamba with `setup-python` on Windows (workaround for `mamba-org/setup-micromamba#306` regression since 2026-05-14)
-- `pyproject.toml`: cleanup; drop dead `ruff` ignores
-- Refactor: replace `os.path` with `pathlib` and `contextlib.chdir` across the package
-- Cleanup: retire past-due deprecations; narrow bare `except:` clauses
-- `CLAUDE.md`: clarify Cython rebuild semantics
-- Dependabot: bump `lxml` (PR #31), `urllib3` (PR #46), and `nokogiri` (PR #45)
 
 ## 2026.4.16
 
