@@ -10,7 +10,6 @@ import os
 import re
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
@@ -52,7 +51,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from typing import Literal, Self, TypeAlias
+    from typing import IO, Literal, Self, TypeAlias
 
     from h5py import File as H5File
     from h5py import Group as H5Group
@@ -152,11 +151,11 @@ def _parse_vasp_array(elem) -> list[list[bool]] | NDArray[np.float64]:
 
 def _parse_from_incar(filename: PathLike, key: str) -> Any:
     """Helper function to parse a parameter from the INCAR."""
-    dirname = Path(filename).parent
-    for path in dirname.iterdir():
-        if re.search("INCAR", path.name):
+    dirname = os.path.dirname(os.fspath(filename)) or "."
+    for fn in os.listdir(dirname):
+        if re.search("INCAR", fn):
             warnings.warn(f"INCAR found. Using {key} from INCAR.", stacklevel=2)
-            incar = Incar.from_file(path)
+            incar = Incar.from_file(os.path.join(dirname, fn))
             return incar.get(key)
     return None
 
@@ -1042,9 +1041,12 @@ class Vasprun(MSONable):
         """
         use_kpoints_opt = not ignore_kpoints_opt and (getattr(self, "kpoints_opt_props", None) is not None)
         if not kpoints_filename:
-            kpts_path = Path(self.filename).parent / ("KPOINTS_OPT" if use_kpoints_opt else "KPOINTS")
+            kpts_path = os.path.join(
+                os.path.dirname(self.filename),
+                "KPOINTS_OPT" if use_kpoints_opt else "KPOINTS",
+            )
             kpoints_filename = zpath(kpts_path)
-        if kpoints_filename and not Path(kpoints_filename).is_file() and line_mode:
+        if kpoints_filename and not os.path.isfile(kpoints_filename) and line_mode:
             name = "KPOINTS_OPT" if use_kpoints_opt else "KPOINTS"
             raise VaspParseError(f"{name} not found but needed to obtain band structure along symmetry lines.")
 
@@ -3797,6 +3799,19 @@ class VolumetricData(BaseVolumetricData):
     """
 
     @staticmethod
+    def _plain_loadtxt(file: IO[bytes], nelem: int) -> NDArray:
+        now = file.tell()
+        ncol = len(file.readline().split())
+        nrow, remainder = divmod(nelem, ncol)
+        file.seek(now)
+        data = np.loadtxt(file, max_rows=nrow).flatten()
+        if remainder:
+            data = np.concatenate((data, np.loadtxt(file, max_rows=1).flatten()))
+        if data.size != nelem:
+            raise ValueError(f"Expected {nelem} values, got {data.size}")
+        return data
+
+    @staticmethod
     def parse_file(filename: PathLike) -> tuple[Poscar, dict, dict]:
         """
         Parse a generic volumetric data file in the VASP like format.
@@ -3804,108 +3819,83 @@ class VolumetricData(BaseVolumetricData):
 
         Args:
             filename (PathLike): Path of file to parse.
-
         Returns:
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
         """
-        poscar_read = False
-        poscar_string: list[str] = []
-        dataset: NDArray = np.zeros((1, 1, 1))
-        all_dataset: list[NDArray] = []
-        # for holding any strings in input that are not Poscar
-        # or VolumetricData (typically augmentation charges)
-        all_dataset_aug: dict[int, list[str]] = {}
-        dim: list[int] = []
-        dimline = ""
-        read_dataset = False
-        ngrid_pts = 0
-        data_count = 0
-        poscar = None
-        with zopen(filename, mode="rt", encoding="utf-8") as file:
-            for line in file:
-                original_line = line
+        with zopen(filename, mode="rb") as file:
+            # parse poscar
+            poscar = None
+            poscar_string: list[bytes] = []
+
+            while poscar is None:
+                line = file.readline()
+                if not line:
+                    break
                 line = line.strip()
-                if read_dataset:
-                    for tok in line.split():
-                        if data_count < ngrid_pts:
-                            # This complicated procedure is necessary because
-                            # VASP outputs x as the fastest index, followed by y
-                            # then z.
-                            no_x = data_count // dim[0]
-                            dataset[data_count % dim[0], no_x % dim[1], no_x // dim[1]] = float(tok)
-                            data_count += 1
-                    if data_count >= ngrid_pts:
-                        read_dataset = False
-                        data_count = 0
-                        all_dataset.append(dataset)
 
-                elif not poscar_read:
-                    if line != "" or len(poscar_string) == 0:
-                        poscar_string.append(line)  # type:ignore[arg-type]
-                    elif line == "":
-                        poscar = Poscar.from_str("\n".join(poscar_string))
-                        poscar_read = True
-
-                elif not dim:
-                    dim = [int(i) for i in line.split()]
-                    ngrid_pts = dim[0] * dim[1] * dim[2]
-                    dimline = line  # type:ignore[assignment]
-                    read_dataset = True
-                    dataset = np.zeros(dim)
-
-                elif line == dimline:
-                    # when line == dimline, expect volumetric data to follow
-                    # so set read_dataset to True
-                    read_dataset = True
-                    dataset = np.zeros(dim)
-
+                if line or len(poscar_string) == 0:
+                    poscar_string.append(line)
                 else:
-                    # store any extra lines that were not part of the
-                    # volumetric data so we know which set of data the extra
-                    # lines are associated with
-                    key = len(all_dataset) - 1
-                    if key not in all_dataset_aug:
-                        all_dataset_aug[key] = []
-                    all_dataset_aug[key].append(original_line)  # type:ignore[arg-type]
+                    poscar = Poscar.from_str(b"\n".join(poscar_string).decode("utf-8"))
+            if poscar is None:
+                raise ValueError("Couldn't parse Poscar from volumetric data file.")
+
+            all_dataset: list[NDArray] = []
+            all_dataset_aug: list[dict[int, NDArray]] = []
+
+            # parse volumetric data
+            while True:
+                line = file.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(b"augmentation occupancies (imaginary part)"):
+                    _, k, n = line.rsplit(maxsplit=2)
+                    arr = VolumetricData._plain_loadtxt(file, int(n))
+                    key = int(k)
+                    all_dataset_aug[-1][key] = np.asarray(all_dataset_aug[-1][key], dtype=np.complex128) + 1j * arr
+                elif line.startswith(b"augmentation occupancies"):
+                    _, k, n = line.rsplit(maxsplit=2)
+                    arr = VolumetricData._plain_loadtxt(file, int(n))
+                    all_dataset_aug[-1][int(k)] = arr
+                elif b"." in line:
+                    arr = np.loadtxt(BytesIO(line), max_rows=1)
+                    # This line's numeric payload is parsed for format alignment but not otherwise used.
+                else:
+                    dims = np.loadtxt(BytesIO(line), max_rows=1, dtype=int)
+                    arr = VolumetricData._plain_loadtxt(file, int(dims.prod())).reshape(dims, order="F")
+                    arr = np.ascontiguousarray(arr)
+                    all_dataset.append(arr)
+                    all_dataset_aug.append({})
 
             if len(all_dataset) == 4:
+                ref_sign = np.sign(all_dataset[1] * 1.01 + all_dataset[2] * 1.02 + all_dataset[3] * 1.03)
+                diff = np.sqrt(all_dataset[1] ** 2 + all_dataset[2] ** 2 + all_dataset[3] ** 2) * ref_sign
                 data = {
                     "total": all_dataset[0],
                     "diff_x": all_dataset[1],
                     "diff_y": all_dataset[2],
                     "diff_z": all_dataset[3],
+                    "diff": diff,
                 }
                 data_aug = {
-                    "total": all_dataset_aug.get(0),
-                    "diff_x": all_dataset_aug.get(1),
-                    "diff_y": all_dataset_aug.get(2),
-                    "diff_z": all_dataset_aug.get(3),
+                    "total": all_dataset_aug[0],
+                    "diff_x": all_dataset_aug[1],
+                    "diff_y": all_dataset_aug[2],
+                    "diff_z": all_dataset_aug[3],
                 }
-
-                # Construct a "diff" dict for scalar-like magnetization density,
-                # referenced to an arbitrary direction (using same method as
-                # pymatgen.electronic_structure.core.Magmom, see
-                # Magmom documentation for justification for this)
-                # TODO: re-examine this, and also similar behavior in
-                # Magmom - @mkhorton
-                # TODO: does CHGCAR change with different SAXIS?
-                diff_xyz = np.array([data["diff_x"], data["diff_y"], data["diff_z"]])
-                diff_xyz = diff_xyz.reshape((3, dim[0] * dim[1] * dim[2]))
-                ref_direction = np.array([1.01, 1.02, 1.03])
-                ref_sign = np.sign(np.dot(ref_direction, diff_xyz))
-                diff = np.multiply(np.linalg.norm(diff_xyz, axis=0), ref_sign)
-                data["diff"] = diff.reshape((dim[0], dim[1], dim[2]))
 
             elif len(all_dataset) == 2:
                 data = {"total": all_dataset[0], "diff": all_dataset[1]}
-                data_aug = {
-                    "total": all_dataset_aug.get(0),
-                    "diff": all_dataset_aug.get(1),
-                }
+                data_aug = {"total": all_dataset_aug[0], "diff": all_dataset_aug[1]}
+
             else:
                 data = {"total": all_dataset[0]}
-                data_aug = {"total": all_dataset_aug.get(0)}
-            return poscar, data, data_aug  # type: ignore[return-value]
+                data_aug = {"total": all_dataset_aug[0]}
+
+            return poscar, data, data_aug
 
     def write_file(
         self,
@@ -3951,9 +3941,44 @@ class VolumetricData(BaseVolumetricData):
             if count % 5 != 0:
                 file.write(" " + "".join(lines) + " \n")  # type:ignore[arg-type]
 
-            data: list | NDArray = self.data_aug.get(data_type, []) if self.data_aug is not None else []
-            if isinstance(data, Iterable):
-                file.write("".join(data))  # type:ignore[arg-type]
+        def write_aug(data_type: str) -> None:
+            if self.data_aug is None:
+                return
+
+            aug_data = self.data_aug.get(data_type, {})
+
+            if isinstance(aug_data, (list, tuple)):
+                for line in aug_data:
+                    file.write(f"{line}\n")
+                return
+
+            if not isinstance(aug_data, dict):
+                return
+
+            def write_values(values: NDArray) -> None:
+                lines = []
+                count = 0
+                for value in np.asarray(values).ravel():
+                    lines.append(format_fortran_float(float(value)))
+                    count += 1
+                    if count % 5 == 0:
+                        file.write(" " + "".join(lines) + "\n")
+                        lines = []
+                    else:
+                        lines.append(" ")
+                if count % 5 != 0:
+                    file.write(" " + "".join(lines) + " \n")
+
+            for key in sorted(aug_data):
+                values = np.asarray(aug_data[key])
+                if np.iscomplexobj(values):
+                    file.write(f"augmentation occupancies   {key} {values.size:3d}\n")
+                    write_values(values.real)
+                    file.write(f"augmentation occupancies (imaginary part)   {key} {values.size:3d}\n")
+                    write_values(values.imag)
+                else:
+                    file.write(f"augmentation occupancies   {key} {values.size:3d}\n")
+                    write_values(values)
 
         with zopen(file_name, mode="wt", encoding="utf-8") as file:
             poscar = Poscar(self.structure)
@@ -3977,13 +4002,18 @@ class VolumetricData(BaseVolumetricData):
             dim = self.dim
 
             write_spin("total")
+            write_aug("total")
             if self.is_spin_polarized:
                 if self.is_soc:
                     write_spin("diff_x")
+                    write_aug("diff_x")
                     write_spin("diff_y")
+                    write_aug("diff_y")
                     write_spin("diff_z")
+                    write_aug("diff_z")
                 else:
                     write_spin("diff")
+                    write_aug("diff")
 
 
 class Locpot(VolumetricData):
@@ -6529,17 +6559,21 @@ class Vaspwave(Vasprun):
         return np.transpose(component, (2, 1, 0))
 
     @staticmethod
+    def _build_spin_polarized_volumetric_data(data: np.ndarray) -> dict[str, np.ndarray]:
+        """Build collinear spin-polarized volumetric data from a two-component HDF5 grid."""
+        total = Vaspwave._transpose_volumetric_component(data[0])
+        diff = Vaspwave._transpose_volumetric_component(data[1])
+        return {"total": total, "diff": diff}
+
+    @staticmethod
     def _build_noncollinear_volumetric_data(data: np.ndarray) -> dict[str, np.ndarray]:
         """Build noncollinear volumetric data from a four-component HDF5 grid."""
         total = Vaspwave._transpose_volumetric_component(data[0])
         diff_x = Vaspwave._transpose_volumetric_component(data[1])
         diff_y = Vaspwave._transpose_volumetric_component(data[2])
         diff_z = Vaspwave._transpose_volumetric_component(data[3])
-        diff_components = [diff_x, diff_y, diff_z]
-        diff_xyz = np.array(diff_components).reshape((3, total.size))
-        ref_direction = np.array([1.01, 1.02, 1.03])
-        ref_sign = np.sign(np.dot(ref_direction, diff_xyz))
-        diff = np.multiply(np.linalg.norm(diff_xyz, axis=0), ref_sign).reshape(total.shape)
+        ref_sign = np.sign(diff_x * 1.01 + diff_y * 1.02 + diff_z * 1.03)
+        diff = np.sqrt(diff_x**2 + diff_y**2 + diff_z**2) * ref_sign
         return {"total": total, "diff_x": diff_x, "diff_y": diff_y, "diff_z": diff_z, "diff": diff}
 
     @staticmethod
@@ -6565,6 +6599,8 @@ class Vaspwave(Vasprun):
 
         if data.shape[0] == 1:
             return {"total": Vaspwave._transpose_volumetric_component(data[0])}
+        if data.shape[0] == 2:
+            return Vaspwave._build_spin_polarized_volumetric_data(data)
         if data.shape[0] == 4:
             return Vaspwave._build_noncollinear_volumetric_data(data)
 

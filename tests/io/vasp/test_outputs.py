@@ -46,6 +46,7 @@ from pymatgen.io.vasp.outputs import (
     Wavecar,
     Waveder,
     Xdatcar,
+    _parse_from_incar,
     get_band_structure_from_vasp_multiple_branches,
 )
 from pymatgen.io.wannier90 import Unk
@@ -60,6 +61,16 @@ TEST_DIR = f"{TEST_FILES_DIR}/io/vasp"
 
 
 class TestVasprun(MatSciTest):
+    def test_parse_from_incar_bare_filename(self):
+        incar_path = Path(self.tmp_path) / "INCAR"
+        incar_path.write_text("ENCUT = 520\n", encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(self.tmp_path)
+        try:
+            assert _parse_from_incar("vasprun.xml", "ENCUT") == 520
+        finally:
+            os.chdir(cwd)
+
     def test_vasprun_soc(self):
         # Test that SOC vaspruns are parsed appropriately, giving just Spin.Up tdos, idos and pdos
         vasp_run = Vasprun(f"{VASP_OUT_DIR}/vasprun.int_Te_SOC.xml.gz")
@@ -1648,10 +1659,25 @@ class TestChgcar(MatSciTest):
 
     def test_write(self):
         self.chgcar_spin.write_file(out_path := f"{self.tmp_path}/CHGCAR_pmg")
-        with open(out_path, encoding="utf-8") as file:
-            for idx, line in enumerate(file):
-                if idx in (22130, 44255):
-                    assert line == "augmentation occupancies   1  15\n"
+        chgcar_from_file = Chgcar.from_file(out_path)
+        assert_allclose(chgcar_from_file.data["total"], self.chgcar_spin.data["total"])
+        assert_allclose(chgcar_from_file.data["diff"], self.chgcar_spin.data["diff"])
+        assert_allclose(chgcar_from_file.data_aug["total"][1], self.chgcar_spin.data_aug["total"][1])
+        assert_allclose(chgcar_from_file.data_aug["diff"][1], self.chgcar_spin.data_aug["diff"][1])
+
+    def test_write_preserves_legacy_aug_lines(self):
+        legacy_aug = {
+            "total": [
+                "augmentation occupancies   1   3",
+                " 0.1000000000E+01 0.2000000000E+01 0.3000000000E+01 ",
+            ]
+        }
+        chgcar = Chgcar(self.chgcar_no_spin.structure, self.chgcar_no_spin.data, data_aug=legacy_aug)
+        out_path = f"{self.tmp_path}/CHGCAR_legacy_aug"
+        chgcar.write_file(out_path)
+        contents = Path(out_path).read_text(encoding="utf-8")
+        assert "augmentation occupancies   1   3" in contents
+        assert "0.1000000000E+01 0.2000000000E+01 0.3000000000E+01" in contents
 
     def test_soc_chgcar(self):
         assert set(self.chgcar_NiO_soc.data) == {
@@ -1678,6 +1704,12 @@ class TestChgcar(MatSciTest):
         self.chgcar_NiO_soc.write_file(out_path := f"{self.tmp_path}/CHGCAR_pmg_soc")
         chg_from_file = Chgcar.from_file(out_path)
         assert chg_from_file.is_soc
+        assert_allclose(chg_from_file.data["total"], self.chgcar_NiO_soc.data["total"])
+        assert_allclose(chg_from_file.data["diff"], self.chgcar_NiO_soc.data["diff"])
+        assert_allclose(chg_from_file.data_aug["total"][1], self.chgcar_NiO_soc.data_aug["total"][1])
+        assert_allclose(chg_from_file.data_aug["diff_x"][1], self.chgcar_NiO_soc.data_aug["diff_x"][1])
+        assert_allclose(chg_from_file.data_aug["diff_y"][1], self.chgcar_NiO_soc.data_aug["diff_y"][1])
+        assert_allclose(chg_from_file.data_aug["diff_z"][1], self.chgcar_NiO_soc.data_aug["diff_z"][1])
 
     @pytest.mark.skipif(h5py is None, reason="h5py required for HDF5 support.")
     def test_hdf5(self):
@@ -1762,6 +1794,32 @@ class TestElfcar(MatSciTest):
         # Test copy preserve type
         elfcar_copy = elfcar.copy()
         assert type(elfcar_copy) is type(elfcar)
+
+    def test_round_trip_write(self):
+        elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
+        out_path = f"{self.tmp_path}/ELFCAR_pmg"
+        elfcar.write_file(out_path)
+        reloaded = Elfcar.from_file(out_path)
+        assert_allclose(reloaded.data["total"], elfcar.data["total"])
+        assert_allclose(reloaded.data["diff"], elfcar.data["diff"])
+        assert reloaded.poscar.structure == elfcar.poscar.structure
+
+    def test_truncated_file(self):
+        elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
+        out_path = f"{self.tmp_path}/ELFCAR_malformed"
+        elfcar.write_file(out_path)
+        with open(out_path, encoding="utf-8") as file:
+            malformed = file.read().replace("   18   18   70", "   18   18", 1)
+        with open(out_path, "w", encoding="utf-8") as file:
+            file.write(malformed)
+        with pytest.raises(
+            ValueError,
+            match=(
+                r"invalid literal for int|could not convert string|cannot reshape array of size|"
+                r"Expected \d+ values, got \d+"
+            ),
+        ):
+            Elfcar.from_file(out_path)
 
     def test_alpha(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
@@ -3079,12 +3137,17 @@ class TestVaspwave(MatSciTest):
         with pytest.raises(ValueError, match="Expected /charge/charge to have 4 dimensions"):
             Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
 
-    def test_validate_volumetric_dataset_spin_polarized_not_implemented(self):
+    def test_validate_volumetric_dataset_spin_polarized_components(self):
         grid = np.array([2, 3, 4])
         data = np.zeros((2, 4, 3, 2))
+        data[0] = np.arange(24, dtype=float).reshape(4, 3, 2)
+        data[1] = 100.0 + np.arange(24, dtype=float).reshape(4, 3, 2)
 
-        with pytest.raises(NotImplementedError, match="Unsupported /charge/charge component count 2"):
-            Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
+        validated = Vaspwave._validate_volumetric_dataset(grid, data, "/charge/charge")
+
+        assert set(validated) == {"total", "diff"}
+        assert_allclose(validated["total"], np.transpose(data[0], (2, 1, 0)))
+        assert_allclose(validated["diff"], np.transpose(data[1], (2, 1, 0)))
 
     def test_validate_volumetric_dataset_soc_components(self):
         grid = np.array([2, 3, 4])
@@ -3347,6 +3410,40 @@ class TestVaspwave(MatSciTest):
             )
             assert_allclose(unk_h5_up.data[band], phase_up * unk_wavecar_up.data[band], atol=1e-6, rtol=1e-6)
             assert_allclose(unk_h5_dn.data[band], phase_dn * unk_wavecar_dn.data[band], atol=1e-6, rtol=1e-6)
+
+    @pytest.mark.skipif(
+        not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
+        reason="Bundled H2 std vaspwave fixtures are not available.",
+    )
+    def test_h2_ispin2_std_fixture_get_chgcar_matches_chgcar(self):
+        vaspwave = Vaspwave(self.ispin2_std_dir / "vaspwave.h5")
+        chgcar_h5 = vaspwave.get_chgcar()
+        chgcar = Chgcar.from_file(self.ispin2_std_dir / "CHGCAR")
+
+        assert chgcar_h5.structure == chgcar.structure
+        assert chgcar_h5.dim == chgcar.dim
+        assert chgcar_h5.is_spin_polarized
+        assert not chgcar_h5.is_soc
+        assert set(chgcar_h5.data) == {"total", "diff"}
+        assert_allclose(chgcar_h5.data["total"], chgcar.data["total"], atol=1e-6)
+        assert_allclose(chgcar_h5.data["diff"], chgcar.data["diff"], atol=1e-6)
+
+    @pytest.mark.skipif(
+        not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
+        reason="Bundled H2 std vaspwave fixtures are not available.",
+    )
+    def test_h2_ispin2_std_fixture_get_locpot_matches_locpot(self):
+        vaspwave = Vaspwave(self.ispin2_std_dir / "vaspwave.h5")
+        locpot_h5 = vaspwave.get_locpot()
+        locpot = Locpot.from_file(self.ispin2_std_dir / "LOCPOT")
+
+        assert locpot_h5.structure == locpot.structure
+        assert locpot_h5.dim == locpot.dim
+        assert locpot_h5.is_spin_polarized
+        assert not locpot_h5.is_soc
+        assert set(locpot_h5.data) == {"total", "diff"}
+        assert_allclose(locpot_h5.data["total"], locpot.data["total"], atol=8e-5)
+        assert_allclose(locpot_h5.data["diff"], locpot.data["diff"], atol=8e-5)
 
     @pytest.mark.skipif(
         not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
