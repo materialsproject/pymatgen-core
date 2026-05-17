@@ -75,15 +75,16 @@ class Lattice(MSONable):
         self.pbc = pbc
 
     def __repr__(self) -> str:
+        matrix = self._matrix.tolist()
         return "\n".join(
             [
                 "Lattice",
                 f"    abc : {' '.join(map(repr, self.lengths))}",
                 f" angles : {' '.join(map(repr, self.angles))}",
                 f" volume : {self.volume!r}",
-                f"      A : {' '.join(map(repr, self._matrix[0]))}",
-                f"      B : {' '.join(map(repr, self._matrix[1]))}",
-                f"      C : {' '.join(map(repr, self._matrix[2]))}",
+                f"      A : {' '.join(map(repr, matrix[0]))}",
+                f"      B : {' '.join(map(repr, matrix[1]))}",
+                f"      C : {' '.join(map(repr, matrix[2]))}",
                 f"    pbc : {' '.join(map(repr, self.pbc))}",
             ]
         )
