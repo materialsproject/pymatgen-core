@@ -29,6 +29,7 @@ The above are recommendations. The following are **UNBREAKABLE** rules:
 from __future__ import annotations
 
 import abc
+import functools
 import itertools
 import os
 import re
@@ -80,7 +81,11 @@ if TYPE_CHECKING:
 MODULE_DIR = os.path.dirname(__file__)
 
 
+@functools.cache
 def _load_yaml_config(fname):
+    # Cached so each YAML (and each PARENT chain) is parsed at most once across
+    # all VaspInputSet subclasses. The merge below never mutates the parent dict
+    # or its values, so sharing the cached object across callers is safe.
     fname = f"{MODULE_DIR}/{fname}"
     if not fname.endswith(".yaml"):
         fname += ".yaml"

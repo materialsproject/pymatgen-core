@@ -20,7 +20,7 @@ import numpy as np
 import orjson
 from lxml import etree as ET
 from monty.dev import requires
-from monty.io import reverse_readfile, zopen
+from monty.io import zopen
 from monty.json import MSONable, jsanitize
 from monty.os.path import zpath
 from monty.re import regrep
@@ -601,11 +601,8 @@ class Vasprun(MSONable):
                         # n_atoms is not the total number of atoms, only those for which force constants were calculated
                         # https://github.com/materialsproject/pymatgen/issues/3084
                         n_atoms = len(hessian) // 3
-                        hessian = np.array(hessian)  # type:ignore[assignment]
-                        self.force_constants = np.zeros((n_atoms, n_atoms, 3, 3), dtype="double")
-                        for ii in range(n_atoms):
-                            for jj in range(n_atoms):
-                                self.force_constants[ii, jj] = hessian[ii * 3 : (ii + 1) * 3, jj * 3 : (jj + 1) * 3]  # type: ignore[call-overload]
+                        hessian = np.asarray(hessian, dtype="double")
+                        self.force_constants = hessian.reshape(n_atoms, 3, n_atoms, 3).transpose(0, 2, 1, 3).copy()
                         self.normalmode_eigenvals = np.array(eigenvalues)
                         self.normalmode_eigenvecs = np.array([np.array(ev).reshape(n_atoms, 3) for ev in eigenvectors])
 
@@ -620,7 +617,7 @@ class Vasprun(MSONable):
                         elif tag == "energy":
                             d = {i.attrib["name"]: float(i.text) for i in elem.findall("i")}  # type:ignore[arg-type]
                             if "kinetic" in d:
-                                md_data[-1]["energy"] = {i.attrib["name"]: float(i.text) for i in elem.findall("i")}  # type:ignore[arg-type]
+                                md_data[-1]["energy"] = d
 
         except ET.XMLSyntaxError:
             if self.exception_on_bad_xml:
@@ -2119,6 +2116,15 @@ class Outcar:
         self.filename: str = str(filename)
         self.is_stopped: bool = False
 
+        # Slurp the OUTCAR once. Every `read_pattern` / `read_table_pattern`
+        # call in __init__ (20+) reuses this cache instead of re-opening and
+        # decompressing the file. Helpers (read_chemical_shielding etc.) that
+        # use micro_pyawk still hit disk; they are conditional on
+        # NMR/LEPSILON/LCALCPOL and out of scope here.
+        with zopen(self.filename, mode="rt", encoding="utf-8") as _f:
+            self._text: str = _f.read()  # type:ignore[assignment]
+        self._lines: list[str] = self._text.splitlines()
+
         # Assume a compilation with parallelization enabled.
         # Will be checked later.
         # If VASP is compiled in serial, the OUTCAR is written slightly differently.
@@ -2146,10 +2152,10 @@ class Outcar:
         e_wo_entrp_pattern = re.compile(r"energy  without entropy\s*=\s+([\d\-\.]+)")
         e0_pattern = re.compile(r"energy\(sigma->0\)\s*=\s+([\d\-\.]+)")
 
-        all_lines = []
-        for line in reverse_readfile(self.filename):
+        # Iterate the cached lines in reverse (replaces reverse_readfile +
+        # all_lines accumulation; same memory footprint).
+        for line in reversed(self._lines):
             clean = line.strip()
-            all_lines.append(clean)
             if clean.find("soft stop encountered!  aborting job") != -1:
                 self.is_stopped = True
             else:
@@ -2196,8 +2202,8 @@ class Outcar:
         read_mag_x = False
         read_mag_y = False  # for SOC calculations only
         read_mag_z = False
-        all_lines.reverse()
-        for clean in all_lines:
+        for line in self._lines:
+            clean = line.strip()
             if read_charge or read_mag_x or read_mag_y or read_mag_z:
                 if clean.startswith("# of ion"):
                     header = re.split(r"\s{2,}", clean.strip())
@@ -2252,21 +2258,20 @@ class Outcar:
         else:
             mag = mag_x  # type:ignore[assignment]
 
-        # Data from beginning of OUTCAR
+        # Data from beginning of OUTCAR (reuse cached lines).
         run_stats["cores"] = None
-        with zopen(filename, mode="rt", encoding="utf-8") as file:
-            for line in file:  # type:ignore[assignment]
-                if "serial" in line:
-                    # Activate serial parallelization
-                    run_stats["cores"] = 1
-                    serial_compilation = True
-                    break
-                if "running" in line:
-                    if line.split()[1] == "on":
-                        run_stats["cores"] = int(line.split()[2])
-                    else:
-                        run_stats["cores"] = int(line.split()[1])
-                    break
+        for line in self._lines:
+            if "serial" in line:
+                # Activate serial parallelization
+                run_stats["cores"] = 1
+                serial_compilation = True
+                break
+            if "running" in line:
+                if line.split()[1] == "on":
+                    run_stats["cores"] = int(line.split()[2])
+                else:
+                    run_stats["cores"] = int(line.split()[1])
+                break
 
         self.run_stats = run_stats
         self.magnetization = tuple(mag)
@@ -2537,7 +2542,25 @@ class Outcar:
             results from regex and postprocess. Note that the values
             are list[list], because you can grep multiple items on one line.
         """
-        matches = regrep(
+        # Use the cached OUTCAR text (populated in __init__) to avoid
+        # re-opening the file on every call; fall back to monty.regrep
+        # only if the cache hasn't been set (e.g. when subclasses skip
+        # the parent __init__).
+        if getattr(self, "_lines", None) is not None:
+            compiled = {k: re.compile(p) for k, p in patterns.items()}
+            matches: dict[str, list] = {k: [] for k in patterns}
+            line_iter = reversed(self._lines) if reverse else iter(self._lines)
+            for line in line_iter:
+                for k, p in compiled.items():
+                    if m := p.search(line):
+                        matches[k].append([postprocess(g) for g in m.groups()])
+                if terminate_on_match and all(matches[k] for k in patterns):
+                    break
+            for key in patterns:
+                self.data[key] = matches[key]
+            return
+
+        raw_matches = regrep(
             filename=self.filename,
             patterns=patterns,
             reverse=reverse,
@@ -2545,7 +2568,7 @@ class Outcar:
             postprocess=postprocess,
         )
         for key in patterns:
-            self.data[key] = [i[0] for i in matches.get(key, [])]
+            self.data[key] = [i[0] for i in raw_matches.get(key, [])]
 
     def read_table_pattern(
         self,
@@ -2596,8 +2619,12 @@ class Outcar:
         if last_one_only and first_one_only:
             raise ValueError("last_one_only and first_one_only options are incompatible")
 
-        with zopen(self.filename, mode="rt", encoding="utf-8") as file:
-            text: str = file.read()  # type:ignore[assignment]
+        # Reuse the cached OUTCAR text if available.
+        if (cached := getattr(self, "_text", None)) is not None:
+            text: str = cached
+        else:
+            with zopen(self.filename, mode="rt", encoding="utf-8") as file:
+                text = file.read()  # type:ignore[assignment]
         table_pattern_text = header_pattern + r"\s*^(?P<table_body>(?:\s+" + row_pattern + r")+)\s+" + footer_pattern
         table_pattern = re.compile(table_pattern_text, re.MULTILINE | re.DOTALL)
         rp = re.compile(row_pattern)
