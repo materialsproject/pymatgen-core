@@ -1042,7 +1042,7 @@ class SlabGenerator:
             else:
                 index_range = sorted(
                     range(-max_normal_search, max_normal_search + 1),
-                    key=lambda x: -abs(x),
+                    key=abs,
                 )
                 candidates = []
                 for uvw in itertools.product(index_range, index_range, index_range):
@@ -1052,8 +1052,10 @@ class SlabGenerator:
                     osdm = np.linalg.norm(vec)
                     cosine = abs(np.dot(vec, normal) / osdm)
                     candidates.append((uvw, cosine, osdm))
-                    # Stop searching if cosine equals 1 or -1
-                    if math.isclose(abs(cosine), 1, abs_tol=1e-8):
+                    # When no threshold is set, stop as soon as a perfect match is found.
+                    # With ascending index order the first cosine=1 is also the smallest such vector.
+                    # When normal_search_tol is set we must collect all candidates first.
+                    if normal_search_tol is None and math.isclose(abs(cosine), 1, abs_tol=1e-8):
                         break
                 if normal_search_tol is not None:
                     valid = [c for c in candidates if math.sqrt(max(0.0, 1.0 - c[1] ** 2)) <= normal_search_tol]
