@@ -6,6 +6,49 @@ nav_order: 4
 
 # Changelog
 
+## v2026.5.17
+
+**Cold-import latency.** Combined import-path work brings `from pymatgen.core import Structure` from ~244 ms to ~98 ms (−60%) on the reference benchmark machine. 
+- PR #56 `Outcar.__init__`: cache OUTCAR text once and route every `read_pattern` / `read_table_pattern` call through the in-memory cache (~1.5–1.8× faster Outcar parsing on real files); vectorize `Vasprun.force_constants` reshape; `@functools.cache` on `_load_yaml_config` in `pymatgen.io.vasp.sets` (by @shyuep)
+- PR #58 New `pymatgen.core.constants` module with embedded CODATA literals; 13 consumer modules migrated off `scipy.constants` (by @shyuep)
+- PR #49 `Composition` / `Element`: cache idempotent properties via `@cached_property` / `@cache` (by @shyuep)
+- PR #48 `VolumetricData`: optimize block parsing of CHGCAR-like files (by @hheei)
+- PR #27 Lazy-load POTCAR summary stats in `pymatgen.io.vasp.inputs` (by @lan496)
+- Refactor: 3D-specialize neighbor-finding kernels in `pymatgen/optimization/neighbors.pyx`
+- PR #47 Fix `vec_to_surface` (by @susumu-fujii)
+- PR #42 Fix Vaspwave structure parsing for LOCPOT-only files (by @hheei)
+- PR #38 Fix `chargemol_caller` for VASP 6.5.1 (by @ThomasWarford)
+- PR #36 `border_hyperplanes`: use float values (by @kavanase)
+- PR #28 Updated RPA calculation parsing when `ALGO=CHI` (by @wuz75)
+- PR #19 `DftSet`: avoid `PendingDeprecationWarning` from YAML `unsafe` loader type (by @cogsworth37)
+- PR #18 `PeriodicSite` attribute setting routes through properties so changes persist through serialization (by @cogsworth37)
+- PR #17 Fix `AttributeError` in `VaspInput.as_dict()`; add `potcar_spec` handling test (by @cogsworth37)
+- PR #13 Fix reference to `cder_imag` in `pymatgen.io.vasp.outputs` (by @hisvvhtek)
+- PR #21 Add `_filter_kwargs` to `IStructure` for better kwargs handling (by @cogsworth37)
+- PR #53 Docstring and numerical accuracy fixes for `elasticity.elastic` (by @Elias-P-M)
+- Require `phonopy>=4.0.0`; restore v3 `primitive_matrix` semantics by passing `"P"` at every `Phonopy(...)` call site in `pymatgen.io.phonopy`
+
+**Features**
+
+- PR #35 Add `Vaspwave` support for `vaspwave.h5` outputs (by @hheei)
+- PR #34 `Outcar.read_vacuum_potentials` (by @ThomasWarford)
+- PR #39 `IStructure.get_primitive_structure`: refactor inner distance calculations to use `scipy.spatial.cKDTree`; validate tolerance (by @kavanase)
+- PR #32 `Structure.relax`: accept `asecellfilter_kwargs` for more controlled cell relaxation (by @deepanshuaggarwal51)
+- PR #29 `BztPlotter.plot_bands` / `plot_dos`: expose additional control arguments (by @deepanshuaggarwal51)
+- PR #43 Cover `HighSymmKpath` and `util.plotting` helpers; fix latent bugs (by @shyuep)
+- PR #41 Restore dropped `structure_analyzer` and `CohpPlotter` tests (by @shyuep)
+
+**Build, CI, packaging**
+
+- PR #33 Split NumPy version constraints at Python 3.13 (by @hheei)
+- PR #40 Bump GitHub Actions to Node 24 majors (by @shyuep)
+- CI: replace micromamba with `setup-python` on Windows (workaround for `mamba-org/setup-micromamba#306` regression since 2026-05-14)
+- `pyproject.toml`: cleanup; drop dead `ruff` ignores
+- Refactor: replace `os.path` with `pathlib` and `contextlib.chdir` across the package
+- Cleanup: retire past-due deprecations; narrow bare `except:` clauses
+- `CLAUDE.md`: clarify Cython rebuild semantics
+- Dependabot: bump `lxml` (PR #31), `urllib3` (PR #46), and `nokogiri` (PR #45)
+
 ## 2026.4.16
 
 - PR #10 Updates to LAMMPS input set generators for compatibility with new atomate2 workflows (by @vir-k01)
