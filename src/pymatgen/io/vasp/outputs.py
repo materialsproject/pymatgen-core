@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import orjson
-from lxml import etree as ET
+from lxml import etree
 from monty.dev import requires
 from monty.io import zopen
 from monty.json import MSONable, jsanitize
@@ -471,7 +471,7 @@ class Vasprun(MSONable):
                 "structure",
                 "varray",
             ]
-            for event, elem in ET.iterparse(stream, events=["start", "end"], tag=_TAGS):
+            for event, elem in etree.iterparse(stream, events=["start", "end"], tag=_TAGS):
                 tag = elem.tag
                 if event == "start":
                     # The start event tells us when we have entered blocks
@@ -617,7 +617,7 @@ class Vasprun(MSONable):
                             if "kinetic" in d:
                                 md_data[-1]["energy"] = d
 
-        except ET.XMLSyntaxError:
+        except etree.XMLSyntaxError:
             if self.exception_on_bad_xml:
                 raise
             warnings.warn(
@@ -1501,7 +1501,7 @@ class Vasprun(MSONable):
         dct["output"] = vout
         return jsanitize(dct, strict=True)
 
-    def _parse_params(self, elem: ET.Element) -> Incar:
+    def _parse_params(self, elem: etree.Element) -> Incar:
         """Parse INCAR parameters and more."""
         params: dict[str, Any] = {}
         for c in elem:
@@ -1535,7 +1535,7 @@ class Vasprun(MSONable):
         return Incar(params)
 
     @staticmethod
-    def _parse_atominfo(elem: ET.Element) -> tuple[list[str], list[str]]:
+    def _parse_atominfo(elem: etree.Element) -> tuple[list[str], list[str]]:
         """Parse atom symbols and POTCAR symbols."""
 
         def parse_atomic_symbol(symbol: str) -> str:
@@ -1565,7 +1565,7 @@ class Vasprun(MSONable):
 
     @staticmethod
     def _parse_kpoints(
-        elem: ET.Element,
+        elem: etree.Element,
     ) -> tuple[Kpoints, list[tuple[float, float, float]], list[float]]:
         """Parse Kpoints."""
         gen = elem.find("generation")
@@ -1609,7 +1609,7 @@ class Vasprun(MSONable):
             )
         return kpoint, actual_kpoints, weights  # type:ignore[return-value]
 
-    def _parse_structure(self, elem: ET.Element) -> Structure:
+    def _parse_structure(self, elem: etree.Element) -> Structure:
         """Parse Structure with lattice, positions and selective dynamics info."""
         lattice = _parse_vasp_array(elem.find("crystal").find("varray"))  # type: ignore[union-attr]
         pos = _parse_vasp_array(elem.find("varray"))
@@ -1621,7 +1621,7 @@ class Vasprun(MSONable):
         return struct
 
     @staticmethod
-    def _parse_diel(elem: ET.Element) -> tuple[list, list, list]:
+    def _parse_diel(elem: etree.Element) -> tuple[list, list, list]:
         """Parse dielectric properties."""
         real_elem = elem.find("real")
         imag_elem = elem.find("imag")
@@ -1638,7 +1638,7 @@ class Vasprun(MSONable):
         return [], [], []
 
     @staticmethod
-    def _parse_optical_transition(elem: ET.Element) -> tuple[NDArray, NDArray]:
+    def _parse_optical_transition(elem: etree.Element) -> tuple[NDArray, NDArray]:
         """Parse optical transitions."""
         for va in elem.findall("varray"):
             if va.attrib.get("name") == "opticaltransitions":
@@ -1650,7 +1650,7 @@ class Vasprun(MSONable):
 
         raise RuntimeError("Failed to parse optical transitions.")
 
-    def _parse_chemical_shielding(self, elem: ET.Element) -> list[dict[str, Any]]:
+    def _parse_chemical_shielding(self, elem: etree.Element) -> list[dict[str, Any]]:
         """Parse NMR chemical shielding."""
         istep: dict[str, Any] = {}
         # not all calculations have a structure
@@ -1684,7 +1684,7 @@ class Vasprun(MSONable):
         elem.clear()
         return calculation
 
-    def _parse_ionic_step(self, elem: ET.Element) -> dict[str, float]:
+    def _parse_ionic_step(self, elem: etree.Element) -> dict[str, float]:
         """Parse an ionic step."""
         try:
             ion_step: dict[str, Any] = {
@@ -1717,7 +1717,7 @@ class Vasprun(MSONable):
         return ion_step
 
     @staticmethod
-    def _parse_dos(elem: ET.Element) -> tuple[Dos, Dos, list[dict]]:
+    def _parse_dos(elem: etree.Element) -> tuple[Dos, Dos, list[dict]]:
         """Parse density of states (DOS)."""
         efermi = float(elem.find("i").text)  # type: ignore[union-attr, arg-type]
         energies: NDArray | None = None
@@ -1764,7 +1764,7 @@ class Vasprun(MSONable):
         )
 
     @staticmethod
-    def _parse_eigen(elem: ET.Element) -> dict[Spin, NDArray]:
+    def _parse_eigen(elem: etree.Element) -> dict[Spin, NDArray]:
         """Parse eigenvalues."""
         eigenvalues: dict[Spin, NDArray] = defaultdict(list)  # type:ignore[arg-type]
         for s in elem.find("array").find("set").findall("set"):  # type: ignore[union-attr]
@@ -1777,7 +1777,7 @@ class Vasprun(MSONable):
 
     @staticmethod
     def _parse_projected_eigen(
-        elem: ET.Element,
+        elem: etree.Element,
     ) -> tuple[dict[Spin, NDArray], NDArray | None]:
         """Parse projected eigenvalues."""
         root = elem.find("array").find("set")  # type: ignore[union-attr]
@@ -1808,7 +1808,7 @@ class Vasprun(MSONable):
         return proj_eigen, proj_mag
 
     @staticmethod
-    def _parse_dynmat(elem: ET.Element) -> tuple[list, list, list]:
+    def _parse_dynmat(elem: etree.Element) -> tuple[list, list, list]:
         """Parse dynamical matrix."""
         hessian: list[list[float]] = []
         eigenvalues: list[float] = []
@@ -1874,7 +1874,7 @@ class BSVasprun(Vasprun):
             in_kpoints_opt = False
             self.eigenvalues = self.projected_eigenvalues = None
             self.kpoints_opt_props = None
-            for event, elem in ET.iterparse(file, events=["start", "end"]):
+            for event, elem in etree.iterparse(file, events=["start", "end"]):
                 tag = elem.tag
                 if event == "start" and not in_kpoints_opt:
                     # The start event tells us when we have entered blocks
