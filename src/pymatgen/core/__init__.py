@@ -7,8 +7,6 @@ import warnings
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
-from ruamel.yaml import YAML
-
 from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.operations import SymmOp
@@ -45,7 +43,11 @@ def _load_pmg_settings() -> dict[str, Any]:
     # PMG_CONFIG_FILE takes precedence over default settings location
     settings_file = os.getenv("PMG_CONFIG_FILE") or SETTINGS_FILE
 
-    # Load .pmgrc.yaml file
+    # Load .pmgrc.yaml file. ruamel.yaml is imported lazily because it is a
+    # non-trivial dependency (~15-20 ms) and most users either have no YAML
+    # config or read settings purely from environment variables.
+    from ruamel.yaml import YAML
+
     yaml = YAML()
     for file_path in (settings_file, OLD_SETTINGS_FILE):
         try:
@@ -78,5 +80,26 @@ def _load_pmg_settings() -> dict[str, Any]:
     return settings
 
 
-SETTINGS = _load_pmg_settings()
-locals().update(SETTINGS)
+# SETTINGS is built lazily on first access via PEP 562 module __getattr__.
+# This avoids reading ~/.pmgrc.yaml (and importing ruamel.yaml) at
+# `from pymatgen.core import ...` time. The cache is populated on first
+# attribute access, so `pymatgen.core.SETTINGS`, `pymatgen.core.PMG_*`, and
+# `from pymatgen.core import SETTINGS` / `import PMG_VASP_PSP_DIR` all work
+# unchanged from a caller's perspective.
+_SETTINGS_CACHE: dict[str, Any] | None = None
+
+
+def _get_settings() -> dict[str, Any]:
+    global _SETTINGS_CACHE  # noqa: PLW0603
+    if _SETTINGS_CACHE is None:
+        _SETTINGS_CACHE = _load_pmg_settings()
+    return _SETTINGS_CACHE
+
+
+def __getattr__(name: str) -> Any:
+    if name == "SETTINGS":
+        return _get_settings()
+    settings = _get_settings()
+    if name in settings:
+        return settings[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -30,11 +30,12 @@ from monty.io import zopen
 from monty.json import MSONable
 from numpy.linalg import norm
 from ruamel.yaml import YAML
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.linalg import expm, polar
-from scipy.spatial import cKDTree, distance
 from tabulate import tabulate
 
+# scipy.cluster.hierarchy, scipy.linalg, and scipy.spatial are imported
+# lazily inside the few methods that use them (merge_sites,
+# get_primitive_structure, rotate_sites, interpolate). Together they account
+# for ~85 ms of cold `from pymatgen.core import Structure` import time.
 from pymatgen.core.bonds import CovalentBond, get_bond_length
 from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice, get_points_in_spheres
@@ -2503,6 +2504,8 @@ class IStructure(SiteCollection, MSONable):
         structs = []
 
         if interpolate_lattices:
+            from scipy.linalg import polar
+
             # Interpolate lattice matrices using polar decomposition
             # u is a unitary rotation, p is stretch
             _u, p = polar(np.dot(end_structure.lattice.matrix.T, np.linalg.inv(self.lattice.matrix.T)))
@@ -2623,6 +2626,8 @@ class IStructure(SiteCollection, MSONable):
             Get the fractional coords in fc1 that have coordinates
             within tolerance to some coordinate in fc2.
             """
+            from scipy.spatial import cKDTree
+
             tol = np.asarray(tol, dtype=float)
             scale = 1.0 / tol
             boxsize = scale
@@ -4786,6 +4791,8 @@ class Structure(IStructure, collections.abc.MutableSequence):
         anchor = np.array(anchor)
         axis = np.array(axis)
 
+        from scipy.linalg import expm
+
         theta %= 2 * np.pi
 
         rm = expm(np.cross(np.eye(3), axis / norm(axis)) * theta)
@@ -4916,6 +4923,9 @@ class Structure(IStructure, collections.abc.MutableSequence):
 
         if dist_mat.shape == (1, 1):
             return self
+
+        from scipy.cluster.hierarchy import fcluster, linkage
+        from scipy.spatial import distance
 
         clusters = fcluster(linkage(distance.squareform((dist_mat + dist_mat.T) / 2)), tol, "distance")
 
@@ -5431,6 +5441,8 @@ class Molecule(IMolecule, collections.abc.MutableSequence):
 
         anchor = np.array(anchor)
         axis = np.array(axis)
+
+        from scipy.linalg import expm
 
         theta %= 2 * np.pi
 
