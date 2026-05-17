@@ -19,7 +19,8 @@ from numbers import Number
 from typing import TYPE_CHECKING, cast, overload
 
 import numpy as np
-import scipy.constants as const
+
+from pymatgen.core import constants as const
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

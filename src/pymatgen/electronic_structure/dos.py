@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
 from monty.json import MSONable
-from scipy.constants import value as _constant
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import hilbert
 from scipy.special import expit
 from scipy.stats import wasserstein_distance
 
 from pymatgen.core import Structure, get_el_sp
+from pymatgen.core.constants import value as _constant
 from pymatgen.core.spectrum import Spectrum
 from pymatgen.electronic_structure.core import Orbital, OrbitalType, Spin
 from pymatgen.util.coord import get_linear_interpolated_value

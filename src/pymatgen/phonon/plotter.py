@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.constants as const
 from matplotlib import colors
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 from monty.json import jsanitize
 
+from pymatgen.core import constants as const
 from pymatgen.electronic_structure.plotter import BSDOSPlotter, plot_brillouin_zone
 from pymatgen.phonon.bandstructure import PhononBandStructureSymmLine
 from pymatgen.phonon.gruneisen import GruneisenPhononBandStructureSymmLine

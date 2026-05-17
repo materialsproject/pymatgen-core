@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, overload
 
 import numpy as np
-import scipy.constants
 import scipy.special
 from monty.json import MSONable
 from tqdm import tqdm
 
+from pymatgen.core import constants as _const
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.vasp.outputs import Vasprun, Waveder
 
@@ -27,11 +27,11 @@ __copyright__ = "Copyright 2022, The Materials Project"
 __maintainer__ = "Jimmy-Xuan Shen"
 __email__ = "jmmshn@gmail.com"
 
-au2ang: float = scipy.constants.physical_constants["atomic unit of length"][0] / 1e-10
-ryd2ev: float = scipy.constants.physical_constants["Rydberg constant times hc in eV"][0]
+au2ang: float = _const.physical_constants["atomic unit of length"][0] / 1e-10
+ryd2ev: float = _const.physical_constants["Rydberg constant times hc in eV"][0]
 edeps: float = 4 * np.pi * 2 * ryd2ev * au2ang  # from constant.inc in VASP
 
-KB: float = scipy.constants.physical_constants["Boltzmann constant in eV/K"][0]
+KB: float = _const.physical_constants["Boltzmann constant in eV/K"][0]
 
 
 @dataclass

@@ -25,7 +25,6 @@ from zipfile import ZipFile
 
 import numpy as np
 import orjson
-import scipy.constants as const
 from monty.dev import deprecated
 from monty.io import zopen
 from monty.json import MontyDecoder, MSONable
@@ -35,6 +34,7 @@ from monty.serialization import dumpfn, loadfn
 from tabulate import tabulate
 
 from pymatgen.core import SETTINGS, Element, Lattice, Structure, get_el_sp
+from pymatgen.core import constants as const
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.util.io_utils import clean_lines
 from pymatgen.util.string import str_delimited

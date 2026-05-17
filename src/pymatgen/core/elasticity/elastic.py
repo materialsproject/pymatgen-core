@@ -13,14 +13,14 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import sympy as sp
-from scipy.constants import N_A as N_a
-from scipy.constants import Boltzmann as kb
-from scipy.constants import R as R_gas
-from scipy.constants import hbar
 from scipy.integrate import quad
 from scipy.optimize import root
 from scipy.special import factorial
 
+from pymatgen.core.constants import N_A as N_a
+from pymatgen.core.constants import Boltzmann as kb
+from pymatgen.core.constants import R as R_gas
+from pymatgen.core.constants import hbar
 from pymatgen.core.tensors import DEFAULT_QUAD, SquareTensor, Tensor, TensorCollection, get_uvec
 from pymatgen.core.units import Unit
 from pymatgen.util.due import Doi, due

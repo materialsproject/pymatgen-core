@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
-import scipy.constants as const
 from monty.functools import lazy_property
 from monty.json import MSONable
 from scipy.ndimage import gaussian_filter1d
 from scipy.stats import wasserstein_distance
 
+from pymatgen.core import constants as const
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord import get_linear_interpolated_value
 

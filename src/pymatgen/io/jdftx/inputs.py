@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import scipy.constants as const
 from monty.json import MSONable
 
 from pymatgen.core import Lattice, Structure
+from pymatgen.core import constants as const
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.units import bohr_to_ang
 from pymatgen.io.jdftx.generic_tags import AbstractTag, BoolTagContainer, DumpTagContainer, MultiformatTag, TagContainer

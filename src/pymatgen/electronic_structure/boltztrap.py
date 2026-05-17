@@ -29,10 +29,10 @@ import numpy as np
 from monty.dev import requires
 from monty.json import MSONable, jsanitize
 from monty.os import cd
-from scipy import constants
 from scipy.optimize import fsolve
 from scipy.spatial import distance
 
+from pymatgen.core import constants
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.units import Energy, Length
 from pymatgen.electronic_structure.bandstructure import BandStructureSymmLine, Kpoint

@@ -7,11 +7,11 @@ import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
-import scipy.constants as cst
 from monty.io import zopen
 from scipy.stats import norm
 
 from pymatgen.core import Composition, Element, Molecule
+from pymatgen.core import constants as cst
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.units import Ha_to_eV
 from pymatgen.electronic_structure.core import Spin
