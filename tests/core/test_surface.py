@@ -486,6 +486,29 @@ class TestSlabGenerator(MatSciTest):
         gen = SlabGenerator(sc, (1, 1, 1), 10, 10, max_normal_search=1)
         assert gen.oriented_unit_cell.lattice.angles[1] == approx(90)
 
+    def test_normal_search_tol(self):
+        fcc = Structure.from_spacegroup("Fm-3m", Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+
+        # Cubic (1,0,0): c is naturally perpendicular; tight tol should succeed.
+        gen = SlabGenerator(fcc, (1, 0, 0), 10, 10, max_normal_search=1, normal_search_tol=1e-6)
+        slab = gen.get_slab()
+        assert slab.lattice.alpha == approx(90)
+        assert slab.lattice.beta == approx(90)
+
+        # Permissive tol (sin <= 0.5, i.e. angle <= 30 deg) should also pass for (1,1,1).
+        gen = SlabGenerator(fcc, (1, 1, 1), 10, 10, max_normal_search=2, normal_search_tol=0.5)
+        slab = gen.get_slab()
+        assert slab.lattice.alpha == approx(90)
+        assert slab.lattice.beta == approx(90)
+
+        # normal_search_tol requires max_normal_search.
+        with pytest.raises(ValueError, match="normal_search_tol requires max_normal_search"):
+            SlabGenerator(fcc, (1, 0, 0), 10, 10, normal_search_tol=0.1)
+
+        # (2,1,1) normal has no exact match within max_normal_search=1; tol=0 should raise.
+        with pytest.raises(ValueError, match="No lattice vector found"):
+            SlabGenerator(fcc, (2, 1, 1), 10, 10, max_normal_search=1, normal_search_tol=0.0)
+
     def test_get_slabs(self):
         gen = SlabGenerator(self.get_structure("CsCl"), [0, 0, 1], 10, 10)
 

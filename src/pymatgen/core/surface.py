@@ -918,6 +918,7 @@ class SlabGenerator:
         in_unit_planes: bool = False,
         primitive: bool = True,
         max_normal_search: int | None = None,
+        normal_search_tol: float | None = None,
         reorient_lattice: bool = True,
     ) -> None:
         """Calculate the slab scale factor and uses it to generate an
@@ -962,6 +963,13 @@ class SlabGenerator:
                 cell for simulation. Normality is not guaranteed, but the oriented
                 cell will have the c vector as normal as possible to the surface.
                 The max absolute Miller index is usually sufficient.
+            normal_search_tol (float | None): If set, only candidates from the
+                max_normal_search iteration whose normalized cross product magnitude
+                with the surface normal is <= this value are accepted. Equivalently,
+                sin(angle between c and surface normal) must be <= normal_search_tol.
+                Among valid candidates the one yielding the fewest atoms (smallest
+                oriented unit cell volume) is chosen. Requires max_normal_search to
+                be set.
             reorient_lattice (bool): reorient the lattice such that
                 the c direction is parallel to the third lattice vector
         """
@@ -1047,9 +1055,19 @@ class SlabGenerator:
                     # Stop searching if cosine equals 1 or -1
                     if math.isclose(abs(cosine), 1, abs_tol=1e-8):
                         break
-                # We want the indices with the maximum absolute cosine,
-                # but smallest possible length.
-                uvw, cosine, osdm = max(candidates, key=lambda x: (x[1], -x[2]))
+                if normal_search_tol is not None:
+                    valid = [c for c in candidates if math.sqrt(max(0.0, 1.0 - c[1] ** 2)) <= normal_search_tol]
+                    if not valid:
+                        raise ValueError(
+                            f"No lattice vector found with cross-product magnitude <= {normal_search_tol}. "
+                            "Try increasing max_normal_search or relaxing normal_search_tol."
+                        )
+                    # Among candidates meeting the threshold, prefer fewest atoms (smallest cell volume).
+                    uvw, cosine, osdm = min(valid, key=lambda x: abs(np.linalg.det([*slab_scale_factor, x[0]])))
+                else:
+                    # We want the indices with the maximum absolute cosine,
+                    # but smallest possible length.
+                    uvw, cosine, osdm = max(candidates, key=lambda x: (x[1], -x[2]))
                 slab_scale_factor.append(uvw)
 
             slab_scale_factor = np.array(slab_scale_factor)  # type: ignore[assignment]
@@ -1081,7 +1099,10 @@ class SlabGenerator:
         # Calculate the most reduced structure as OUC to minimize calculations
         self.oriented_unit_cell = Structure.from_sites(single, to_unit_cell=True)
 
+        if normal_search_tol is not None and max_normal_search is None:
+            raise ValueError("normal_search_tol requires max_normal_search to be set.")
         self.max_normal_search = max_normal_search
+        self.normal_search_tol = normal_search_tol
         self.parent = initial_structure
         self.lll_reduce = lll_reduce
         self.center_slab = center_slab
@@ -1607,6 +1628,7 @@ def generate_all_slabs(
     center_slab: bool = False,
     primitive: bool = True,
     max_normal_search: int | None = None,
+    normal_search_tol: float | None = None,
     symmetrize: bool = False,
     repair: bool = False,
     include_reconstructions: bool = False,
@@ -1657,6 +1679,10 @@ def generate_all_slabs(
             cell for simulation. Normality is not guaranteed, but the oriented
             cell will have the c vector as normal as possible to the surface.
             The max absolute Miller index is usually sufficient.
+        normal_search_tol (float | None): Passed to SlabGenerator. If set,
+            only c-vector candidates with sin(angle to surface normal) <=
+            this value are accepted, and the one yielding fewest atoms is
+            chosen. Requires max_normal_search to be set.
         symmetrize (bool): Whether to ensure the surfaces of the
             slabs are equivalent.
         repair (bool): Whether to repair terminations with broken bonds
@@ -1684,6 +1710,7 @@ def generate_all_slabs(
             center_slab=center_slab,
             primitive=primitive,
             max_normal_search=max_normal_search,
+            normal_search_tol=normal_search_tol,
             in_unit_planes=in_unit_planes,
         )
         slabs = gen.get_slabs(
