@@ -242,24 +242,18 @@ class TestBSDOSPlotter:
 
         with open(f"{TEST_FILES_DIR}/electronic_structure/plotter/SrBa2Sn2O7.json", "rb") as file:
             band_struct_dict = orjson.loads(file.read())
-        # generate random projections
-        data_structure = [[[[0 for _ in range(12)] for _ in range(9)] for _ in range(70)] for _ in range(90)]
-        band_struct_dict["projections"]["1"] = data_structure
-        dct = band_struct_dict["projections"]["1"]
+        # Generate random sparse projections: for each (i, j, k) cell, populate two
+        # randomly-chosen orbital slots out of the first 7. Vectorised equivalent of
+        # the original 4-deep Python loop.
         rng = np.random.default_rng()
-        for ii in range(len(dct)):
-            for jj in range(len(dct[ii])):
-                for kk in range(len(dct[ii][jj])):
-                    for ll in range(len(dct[ii][jj][kk])):
-                        dct[ii][jj][kk][ll] = 0
-                        # d[i][j][k][m] = rng.random()
-                    # generate random number for two atoms
-                    a = rng.integers(0, 7)
-                    b = rng.integers(0, 7)
-                    # c = rng.integers(0, 7)
-                    dct[ii][jj][kk][a] = rng.random()
-                    dct[ii][jj][kk][b] = rng.random()
-                    # d[i][j][k][c] = rng.random()
+        n_i, n_j, n_k, n_orb = 90, 70, 9, 12
+        projections = np.zeros((n_i, n_j, n_k, n_orb))
+        flat = projections.reshape(-1, n_orb)
+        n_cells = flat.shape[0]
+        cell_idx = np.arange(n_cells)
+        flat[cell_idx, rng.integers(0, 7, size=n_cells)] = rng.random(n_cells)
+        flat[cell_idx, rng.integers(0, 7, size=n_cells)] = rng.random(n_cells)
+        band_struct_dict["projections"]["1"] = projections.tolist()
         band_struct = BandStructureSymmLine.from_dict(band_struct_dict)
         ax = plotter.get_plot(band_struct)
         assert isinstance(ax, plt.Axes)

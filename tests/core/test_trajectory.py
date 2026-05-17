@@ -18,31 +18,31 @@ TEST_DIR = f"{TEST_FILES_DIR}/core/trajectory"
 
 
 class TestTrajectory(MatSciTest):
-    def setup_method(self):
-        xdatcar = Xdatcar(f"{VASP_OUT_DIR}/XDATCAR_traj")
-        self.traj = Trajectory.from_file(f"{VASP_OUT_DIR}/XDATCAR_traj")
-        self.structures = xdatcar.structures
+    @classmethod
+    def setup_class(cls):
+        cls._xdatcar_structures = Xdatcar(f"{VASP_OUT_DIR}/XDATCAR_traj").structures
 
         out = QCOutput(f"{TEST_FILES_DIR}/io/qchem/new_qchem_files/ts.out")
         last_mol = out.data["molecule_from_last_geometry"]
-        species = last_mol.species
-        coords = out.data["geometries"]
+        cls._species = last_mol.species
+        cls._coords = out.data["geometries"]
+        cls._charge = int(last_mol.charge)
+        cls._spin = int(last_mol.spin_multiplicity)
+        cls._molecules = [
+            Molecule(cls._species, coord, charge=cls._charge, spin_multiplicity=cls._spin) for coord in cls._coords
+        ]
 
-        self.molecules = []
-        for coord in coords:
-            mol = Molecule(
-                species,
-                coord,
-                charge=int(last_mol.charge),
-                spin_multiplicity=int(last_mol.spin_multiplicity),
-            )
-            self.molecules += [mol]
-
+    def setup_method(self):
+        # Fresh per-test Trajectory objects (tests mutate via to_displacements/to_positions
+        # and copy.deepcopy). Structures/molecules are not mutated so they can be shared.
+        self.traj = Trajectory.from_file(f"{VASP_OUT_DIR}/XDATCAR_traj")
+        self.structures = self._xdatcar_structures
+        self.molecules = self._molecules
         self.traj_mols = Trajectory(
-            species=species,
-            coords=coords,
-            charge=int(last_mol.charge),
-            spin_multiplicity=int(last_mol.spin_multiplicity),
+            species=self._species,
+            coords=self._coords,
+            charge=self._charge,
+            spin_multiplicity=self._spin,
         )
 
     def _check_traj_equality(self, traj_1, traj_2):

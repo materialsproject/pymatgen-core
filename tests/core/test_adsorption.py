@@ -12,8 +12,9 @@ from pymatgen.util.testing import MatSciTest
 
 
 class TestAdsorbateSiteFinder(MatSciTest):
-    def setup_method(self):
-        self.structure = Structure.from_spacegroup("Fm-3m", Lattice.cubic(3.5), ["Ni"], [[0, 0, 0]])
+    @classmethod
+    def setup_class(cls):
+        cls.structure = Structure.from_spacegroup("Fm-3m", Lattice.cubic(3.5), ["Ni"], [[0, 0, 0]])
         lattice = Lattice.cubic(3.010)
         frac_coords = [
             [0.00000, 0.00000, 0.00000],
@@ -26,22 +27,22 @@ class TestAdsorbateSiteFinder(MatSciTest):
             [0.00000, 0.50000, 0.00000],
         ]
         species = ["Mg", "Mg", "Mg", "Mg", "O", "O", "O", "O"]
-        self.MgO = Structure(lattice, species, frac_coords)
+        cls.MgO = Structure(lattice, species, frac_coords)
 
         slabs = generate_all_slabs(
-            self.structure,
+            cls.structure,
             max_index=2,
             min_slab_size=6.0,
             min_vacuum_size=15.0,
             max_normal_search=1,
             center_slab=True,
         )
-        self.slab_dict = {"".join(str(i) for i in slab.miller_index): slab for slab in slabs}
-        self.asf_211 = AdsorbateSiteFinder(self.slab_dict["211"])
-        self.asf_100 = AdsorbateSiteFinder(self.slab_dict["100"])
-        self.asf_111 = AdsorbateSiteFinder(self.slab_dict["111"])
-        self.asf_110 = AdsorbateSiteFinder(self.slab_dict["110"])
-        self.asf_struct = AdsorbateSiteFinder(Structure.from_sites(self.slab_dict["111"].sites))
+        cls.slab_dict = {"".join(str(i) for i in slab.miller_index): slab for slab in slabs}
+        cls.asf_211 = AdsorbateSiteFinder(cls.slab_dict["211"])
+        cls.asf_100 = AdsorbateSiteFinder(cls.slab_dict["100"])
+        cls.asf_111 = AdsorbateSiteFinder(cls.slab_dict["111"])
+        cls.asf_110 = AdsorbateSiteFinder(cls.slab_dict["110"])
+        cls.asf_struct = AdsorbateSiteFinder(Structure.from_sites(cls.slab_dict["111"].sites))
 
     def test_init(self):
         AdsorbateSiteFinder(self.slab_dict["100"])
