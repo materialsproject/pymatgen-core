@@ -262,7 +262,7 @@ def get_displaced_structures(pmg_structure, atom_disp=0.01, supercell_matrix=Non
     if supercell_matrix is None:
         supercell_matrix = np.eye(3) * np.array((1, 1, 1))
 
-    phonon = Phonopy(unitcell=ph_structure, supercell_matrix=supercell_matrix)
+    phonon = Phonopy(unitcell=ph_structure, supercell_matrix=supercell_matrix, primitive_matrix="P")
     phonon.generate_displacements(
         distance=atom_disp,
         is_plusminus=is_plus_minus,
@@ -315,6 +315,9 @@ def get_phonon_dos_from_fc(
         The density of states.
     """
     structure_phonopy = get_phonopy_structure(structure)
+    # phonopy >=4 defaults primitive_matrix to "auto"; pin to identity so the
+    # returned DOS is projected onto the input ``structure`` sites.
+    kwargs.setdefault("primitive_matrix", "P")
     phonon = Phonopy(structure_phonopy, supercell_matrix=supercell_matrix, **kwargs)
     phonon.force_constants = force_constants
     phonon.run_mesh(
@@ -362,6 +365,7 @@ def get_phonon_band_structure_from_fc(
         The uniform phonon band structure.
     """
     structure_phonopy = get_phonopy_structure(structure)
+    kwargs.setdefault("primitive_matrix", "P")
     phonon = Phonopy(structure_phonopy, supercell_matrix=supercell_matrix, **kwargs)
     phonon.force_constants = force_constants
     phonon.run_mesh(mesh_density, is_mesh_symmetry=False, is_gamma_center=True)
@@ -396,6 +400,7 @@ def get_phonon_band_structure_symm_line_from_fc(
         The line mode band structure.
     """
     structure_phonopy = get_phonopy_structure(structure)
+    kwargs.setdefault("primitive_matrix", "P")
     phonon = Phonopy(structure_phonopy, supercell_matrix=supercell_matrix, symprec=symprec, **kwargs)
     phonon.force_constants = force_constants
 
