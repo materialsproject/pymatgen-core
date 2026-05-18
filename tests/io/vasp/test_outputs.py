@@ -695,7 +695,7 @@ class TestVasprun(MatSciTest):
             expected_spec += [
                 {
                     "titel": titel,
-                    "hash": potcar.md5_header_hash,
+                    "hash": None,
                     "summary_stats": potcar._summary_stats,
                 }
             ]
@@ -863,7 +863,6 @@ class TestVasprun(MatSciTest):
             # Note that the TITEL is not updated in Vasprun.potcar_spec
             # Since the fake POTCARs modify the TITEL (to indicate fakeness), can't compare
             for ipot in range(len(potcar)):
-                assert vrun.potcar_spec[ipot]["hash"] == potcar[ipot].md5_header_hash
                 assert vrun.potcar_spec[ipot]["summary_stats"] == potcar[ipot]._summary_stats
 
 

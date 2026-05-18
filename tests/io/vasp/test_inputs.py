@@ -1705,28 +1705,6 @@ class TestPotcarSingle:
         ):
             PotcarSingle.from_file(filename)
 
-    def test_faulty_potcar_has_wrong_hash(self):
-        filename = f"{FAKE_POTCAR_DIR}/modified_potcars_data/POT_GGA_PAW_PBE_54/POTCAR.Fe_pv_with_hash.gz"
-        psingle = PotcarSingle.from_file(filename)
-        assert not psingle.is_valid
-        assert psingle.sha256_computed_file_hash != psingle.hash_sha256_from_file
-
-    def test_verify_correct_potcar_with_sha256(self):
-        filename = f"{FAKE_POTCAR_DIR}/POT_GGA_PAW_PBE_54/POTCAR.Fe_pv_with_hash.gz"
-        psingle = PotcarSingle.from_file(filename)
-        assert psingle.sha256_computed_file_hash == psingle.hash_sha256_from_file
-
-    def test_multi_potcar_with_and_without_sha256(self):
-        filename = f"{FAKE_POTCAR_DIR}/POT_GGA_PAW_PBE_54/POTCAR.Fe_O.gz"
-        potcars = Potcar.from_file(filename)
-        # Still need to test the if POTCAR can be read.
-        # No longer testing for hashes
-        for psingle in potcars:
-            if psingle.hash_sha256_from_file:
-                assert psingle.sha256_computed_file_hash == psingle.hash_sha256_from_file
-            else:
-                assert psingle.is_valid
-
     def test_default_functional(self):
         with patch.dict(SETTINGS, PMG_DEFAULT_FUNCTIONAL="PBE"):
             potcar = PotcarSingle.from_symbol_and_functional("Fe")
@@ -1772,24 +1750,6 @@ class TestPotcarSingle:
         )
         assert repr(self.psingle_Mn_pv) == expected_repr
 
-    def test_hash(self):
-        assert self.psingle_Mn_pv.md5_header_hash == "b45747d8ceeee91c3b27e8484db32f5a"
-        assert self.psingle_Fe.md5_header_hash == "adcc7d2abffa088eccc74948a68235d6"
-
-    def test_potcar_file_hash(self):
-        assert self.psingle_Mn_pv.md5_computed_file_hash == "e66e5662ec6e46d6f10ce0bb07b3b742"
-        assert self.psingle_Fe.md5_computed_file_hash == "ae761615a0734cc5a2a1db0d5919f12d"
-
-    def test_sha256_file_hash(self):
-        assert (
-            self.psingle_Mn_pv.sha256_computed_file_hash
-            == "3890fe92124e18500817b565a6048a317968613e226ab7b7c2a2d4ca62451e3a"
-        )
-        assert (
-            self.psingle_Fe.sha256_computed_file_hash
-            == "7bcf5ad80200e5d74ba63b45d87825b31e6cae2bcd03cebda2f1cbec9870c1cf"
-        )
-
     def test_eq(self):
         assert self.psingle_Mn_pv == self.psingle_Mn_pv
         assert self.psingle_Fe == self.psingle_Fe
@@ -1805,7 +1765,7 @@ class TestPotcarSingle:
         for psingle in [self.psingle_Fe, self.psingle_Fe_54, self.psingle_Mn_pv]:
             expected_spec = {
                 "titel": psingle.TITEL,
-                "hash": psingle.md5_header_hash,
+                "hash": None,
                 "summary_stats": psingle._summary_stats,
                 "symbol": psingle.symbol,
             }

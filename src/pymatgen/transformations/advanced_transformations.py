@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from joblib import Parallel, delayed
 from monty.dev import requires
-from monty.fractions import lcm
 from monty.json import MSONable
 
 from pymatgen.command_line.enumlib_caller import EnumError, EnumlibAdaptor
@@ -664,11 +663,6 @@ class MagOrderingTransformation(AbstractTransformation):
         """Determine the smallest supercell that is able to enumerate
         the provided structure with the given order parameter.
         """
-
-        def lcm(n1, n2):
-            """Find least common multiple of two numbers."""
-            return n1 * n2 / math.gcd(n1, n2)
-
         # assumes all order parameters for a given species are the same
         mag_species_order_parameter = {}
         mag_species_occurrences = {}
@@ -691,7 +685,7 @@ class MagOrderingTransformation(AbstractTransformation):
             denom = Fraction(order_parameter).limit_denominator(100).denominator
             num_atom_per_specie = mag_species_occurrences[sp]
             n_gcd = math.gcd(denom, num_atom_per_specie)
-            smallest_n.append(lcm(int(n_gcd), denom) / n_gcd)
+            smallest_n.append(math.lcm(int(n_gcd), denom) / n_gcd)
 
         return max(smallest_n)
 
@@ -1079,7 +1073,7 @@ class DopingTransformation(AbstractTransformation):
                 )
 
                 if sp_to_remove == sp:
-                    common_charge = lcm(int(abs(sp.oxi_state)), int(abs(ox)))  # type: ignore[arg-type]
+                    common_charge = math.lcm(int(abs(sp.oxi_state)), int(abs(ox)))  # type: ignore[arg-type]
                     n_dopant = common_charge / abs(ox)
                     nsp_to_remove = common_charge / abs(sp.oxi_state)  # type: ignore[arg-type]
                     logger.info(f"Doping {nsp_to_remove} {sp} with {n_dopant} {self.dopant}.")
@@ -1094,7 +1088,7 @@ class DopingTransformation(AbstractTransformation):
                 else:
                     ox_diff = int(abs(round(sp.oxi_state - ox)))
                     vac_ox = int(abs(sp_to_remove.oxi_state)) * ox_diff  # type: ignore[arg-type]
-                    common_charge = lcm(vac_ox, ox_diff)
+                    common_charge = math.lcm(vac_ox, ox_diff)
                     n_dopant = common_charge / ox_diff
                     nx_to_remove = common_charge / vac_ox
                     nx = supercell.composition[sp_to_remove]
@@ -1123,7 +1117,7 @@ class DopingTransformation(AbstractTransformation):
                 ox_diff = int(abs(round(sp.oxi_state - ox)))
                 anion_ox = int(abs(sp_to_remove.oxi_state))  # type: ignore[arg-type]
                 nx = supercell.composition[sp_to_remove]
-                common_charge = lcm(anion_ox, ox_diff)
+                common_charge = math.lcm(anion_ox, ox_diff)
                 n_dopant = common_charge / ox_diff
                 nx_to_remove = common_charge / anion_ox
                 logger.info(f"Doping {n_dopant} {sp} with {self.dopant} and removing {nx_to_remove} {sp_to_remove}.")

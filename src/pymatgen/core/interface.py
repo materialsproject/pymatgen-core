@@ -13,7 +13,6 @@ from itertools import chain, combinations, product
 from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
-from monty.fractions import lcm
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 
@@ -586,7 +585,7 @@ class GrainBoundaryGenerator:
 
                 _plane = np.matmul(_rotation_axis, metric)
                 fractions = [Fraction(x).limit_denominator() for x in _plane]
-                least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+                least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
                 _plane = cast("tuple[int, int, int]", tuple(round(x * least_mul) for x in _plane))
 
         else:
@@ -868,7 +867,7 @@ class GrainBoundaryGenerator:
                 index.pop(min_index)
                 frac1 = Fraction(lat[index[0]] ** 2 / lat[min_index] ** 2).limit_denominator(max_denominator)
                 frac2 = Fraction(lat[index[1]] ** 2 / lat[min_index] ** 2).limit_denominator(max_denominator)
-                com_lcm = lcm(frac1.denominator, frac2.denominator)
+                com_lcm = math.lcm(frac1.denominator, frac2.denominator)
                 ratio[min_index] = com_lcm
                 ratio[index[0]] = frac1.numerator * round(com_lcm / frac1.denominator)
                 ratio[index[1]] = frac2.numerator * round(com_lcm / frac2.denominator)
@@ -1021,7 +1020,7 @@ class GrainBoundaryGenerator:
 
                 surface = np.matmul(r_axis, metric)
                 fractions = [Fraction(x).limit_denominator() for x in surface]
-                least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+                least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
                 surface = cast(
                     "tuple[int, int, int] | tuple[int, int, int,int]",
                     tuple(round(x * least_mul) for x in surface),
@@ -1269,7 +1268,7 @@ class GrainBoundaryGenerator:
         if surface is None:
             raise ValueError("surface is None.")
         fractions = [Fraction(x).limit_denominator() for x in surface]
-        least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+        least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
         surface = cast("tuple[int, int, int]", tuple(round(x * least_mul) for x in surface))
         if reduce(math.gcd, surface) != 1:
             index = reduce(math.gcd, surface)
@@ -1296,7 +1295,7 @@ class GrainBoundaryGenerator:
 
         # With the rotation matrix to construct the CSL lattice, check reference for details
         fractions = [Fraction(x).limit_denominator() for x in new_rot[:, kk]]
-        least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+        least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
         scale = np.zeros((3, 3))
         scale[hh, hh] = 1
         scale[kk, kk] = least_mul
@@ -2138,7 +2137,7 @@ class GrainBoundaryGenerator:
                 index_len = len(miller_nonzero)
                 for i in range(index_len):
                     for j in range(i + 1, index_len):
-                        lcm_miller = lcm(miller[miller_nonzero[i]], miller[miller_nonzero[j]])
+                        lcm_miller = math.lcm(miller[miller_nonzero[i]], miller[miller_nonzero[j]])
                         scl_factor = [0, 0, 0]
                         scl_factor[miller_nonzero[i]] = -round(lcm_miller / miller[miller_nonzero[i]])
                         scl_factor[miller_nonzero[j]] = round(lcm_miller / miller[miller_nonzero[j]])
@@ -2379,7 +2378,7 @@ class GrainBoundaryGenerator:
                 miller[true_index] = frac[0].denominator
                 miller[index[0]] = frac[0].numerator
             else:
-                com_lcm = lcm(frac[0].denominator, frac[1].denominator)
+                com_lcm = math.lcm(frac[0].denominator, frac[1].denominator)
                 miller[true_index] = com_lcm
                 miller[index[0]] = frac[0].numerator * round(com_lcm / frac[0].denominator)
                 miller[index[1]] = frac[1].numerator * round(com_lcm / frac[1].denominator)
