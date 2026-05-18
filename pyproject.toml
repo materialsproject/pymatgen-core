@@ -283,6 +283,7 @@ dev = [
     "pre-commit>=4.2.0",
 ]
 test = [
+    "pymongo>=4.10",
     "pytest>=8.3.5",
     "pytest-cov>=6.0.0",
     "pytest-split>=0.10.0",
