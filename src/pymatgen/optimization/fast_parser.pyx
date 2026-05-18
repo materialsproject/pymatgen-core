@@ -71,46 +71,70 @@ cdef const char* parse_doubles(
     return ptr
 
 
-cdef Py_ssize_t last_whitespace(bytes data):
+cdef Py_ssize_t last_whitespace(const unsigned char[::1] data) noexcept nogil:
     """Return the index after the last ASCII whitespace byte, or -1."""
-    cdef Py_ssize_t idx = len(data) - 1
+    cdef Py_ssize_t idx = data.shape[0] - 1
     cdef unsigned char value
 
     while idx >= 0:
         value = data[idx]
-        if value in (9, 10, 11, 12, 13, 32):
+        # ASCII whitespace: 9-13 (tab, LF, VT, FF, CR) and 32 (space).
+        if (9 <= value <= 13) or value == 32:
             return idx + 1
         idx -= 1
 
     return -1
 
 
-cdef bint only_whitespace_left(bytes data, Py_ssize_t start, Py_ssize_t end):
+cdef bint only_whitespace_left(
+    const unsigned char[::1] data, Py_ssize_t start, Py_ssize_t end,
+) noexcept nogil:
     """Return whether ``data[start:end]`` contains only ASCII whitespace."""
     cdef Py_ssize_t idx = start
     cdef unsigned char value
 
     while idx < end:
         value = data[idx]
-        if value not in (9, 10, 11, 12, 13, 32):
+        if not ((9 <= value <= 13) or value == 32):
             return False
         idx += 1
 
     return True
 
 
-def parse_N_doubles(file, double[::1] out, Py_ssize_t nelem=-1):
+def parse_n_doubles(file, double[::1] out, Py_ssize_t nelem=-1):
     """Parse doubles from a binary file object into ``out``.
 
     The file is read in 1 MiB chunks. On return, the file position follows the
     stop pointer returned by the parser without rewinding trailing whitespace.
 
+    The ``file`` must be a seekable binary stream (the function uses
+    ``tell()``/``seek()`` to leave the cursor right after the last parsed
+    number). Backward seeks on compressed streams (e.g. ``gzip.GzipFile``,
+    ``bz2.BZ2File``) are implemented as decompress-from-start and can be
+    dramatically slower than on uncompressed files; prefer decompressing
+    upstream when parsing large compressed inputs.
+
     Returns:
         int: Parsed element count.
+
+    Raises:
+        TypeError: If ``file`` is not a binary stream.
+        ValueError: If ``nelem`` exceeds ``out.shape[0]``.
     """
+    cdef Py_ssize_t limit = out.shape[0] if nelem < 0 else nelem
+    if limit > out.shape[0]:
+        raise ValueError("nelem exceeds output length")
+
+    # Validate the file is binary up front, before mutating state via tell()/read().
+    # A zero-byte read returns the empty bytes/str of the underlying mode without
+    # advancing the file position.
+    probe = file.read(0)
+    if not isinstance(probe, bytes):
+        raise TypeError("parse_n_doubles requires a binary file object")
+
     cdef Py_ssize_t total_parsed = 0
     cdef Py_ssize_t parsed = 0
-    cdef Py_ssize_t limit = out.shape[0] if nelem < 0 else nelem
     cdef Py_ssize_t remaining = limit
     cdef Py_ssize_t parse_len = 0
     cdef Py_ssize_t stop_offset
@@ -120,36 +144,42 @@ def parse_N_doubles(file, double[::1] out, Py_ssize_t nelem=-1):
     cdef const char* start
     cdef const char* stop
     cdef bytes chunk
-    cdef bytes buffer = b""
+    cdef bytearray buffer = bytearray()
     cdef bint eof = False
 
-    if limit > out.shape[0]:
-        raise ValueError("nelem exceeds output length")
+    # Hold the memoryview only inside each iteration; ``bytearray.extend``/``del``
+    # cannot resize the buffer while a memoryview is exported on it.
+    cdef const unsigned char[::1] view
+    cdef bint needs_more_data
 
     while remaining > 0:
         chunk = file.read(BUFFER_SIZE)
-        if not isinstance(chunk, bytes):
-            raise TypeError("parse_N_doubles requires a binary file object")
 
         if chunk:
-            buffer += chunk
+            buffer.extend(chunk)
         else:
             eof = True
 
         if not buffer:
             break
 
-        parse_len = len(buffer) if eof else last_whitespace(buffer)
+        view = buffer
+        parse_len = view.shape[0] if eof else last_whitespace(view)
+
+        needs_more_data = False
         if parse_len < 0:
             if eof:
-                parse_len = len(buffer)
+                parse_len = view.shape[0]
             else:
-                continue
+                needs_more_data = True
+        elif parse_len == 0 and not eof:
+            needs_more_data = True
 
-        if parse_len == 0 and not eof:
+        if needs_more_data:
+            view = None
             continue
 
-        start = buffer
+        start = <const char*>&view[0]
         stop = parse_doubles(start, parse_len, &out[total_parsed], remaining, &parsed)
         stop_offset = <ptrdiff_t>(stop - start)
         parsed_offset = stop_offset
@@ -157,16 +187,19 @@ def parse_N_doubles(file, double[::1] out, Py_ssize_t nelem=-1):
         remaining -= parsed
 
         if parsed == 0 or remaining == 0:
+            view = None
             file.seek(base_pos + consumed + stop_offset)
             return total_parsed
 
         if stop_offset < parse_len:
-            if not only_whitespace_left(buffer, stop_offset, parse_len):
+            if not only_whitespace_left(view, stop_offset, parse_len):
+                view = None
                 file.seek(base_pos + consumed + stop_offset)
                 return total_parsed
 
         consumed += parse_len
-        buffer = buffer[parse_len:]
+        view = None  # release before mutating the bytearray
+        del buffer[:parse_len]
 
         if eof:
             break

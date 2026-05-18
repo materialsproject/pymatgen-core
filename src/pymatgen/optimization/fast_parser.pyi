@@ -1,3 +1,5 @@
+from typing import BinaryIO
+
 from numpy.typing import NDArray
 
-def parse_N_doubles(file, out: NDArray, nelem: int = -1) -> int: ...
+def parse_n_doubles(file: BinaryIO, out: NDArray, nelem: int = -1) -> int: ...

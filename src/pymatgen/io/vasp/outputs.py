@@ -42,7 +42,7 @@ from pymatgen.io.common import VolumetricData as BaseVolumetricData
 from pymatgen.io.core import ParseError
 from pymatgen.io.vasp.inputs import Incar, Kpoints, KpointsSupportedModes, Poscar, Potcar
 from pymatgen.io.wannier90 import Unk
-from pymatgen.optimization.fast_parser import parse_N_doubles
+from pymatgen.optimization.fast_parser import parse_n_doubles
 from pymatgen.util.io_utils import clean_lines, micro_pyawk
 from pymatgen.util.num import make_symmetric_matrix_from_upper_tri
 
@@ -3879,16 +3879,18 @@ class VolumetricData(BaseVolumetricData):
                     continue
                 if line.startswith(b"augmentation occupancies (imaginary part)"):
                     _, k, n = line.rsplit(maxsplit=2)
-                    arr = np.empty(int(n))
-                    if (parsed := parse_N_doubles(file, arr, int(n))) != int(n):
-                        raise ValueError(f"Expected {int(n)} values, got {parsed}")
+                    nelem = int(n)
+                    arr = np.empty(nelem)
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
+                        raise ValueError(f"Expected {nelem} values, got {parsed}")
                     key = int(k)
                     all_dataset_aug[-1][key] = np.asarray(all_dataset_aug[-1][key], dtype=np.complex128) + 1j * arr
                 elif line.startswith(b"augmentation occupancies"):
                     _, k, n = line.rsplit(maxsplit=2)
-                    arr = np.empty(int(n))
-                    if (parsed := parse_N_doubles(file, arr, int(n))) != int(n):
-                        raise ValueError(f"Expected {int(n)} values, got {parsed}")
+                    nelem = int(n)
+                    arr = np.empty(nelem)
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
+                        raise ValueError(f"Expected {nelem} values, got {parsed}")
                     all_dataset_aug[-1][int(k)] = arr
                 elif b"." in line:
                     arr = np.loadtxt(BytesIO(line), max_rows=1)
@@ -3899,7 +3901,7 @@ class VolumetricData(BaseVolumetricData):
                         raise ValueError(f"Expected 3 values, got {dims.size}")
                     nelem = int(dims.prod())
                     arr = np.empty(nelem)
-                    if (parsed := parse_N_doubles(file, arr, nelem)) != nelem:
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
                         raise ValueError(f"Expected {nelem} values, got {parsed}")
                     arr = arr.reshape(dims, order="F")
                     arr = np.ascontiguousarray(arr)
