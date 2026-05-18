@@ -1,0 +1,3 @@
+from numpy.typing import NDArray
+
+def parse_N_doubles(file, out: NDArray, nelem: int = -1) -> int: ...

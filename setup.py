@@ -23,6 +23,11 @@ setup(
             ["src/pymatgen/optimization/neighbors.pyx"],
             extra_link_args=extra_link_args,
         ),
+        Extension(
+            "pymatgen.optimization.fast_parser",
+            ["src/pymatgen/optimization/fast_parser.pyx"],
+            extra_link_args=extra_link_args,
+        ),
     ],
     include_dirs=[np.get_include()],
 )
