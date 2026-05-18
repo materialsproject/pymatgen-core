@@ -729,6 +729,12 @@ class KabschMatcher(MSONable):
     Notes:
         When aligning molecules, the atoms of the two molecules **must** be in the same
         order for the results to be sensible.
+
+        RMSD follows the standard definition ``sqrt((1/N) * sum_i |p_i - q_i|^2)``
+        where the sum is over atoms (not coordinate components). Prior to
+        2026, this implementation divided by ``3N`` instead of ``N``, yielding
+        values smaller by a factor of ``sqrt(3)``; any user-tuned ``threshold``
+        / ``tolerance`` values from older code should be rescaled accordingly.
     """
 
     def __init__(self, target: Molecule):
@@ -773,7 +779,7 @@ class KabschMatcher(MSONable):
         U = self.kabsch(p_centroid, q_centroid)
 
         p_prime_centroid = np.dot(p_centroid, U)
-        rmsd = np.sqrt(np.mean(np.square(p_prime_centroid - q_centroid)))
+        rmsd = np.sqrt(np.mean(np.sum(np.square(p_prime_centroid - q_centroid), axis=1)))
 
         V = q_trans - np.dot(p_trans, U)
 
@@ -901,7 +907,7 @@ class BruteForceOrderMatcher(KabschMatcher):
             U_test = self.kabsch(p_centroid_test, q_centroid)
 
             p_centroid_prime_test = np.dot(p_centroid_test, U_test)
-            rmsd_test = np.sqrt(np.mean(np.square(p_centroid_prime_test - q_centroid)))
+            rmsd_test = np.sqrt(np.mean(np.sum(np.square(p_centroid_prime_test - q_centroid), axis=1)))
 
             if rmsd_test < rmsd:
                 p_inds, U, rmsd = p_inds_test, U_test, rmsd_test
@@ -1007,7 +1013,7 @@ class HungarianOrderMatcher(KabschMatcher):
             U_test = self.kabsch(p_centroid_test, q_centroid)
 
             p_centroid_prime_test = np.dot(p_centroid_test, U_test)
-            rmsd_test = np.sqrt(np.mean(np.square(p_centroid_prime_test - q_centroid)))
+            rmsd_test = np.sqrt(np.mean(np.sum(np.square(p_centroid_prime_test - q_centroid), axis=1)))
 
             if rmsd_test < rmsd:
                 inds, U, rmsd = p_inds_test, U_test, rmsd_test
@@ -1306,7 +1312,7 @@ class GeneticOrderMatcher(KabschMatcher):
                     U = self.kabsch(p_centroid, f_centroid)
 
                     p_prime_centroid = np.dot(p_centroid, U)
-                    rmsd = np.sqrt(np.mean(np.square(p_prime_centroid - f_centroid)))
+                    rmsd = np.sqrt(np.mean(np.sum(np.square(p_prime_centroid - f_centroid), axis=1)))
 
                     # rejecting if the deviation is too large
                     if rmsd > self.threshold:
