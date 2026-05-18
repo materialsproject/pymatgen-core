@@ -6,7 +6,7 @@
 from libc.stddef cimport ptrdiff_t
 
 
-DEF BUFFER_SIZE = 1048576
+cdef const int BUFFER_SIZE = 1048576
 
 
 cdef extern from *:
