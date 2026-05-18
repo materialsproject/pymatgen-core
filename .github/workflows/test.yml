@@ -141,7 +141,9 @@ jobs:
         # codecov reflects the full test surface. The python 3.11 shard runs
         # without extras and was previously uploading misleadingly low numbers
         # for any file gated on ase/seekpath/phonopy/etc.
+        # Uses GitHub OIDC (no shared secret); requires "Tokenless Upload"
+        # to be enabled at https://app.codecov.io/gh/materialsproject/pymatgen-core
         if: github.ref == 'refs/heads/main' && matrix.config.os == 'ubuntu-latest' && matrix.config.extras == 'optional'
         uses: codecov/codecov-action@v6
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          use_oidc: true
