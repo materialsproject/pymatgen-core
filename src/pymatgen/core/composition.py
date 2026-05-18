@@ -17,7 +17,7 @@ from itertools import combinations_with_replacement, product
 from typing import TYPE_CHECKING
 
 from monty.dev import deprecated
-from monty.fractions import gcd, gcd_float
+from monty.fractions import gcd_float
 from monty.json import MSONable
 from monty.serialization import loadfn
 
@@ -671,7 +671,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """
         reduced = self.element_composition
         if all(val == int(val) for val in self.values()):
-            reduced /= gcd(*(int(i) for i in self.values()))
+            reduced /= math.gcd(*(int(i) for i in self.values()))
 
         anon = ""
         for elem, amt in zip(string.ascii_uppercase, sorted(reduced.values()), strict=False):
@@ -1373,7 +1373,7 @@ def reduce_formula(
     # Enforce integer for calculating greatest common divisor
     factor: int = 1
     if all(int(i) == i for i in sym_amt.values()):
-        factor = abs(gcd(*(int(i) for i in sym_amt.values())))
+        factor = abs(math.gcd(*(int(i) for i in sym_amt.values())))
 
     # If the composition contains polyanion
     poly_anions: list[str] = []

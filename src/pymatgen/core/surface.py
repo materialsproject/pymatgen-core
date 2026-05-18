@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import orjson
-from monty.fractions import lcm
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 
@@ -1020,7 +1019,7 @@ class SlabGenerator:
             c_index, _dist = max(non_orth_ind, key=lambda t: t[1])
 
             if len(non_orth_ind) > 1:
-                lcm_miller = lcm(*(miller_index[i] for i, _d in non_orth_ind))
+                lcm_miller = math.lcm(*(miller_index[i] for i, _d in non_orth_ind))
                 for (ii, _di), (jj, _dj) in itertools.combinations(non_orth_ind, 2):
                     scale_factor = [0, 0, 0]
                     scale_factor[ii] = -round(lcm_miller / miller_index[ii])
@@ -2142,13 +2141,8 @@ def hkl_transformation(
         transf (3x3 array): The matrix that transforms a lattice from A to B.
         miller_index (tuple[int, ...]): The Miller index [h, k, l] to transform.
     """
-
-    def math_lcm(a: int, b: int) -> int:
-        """Calculate the least common multiple."""
-        return a * b // math.gcd(a, b)
-
     # Convert the elements of the transformation matrix to integers
-    reduced_transf = reduce(math_lcm, [int(1 / i) for i in itertools.chain(*transf) if i != 0]) * transf
+    reduced_transf = reduce(math.lcm, [int(1 / i) for i in itertools.chain(*transf) if i != 0]) * transf
     reduced_transf = reduced_transf.astype(int)
 
     # Perform the transformation

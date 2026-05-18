@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from monty.dev import requires
-from monty.fractions import lcm
 from monty.tempfile import ScratchDir
 
 from pymatgen.core import DummySpecies, PeriodicSite, Structure
@@ -250,7 +249,7 @@ class EnumlibAdaptor:
         n_disordered = sum(len(s) for s in disordered_sites)
         base = int(
             n_disordered
-            * lcm(
+            * math.lcm(
                 *(
                     fraction.limit_denominator(n_disordered * self.max_cell_size).denominator
                     for fraction in map(fractions.Fraction, index_amounts)
