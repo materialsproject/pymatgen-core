@@ -317,7 +317,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "python_full_version < '3.13' and implementation_name != 'PyPy' and sys_platform != 'win32'" },
+    { name = "pycparser", marker = "python_full_version < '3.12' and implementation_name != 'PyPy' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -1871,15 +1871,15 @@ wheels = [
 
 [[package]]
 name = "monty"
-version = "2026.2.18"
+version = "2026.5.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/82/e2/e8ada0dbe679e4af4587e1d29b46e6c1febf2e861cb71ba09b2a6b3aed1a/monty-2026.2.18.tar.gz", hash = "sha256:e34e77abe7454ab84a9eeab7d909dbb500e3fa114c1849352ecd4570feb72be0", size = 191585, upload-time = "2026-02-18T01:19:02.858Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/d7/bd34aafa34d3cddd93c440e7cfb3371328079e864279708f64a871806eb7/monty-2026.5.18.tar.gz", hash = "sha256:b2d8d5c78030e889f6407fa9d8c8c4e3df05fc380251cdf85a119cd1e49c3fdd", size = 211830, upload-time = "2026-05-18T03:21:02.254Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/af/d46382eef9338e01a9f6424884a127e1fbf9a13818b962edfa8a231830bb/monty-2026.2.18-py3-none-any.whl", hash = "sha256:fee3580ccc77431a4714455dc705a0bd6196c4350f4fca3771e5fa61638274ea", size = 52670, upload-time = "2026-02-18T01:19:01.079Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/63/86120977f920798494c522c26899ffacde6d848e1eb018403f1d08044d0d/monty-2026.5.18-py3-none-any.whl", hash = "sha256:dd108b5c3cceb1f61de1a854db8ffda3dc7c2a2d4025b24cf397ade1121e7904", size = 59998, upload-time = "2026-05-18T03:21:00.059Z" },
 ]
 
 [[package]]
@@ -3203,7 +3203,7 @@ requires-dist = [
     { name = "matgl", marker = "python_full_version < '3.13' and extra == 'matcalc'", specifier = ">=2.0.4" },
     { name = "matgl", marker = "python_full_version < '3.13' and extra == 'mlp'", specifier = ">=2.0.4" },
     { name = "matplotlib", specifier = ">=3.8" },
-    { name = "monty", specifier = ">=2026.2.18" },
+    { name = "monty", specifier = ">=2026.5.18" },
     { name = "moyopy", extras = ["interface"], marker = "extra == 'symmetry'", specifier = ">=0.3" },
     { name = "netcdf4", marker = "extra == 'abinit'", specifier = ">=1.7.2" },
     { name = "netcdf4", marker = "extra == 'optional'", specifier = ">=1.7.2" },
@@ -3972,8 +3972,8 @@ name = "tblite"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "python_full_version < '3.13' and sys_platform != 'win32'" },
-    { name = "numpy", marker = "python_full_version < '3.13' and sys_platform != 'win32'" },
+    { name = "cffi", marker = "python_full_version < '3.12' and sys_platform != 'win32'" },
+    { name = "numpy", marker = "python_full_version < '3.12' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b7/c2/53b25049bc3f10c91fe2f5f0ccfa711a0357c14fc57d015efa57761b4a45/tblite-0.6.0.tar.gz", hash = "sha256:339e6d233ea3b913f1485264408b2b30a1b4355cdcf1bc2a86c70bef44ca0a65", size = 3030751, upload-time = "2026-05-16T09:08:27.978Z" }
 wheels = [
@@ -3987,7 +3987,7 @@ wheels = [
 
 [package.optional-dependencies]
 ase = [
-    { name = "ase", marker = "python_full_version < '3.13' and sys_platform != 'win32'" },
+    { name = "ase", marker = "python_full_version < '3.12' and sys_platform != 'win32'" },
 ]
 
 [[package]]
