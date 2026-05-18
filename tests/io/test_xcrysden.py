@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from pymatgen.core.structure import Structure
-from pymatgen.io.xcrysden import XSF
+from pymatgen.io.xcrysden import XSF, XSFBand, XSFGrid
 from pymatgen.util.testing import MatSciTest
 
 
@@ -97,3 +98,57 @@ PRIMCOORD
 
         structure2 = XSF.from_str(test_string2).structure
         assert structure == structure2
+
+    def test_structure_from_str_rejects_xsf_without_structure(self, monkeypatch):
+        xsf = XSF()
+        xsf.grids["block_name"] = XSFGrid(
+            data=np.zeros((1, 1, 1)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        monkeypatch.setattr(XSF, "from_str", lambda *args, **kwargs: xsf)
+
+        with pytest.raises(ValueError, match="XSF data does not contain a structure"):
+            Structure.from_str("grid only", fmt="xsf")
+
+    def test_grid_and_band_are_msonable(self):
+        grid = XSFGrid(
+            data=np.ones((1, 2, 3)),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(3),
+            comment="rho",
+            labels=["grid/rho"],
+        )
+        grid_roundtrip = XSFGrid.from_dict(grid.as_dict())
+        assert grid_roundtrip.comment == "rho"
+        assert grid_roundtrip.labels == ["grid/rho"]
+        assert grid_roundtrip.ndim == 2
+        np.testing.assert_allclose(grid_roundtrip.data, grid.data)
+        np.testing.assert_allclose(grid_roundtrip.lattice, grid.lattice)
+        np.testing.assert_allclose(grid_roundtrip.origin, grid.origin)
+
+        band = XSFBand(
+            fermi_energy=1.5,
+            data=np.ones((1, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+            comment="fermi surface",
+            labels=["grid/1"],
+        )
+        band_roundtrip = XSFBand.from_dict(band.as_dict())
+        assert band_roundtrip.fermi_energy == 1.5
+        assert band_roundtrip.comment == "fermi surface"
+        assert band_roundtrip.labels == ["grid/1"]
+        np.testing.assert_allclose(band_roundtrip.data, band.data)
+
+        with pytest.raises(ValueError, match="XSFGrid labels must be empty or match"):
+            XSFGrid(data=np.ones((2, 2, 3)), lattice=np.eye(2, 3), origin=np.zeros(3), labels=["only one label"])
+
+        with pytest.raises(ValueError, match="labels must be empty or match"):
+            XSFBand(
+                fermi_energy=1.5,
+                data=np.ones((2, 2, 2, 2)),
+                lattice=np.eye(3),
+                origin=np.zeros(3),
+                labels=["only one label"],
+            )

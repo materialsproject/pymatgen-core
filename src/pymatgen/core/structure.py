@@ -3191,7 +3191,10 @@ class IStructure(SiteCollection, MSONable):
         elif fmt_low == "xsf":
             from pymatgen.io.xcrysden import XSF
 
-            struct = XSF.from_str(input_string, **cls._filter_kwargs(XSF.from_str, kwargs)).structure  # type:ignore[assignment]
+            xsf = XSF.from_str(input_string, **cls._filter_kwargs(XSF.from_str, kwargs))
+            if xsf.structure is None:
+                raise ValueError("XSF data does not contain a structure; use XSF.from_str for grids or band data")
+            struct = xsf.structure
         elif fmt_low == "mcsqs":
             from pymatgen.io.atat import Mcsqs
 
