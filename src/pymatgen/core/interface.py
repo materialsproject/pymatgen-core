@@ -585,7 +585,7 @@ class GrainBoundaryGenerator:
 
                 _plane = np.matmul(_rotation_axis, metric)
                 fractions = [Fraction(x).limit_denominator() for x in _plane]
-                least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+                least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
                 _plane = cast("tuple[int, int, int]", tuple(round(x * least_mul) for x in _plane))
 
         else:
@@ -1020,7 +1020,7 @@ class GrainBoundaryGenerator:
 
                 surface = np.matmul(r_axis, metric)
                 fractions = [Fraction(x).limit_denominator() for x in surface]
-                least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+                least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
                 surface = cast(
                     "tuple[int, int, int] | tuple[int, int, int,int]",
                     tuple(round(x * least_mul) for x in surface),
@@ -1268,7 +1268,7 @@ class GrainBoundaryGenerator:
         if surface is None:
             raise ValueError("surface is None.")
         fractions = [Fraction(x).limit_denominator() for x in surface]
-        least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+        least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
         surface = cast("tuple[int, int, int]", tuple(round(x * least_mul) for x in surface))
         if reduce(math.gcd, surface) != 1:
             index = reduce(math.gcd, surface)
@@ -1295,7 +1295,7 @@ class GrainBoundaryGenerator:
 
         # With the rotation matrix to construct the CSL lattice, check reference for details
         fractions = [Fraction(x).limit_denominator() for x in new_rot[:, kk]]
-        least_mul = reduce(lcm, [fraction.denominator for fraction in fractions])
+        least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
         scale = np.zeros((3, 3))
         scale[hh, hh] = 1
         scale[kk, kk] = least_mul
