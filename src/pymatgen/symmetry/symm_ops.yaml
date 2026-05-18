@@ -1,7 +1,18 @@
-# This file has been modified from cod-tools
-# (https://aiida-core.readthedocs.io/en/latest/plugins/codtools/), which is
-# distributed under the GNU GPL v2 license. The main modifications are with
-# respect to conversion to a YAML format and removal of the constraints key.
+# This file is derived from the cod-tools project
+# (https://github.com/cod-developers/cod-tools, https://wiki.crystallography.net/cod-tools/),
+# specifically the COD::Spacegroups::Lookup::COD table at
+# src/lib/perl5/COD/Spacegroups/Lookup/COD.pm. The data was extracted in 2016
+# (materialsproject/pymatgen commit 925a2798), at which time cod-tools was
+# distributed under the GNU GPL v2 license; the original GPLv2 license text is
+# reproduced below. Upstream cod-tools has since relicensed to LGPL-3, but this
+# snapshot retains its original GPLv2 terms. Modifications relative to the
+# upstream Perl table are limited to conversion to YAML format and removal of
+# the `constraints` key.
+#
+# Note: the previous header referenced https://aiida-core.readthedocs.io/.../codtools/,
+# which describes the AiiDA wrapper around cod-tools (MIT-licensed) rather than
+# cod-tools itself; that URL was misleading regarding the data's provenance and
+# license.
 #
 # 		    GNU GENERAL PUBLIC LICENSE
 # 		       Version 2, June 1991
