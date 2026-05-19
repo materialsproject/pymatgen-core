@@ -479,6 +479,10 @@ class XSF:
         block_dim: int | None = None
         iframe = None
         current_lattice = None
+        block_labels: list[str] = []
+        block_data: list[np.ndarray] = []
+        block_origin: np.ndarray | None = None
+        block_lattice: np.ndarray | None = None
 
         while True:
             raw = file.readline()
@@ -609,7 +613,7 @@ class XSF:
                 if block_name in xsf.grids:
                     raise ValueError(f"Duplicate DATAGRID block name: {block_name}")
 
-                block_labels: list[str] = []
+                block_labels = []
                 block_data = []
                 block_origin = None
                 block_lattice = None
