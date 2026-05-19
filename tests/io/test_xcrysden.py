@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from pymatgen.core import Molecule
 from pymatgen.core.structure import Structure
 from pymatgen.io.xcrysden import XSF, XSFBand, XSFGrid
-from pymatgen.util.testing import MatSciTest
+from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
 
 class TestXSF(MatSciTest):
@@ -128,7 +131,6 @@ PRIMCOORD
         np.testing.assert_allclose(grid_roundtrip.origin, grid.origin)
 
         band = XSFBand(
-            fermi_energy=1.5,
             data=np.ones((1, 2, 2, 2)),
             lattice=np.eye(3),
             origin=np.zeros(3),
@@ -136,7 +138,6 @@ PRIMCOORD
             labels=["grid/1"],
         )
         band_roundtrip = XSFBand.from_dict(band.as_dict())
-        assert band_roundtrip.fermi_energy == 1.5
         assert band_roundtrip.comment == "fermi surface"
         assert band_roundtrip.labels == ["grid/1"]
         np.testing.assert_allclose(band_roundtrip.data, band.data)
@@ -146,9 +147,343 @@ PRIMCOORD
 
         with pytest.raises(ValueError, match="labels must be empty or match"):
             XSFBand(
-                fermi_energy=1.5,
                 data=np.ones((2, 2, 2, 2)),
                 lattice=np.eye(3),
                 origin=np.zeros(3),
                 labels=["only one label"],
+            )
+
+    def test_to_str_roundtrip_with_forces_grid_and_band(self):
+        xsf = XSF(self.struct.copy())
+        xsf.forces = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        xsf.grids["density"] = XSFGrid(
+            data=np.arange(6, dtype=float).reshape(1, 2, 3),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(3),
+            labels=["grid/rho"],
+        )
+        xsf.fermi_energy = 5.0
+        xsf.bands["bands"] = XSFBand(
+            data=np.arange(8, dtype=float).reshape(1, 2, 2, 2),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+            labels=["band_1"],
+        )
+
+        roundtrip = XSF.from_str(xsf.to_str())
+        np.testing.assert_allclose(roundtrip.forces, xsf.forces)
+        np.testing.assert_allclose(roundtrip.grids["density"].data, xsf.grids["density"].data)
+        np.testing.assert_allclose(roundtrip.bands["bands"].data, xsf.bands["bands"].data)
+        assert roundtrip.fermi_energy == 5.0
+
+    def test_from_file_reads_fixture(self):
+        with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "crystal_primvec_primcoord.xsf", "rb") as file:
+            xsf = XSF.parse_file(file)
+
+        assert xsf.kind == "crystal"
+        assert xsf.structure is not None
+        assert len(xsf.structure) == 2
+
+    def test_datagrid_roundtrip_preserves_values(self):
+        with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "datagrid_2d.xsf", "rb") as file:
+            xsf_2d = XSF.parse_file(file)
+        with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "datagrid_3d.xsf", "rb") as file:
+            xsf_3d = XSF.parse_file(file)
+
+        assert xsf_2d.grids["density_2d"].data.tolist() == [[[0.0, 2.0, 4.0], [1.0, 3.0, 5.0]]]
+        assert xsf_3d.grids["density_3d"].data.tolist() == [[[[0.0, 4.0], [2.0, 6.0]], [[1.0, 5.0], [3.0, 7.0]]]]
+
+    def test_molecule_atoms_roundtrip(self):
+        molecule = Molecule(["O", "H", "H"], [[0, 0, 0], [0.757, 0.586, 0], [-0.757, 0.586, 0]])
+        xsf = XSF(molecule, forces=np.ones((3, 3)))
+
+        roundtrip = XSF.from_str(xsf.to_str())
+
+        assert roundtrip.kind == "molecule"
+        assert roundtrip.lattice is None
+        assert isinstance(roundtrip.structure, Molecule)
+        assert roundtrip.structure.composition == molecule.composition
+        np.testing.assert_allclose(roundtrip.structure.cart_coords, molecule.cart_coords)
+        np.testing.assert_allclose(roundtrip.forces, np.ones((3, 3)))
+
+    def test_atoms_stops_before_following_section(self):
+        xsf = XSF.from_str(
+            """MOLECULE
+ATOMS
+O 0.0 0.0 0.0
+H 0.0 0.0 1.0
+BEGIN_BLOCK_DATAGRID_3D
+density
+BEGIN_DATAGRID_3D_rho
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+0.0
+END_DATAGRID_3D
+END_BLOCK_DATAGRID_3D
+"""
+        )
+
+        assert isinstance(xsf.structure, Molecule)
+        assert len(xsf.structure) == 2
+        assert "density" in xsf.grids
+
+    def test_xsf_rejects_atoms_before_kind(self):
+        with pytest.raises(ValueError, match="ATOMS is not valid in MOLECULE sections"):
+            XSF.from_str(
+                """ATOMS
+1 1
+H 0.0 0.0 0.0
+"""
+            )
+
+    def test_xsf_rejects_primcoord_before_primvec(self):
+        with pytest.raises(ValueError, match="PRIMCOORD encountered before PRIMVEC"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMCOORD
+1 1
+H 0.0 0.0 0.0
+"""
+            )
+
+    def test_xsf_rejects_convvect(self):
+        with pytest.raises(NotImplementedError, match="CONVCOORD section is not allowed in XSF files"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMVEC
+ 1 0 0
+ 0 1 0
+ 0 0 1
+CONVCOORD
+ 1 0 0
+ 0 1 0
+ 0 0 1
+PRIMCOORD
+1 1
+H 0 0 0
+"""
+            )
+
+    def test_xsf_rejects_malformed_datagrid(self):
+        with pytest.raises(ValueError, match=r"Unsupported DATAGRID dimensionality|No data parsed"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMVEC
+ 1 0 0
+ 0 1 0
+ 0 0 1
+PRIMCOORD
+1 1
+H 0 0 0
+BEGIN_BLOCK_DATAGRID_4D
+block
+END_BLOCK_DATAGRID_4D
+"""
+            )
+
+    def test_xsf_rejects_bandgrid_without_fermi_energy(self):
+        with pytest.raises(ValueError, match="BANDGRID block is missing required Fermi energy"):
+            XSF.from_str(
+                """BEGIN_BLOCK_BANDGRID_3D
+band_energies
+BEGIN_BANDGRID_3D_band
+1
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+BAND: 1
+0.0
+END_BANDGRID_3D
+END_BLOCK_BANDGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_end_info_without_begin_info(self):
+        with pytest.raises(ValueError, match="END_INFO encountered without a preceding BEGIN_INFO"):
+            XSF.from_str(
+                """END_INFO
+"""
+            )
+
+    def test_xsf_rejects_multiple_begin_info_sections(self):
+        with pytest.raises(ValueError, match="Multiple BEGIN_INFO sections are not supported"):
+            XSF.from_str(
+                """BEGIN_INFO
+Fermi Energy: 1.0
+END_INFO
+BEGIN_INFO
+Fermi Energy: 2.0
+END_INFO
+"""
+            )
+
+    def test_xsf_rejects_end_block_datagrid_without_begin(self):
+        with pytest.raises(ValueError, match="END_BLOCK_DATAGRID encountered without a matching BEGIN_BLOCK_DATAGRID"):
+            XSF.from_str(
+                """END_BLOCK_DATAGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_end_block_bandgrid_without_begin(self):
+        with pytest.raises(ValueError, match="END_BLOCK_BANDGRID encountered without a matching BEGIN_BLOCK_BANDGRID"):
+            XSF.from_str(
+                """END_BLOCK_BANDGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_begin_datagrid_without_block(self):
+        with pytest.raises(ValueError, match="BEGIN_DATAGRID encountered without a matching BEGIN_BLOCK_DATAGRID"):
+            XSF.from_str(
+                """BEGIN_DATAGRID_3D_density
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+0.0
+"""
+            )
+
+    def test_xsf_rejects_begin_bandgrid_without_block(self):
+        with pytest.raises(ValueError, match="BEGIN_BANDGRID encountered without a matching BEGIN_BLOCK_BANDGRID"):
+            XSF.from_str(
+                """BEGIN_INFO
+Fermi Energy: 1.0
+END_INFO
+BEGIN_BANDGRID_3D_band
+1
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+BAND: 1
+0.0
+END_BANDGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_bad_primcoord_field_count(self):
+        with pytest.raises(ValueError, match="PRIMCOORD atom rows must contain 4 fields or 7 fields with forces"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMVEC
+ 1 0 0
+ 0 1 0
+ 0 0 1
+PRIMCOORD
+1 1
+H 0 0
+"""
+            )
+
+    def test_xsf_rejects_truncated_datagrid(self):
+        with pytest.raises(ValueError, match="Expected 8 grid values but parsed 7"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMVEC
+ 1 0 0
+ 0 1 0
+ 0 0 1
+PRIMCOORD
+1 1
+H 0 0 0
+BEGIN_BLOCK_DATAGRID_3D
+rho
+BEGIN_DATAGRID_3D_rho
+2 2 2
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+0 1 2 3 4 5 6
+END_DATAGRID_3D
+END_BLOCK_DATAGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_nested_datagrid_block(self):
+        with pytest.raises(ValueError, match="Nested BEGIN_BLOCK_DATAGRID is not allowed"):
+            XSF.from_str(
+                """BEGIN_BLOCK_DATAGRID_3D
+block1
+BEGIN_BLOCK_DATAGRID_3D
+block2
+"""
+            )
+
+    def test_xsf_rejects_nested_bandgrid_block(self):
+        with pytest.raises(ValueError, match="Nested BEGIN_BLOCK_BANDGRID is not allowed"):
+            XSF.from_str(
+                """BEGIN_INFO
+Fermi Energy: 1.0
+END_INFO
+BEGIN_BLOCK_BANDGRID_3D
+bands
+BEGIN_BLOCK_BANDGRID_3D
+bands2
+"""
+            )
+
+    def test_xsf_rejects_bandgrid_band_count_mismatch(self):
+        with pytest.raises(ValueError, match="Expected 2 bands but parsed 1"):
+            XSF.from_str(
+                """BEGIN_INFO
+  Fermi Energy: 1.0
+END_INFO
+BEGIN_BLOCK_BANDGRID_3D
+bands
+BEGIN_BANDGRID_3D_band
+2
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+BAND: 1
+0.0
+END_BANDGRID_3D
+END_BLOCK_BANDGRID_3D
+"""
+            )
+
+    def test_xsf_rejects_duplicate_datagrid_block_name(self):
+        with pytest.raises(ValueError, match="Duplicate DATAGRID block name: density"):
+            XSF.from_str(
+                """CRYSTAL
+PRIMVEC
+ 1 0 0
+ 0 1 0
+ 0 0 1
+PRIMCOORD
+1 1
+H 0 0 0
+BEGIN_BLOCK_DATAGRID_3D
+density
+BEGIN_DATAGRID_3D_rho
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+0.0
+END_DATAGRID_3D
+END_BLOCK_DATAGRID_3D
+BEGIN_BLOCK_DATAGRID_3D
+density
+BEGIN_DATAGRID_3D_rho2
+1 1 1
+0 0 0
+1 0 0
+0 1 0
+0 0 1
+1.0
+END_DATAGRID_3D
+END_BLOCK_DATAGRID_3D
+"""
             )
