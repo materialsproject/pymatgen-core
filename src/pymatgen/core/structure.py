@@ -3194,7 +3194,10 @@ class IStructure(SiteCollection, MSONable):
             xsf = XSF.from_str(input_string, **cls._filter_kwargs(XSF.from_str, kwargs))
             if xsf.structure is None:
                 raise ValueError("XSF data does not contain a structure; use XSF.from_str for grids or band data")
+            if isinstance(xsf.structure, Molecule):
+                raise ValueError("XSF data contains a Molecule; use pymatgen.io.xcrysden.XSF for molecular data")
             struct = xsf.structure
+            struct.properties.update(xsf.structure_properties())
         elif fmt_low == "mcsqs":
             from pymatgen.io.atat import Mcsqs
 

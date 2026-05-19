@@ -206,6 +206,43 @@ PRIMCOORD
         np.testing.assert_allclose(roundtrip.structure.cart_coords, molecule.cart_coords)
         np.testing.assert_allclose(roundtrip.forces, np.ones((3, 3)))
 
+    def test_structure_from_str_rejects_molecule_xsf(self):
+        with pytest.raises(ValueError, match="XSF data contains a Molecule"):
+            Structure.from_str(
+                """MOLECULE
+ATOMS
+O 0.0 0.0 0.0
+H 0.0 0.0 1.0
+""",
+                fmt="xsf",
+            )
+
+    def test_structure_from_str_stores_xsf_extras_in_properties(self):
+        xsf = XSF(self.struct.copy())
+        xsf.grids["density"] = XSFGrid(
+            data=np.arange(6, dtype=float).reshape(1, 2, 3),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(3),
+            labels=["grid/rho"],
+        )
+        xsf.fermi_energy = 5.0
+        xsf.bands["bands"] = XSFBand(
+            data=np.arange(8, dtype=float).reshape(1, 2, 2, 2),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+            labels=["band_1"],
+        )
+        struct = Structure.from_str(xsf.to_str(), fmt="xsf")
+
+        assert struct.composition == self.struct.composition
+        np.testing.assert_allclose(struct.lattice.matrix, self.struct.lattice.matrix)
+        np.testing.assert_allclose(struct.frac_coords, self.struct.frac_coords)
+        assert isinstance(struct.properties["grids/density/rho"], XSFGrid)
+        assert isinstance(struct.properties["bands/bands/band_1"], XSFBand)
+        assert struct.properties["bands/fermi_energy"] == 5.0
+        np.testing.assert_allclose(struct.properties["grids/density/rho"].data, xsf.grids["density"].data)
+        np.testing.assert_allclose(struct.properties["bands/bands/band_1"].data, xsf.bands["bands"].data)
+
     def test_atoms_stops_before_following_section(self):
         xsf = XSF.from_str(
             """MOLECULE

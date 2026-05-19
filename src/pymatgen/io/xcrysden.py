@@ -365,6 +365,42 @@ class XSF:
 
         return "\n".join(lines)
 
+    def structure_properties(self) -> dict[str, object]:
+        """Return XSF extras as flat structure properties."""
+        properties: dict[str, object] = {}
+
+        def strip_label_prefix(label: str) -> str:
+            return label.split("/", maxsplit=1)[-1] if "/" in label else label
+
+        for block_name, grid in self.grids.items():
+            labels = grid.labels or [f"UNKGRID{i}" for i in range(grid.data.shape[0])]
+            for index, label in enumerate(labels):
+                key = f"grids/{block_name}/{strip_label_prefix(label)}"
+                properties[key] = XSFGrid(
+                    data=np.asarray(grid.data[index : index + 1]),
+                    lattice=np.asarray(grid.lattice),
+                    origin=np.asarray(grid.origin),
+                    comment=grid.comment,
+                    labels=[label],
+                )
+
+        for block_name, band in self.bands.items():
+            labels = band.labels or [f"UNKBAND{i}" for i in range(band.data.shape[0])]
+            for index, label in enumerate(labels):
+                key = f"bands/{block_name}/{strip_label_prefix(label)}"
+                properties[key] = XSFBand(
+                    data=np.asarray(band.data[index : index + 1]),
+                    lattice=np.asarray(band.lattice),
+                    origin=np.asarray(band.origin),
+                    comment=band.comment,
+                    labels=[label],
+                )
+
+        if self.fermi_energy is not None:
+            properties["bands/fermi_energy"] = self.fermi_energy
+
+        return properties
+
     def write_file(self, filename: PathLike, atom_symbol: bool = True) -> None:
         """Write the structure to an XSF file.
 
