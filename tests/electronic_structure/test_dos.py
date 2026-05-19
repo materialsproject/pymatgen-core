@@ -103,7 +103,7 @@ class TestFermiDos:
         assert isinstance(dos_dict["densities"]["1"][0], float)
         assert not isinstance(dos_dict["densities"]["1"][0], np.float64)
 
-    def test_get_vbm_cbm_doping(self):
+    def test_get_cbm_vbm_doping(self):
         dos = Dos(
             energies=np.array([0.0, 0.5, 1.0, 1.5, 2.0]),
             densities={
