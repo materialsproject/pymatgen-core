@@ -216,7 +216,8 @@ class TestBSPlotterProjected:
                 {"Cu": ["dxy", "s", "px"], "O": ["px", "py", "pz"]},
                 {"Cu": [3, 5], "O": [1]}, num_column=3)
         axs_spec = axs_col[2].get_subplotspec()
-        assert axs_spec.rowspan.start == 0 and axs_spec.colspan.start == 2
+        assert axs_spec.rowspan.start == 0 
+        assert axs_spec.colspan.start == 2
 
         with pytest.raises(
             ValueError,
