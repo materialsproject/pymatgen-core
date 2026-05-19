@@ -3342,7 +3342,7 @@ class IStructure(SiteCollection, MSONable):
             from pymatgen.io.xcrysden import XSF
 
             with zopen(filename, mode="rb") as file:
-                xsf = XSF.from_file(file, **cls._filter_kwargs(XSF.from_file, kwargs))
+                xsf = XSF.parse_file(file, **cls._filter_kwargs(XSF.parse_file, kwargs))
             if xsf.structure is None:
                 raise ValueError("XSF data does not contain a structure; use XSF.from_file for grids or band data")
             if isinstance(xsf.structure, Molecule):

@@ -178,16 +178,26 @@ PRIMCOORD
         assert roundtrip.fermi_energy == 5.0
 
     def test_from_file_reads_fixture(self):
-        with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "crystal_primvec_primcoord.xsf", "rb") as file:
-            xsf = XSF.from_file(file)
+        xsf = XSF.from_file(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "crystal_primvec_primcoord.xsf")
 
         assert xsf.kind == "crystal"
         assert xsf.structure is not None
         assert len(xsf.structure) == 2
 
-    def test_from_file_requires_binary_stream(self):
+    def test_parse_file_supports_file_streams(self):
+        fixture = Path(TEST_FILES_DIR) / "io" / "xcrysden" / "crystal_primvec_primcoord.xsf"
+        with open(fixture, "rb") as file:
+            xsf_binary = XSF.parse_file(file)
+        with open(fixture, encoding="utf-8") as file:
+            xsf_text = XSF.parse_file(file)
+
+        assert xsf_binary.kind == "crystal"
+        assert xsf_text.kind == "crystal"
+        assert xsf_binary.structure == xsf_text.structure
+
+    def test_parse_file_rejects_string_io(self):
         with pytest.raises(TypeError, match="binary stream"):
-            XSF.from_file(StringIO("CRYSTAL\n"))
+            XSF.parse_file(StringIO("CRYSTAL\n"))
 
     def test_datagrid_roundtrip_preserves_values(self):
         with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "datagrid_2d.xsf", "rb") as file:

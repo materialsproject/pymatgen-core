@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from io import BytesIO
-from typing import TYPE_CHECKING
+from io import BufferedIOBase, BytesIO
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from monty.io import zopen
@@ -26,6 +26,29 @@ if TYPE_CHECKING:
 
     from pymatgen.core.trajectory import Trajectory
     from pymatgen.util.typing import PathLike
+
+XSF_KEYWORDS = {
+    b"ANIMSTEPS",
+    b"MOLECULE",
+    b"POLYMER",
+    b"SLAB",
+    b"CRYSTAL",
+    b"PRIMVEC",
+    b"CONVVEC",
+    b"PRIMCOORD",
+    b"ATOMS",
+    b"CONVCOORD",
+    b"BEGIN_BLOCK_DATAGRID_",
+    b"END_BLOCK_DATAGRID",
+    b"BEGIN_DATAGRID_",
+    b"END_DATAGRID",
+    b"BEGIN_INFO",
+    b"END_INFO",
+    b"BEGIN_BLOCK_BANDGRID_",
+    b"END_BLOCK_BANDGRID",
+    b"BEGIN_BANDGRID_",
+    b"END_BANDGRID",
+}
 
 
 @dataclass
@@ -224,7 +247,7 @@ class XSF:
             arr = np.asarray(values, dtype=float)
             return " ".join(f"{value:.14f}" for value in arr)
 
-        def append_flat_values(values: np.ndarray, order: str = "F") -> None:
+        def append_flat_values(values: np.ndarray, order: Literal["C", "F"] = "F") -> None:
             flat = np.asarray(values, dtype=float).ravel(order=order)
             lines.extend(
                 " ".join(f"{value:.14f}" for value in flat[start : start + 6]) for start in range(0, flat.size, 6)
@@ -412,16 +435,18 @@ class XSF:
             file.write(self.to_str(atom_symbol=atom_symbol))
 
     @classmethod
-    def from_file(cls, file) -> Self:
-        """Read an XSF-family file stream.
+    def from_file(cls, filename: PathLike) -> Self:
+        """Read an XSF-family file path.
 
         Args:
-            file: Binary stream with a ``readline`` method that returns ``bytes``.
+            filename: Source filename.
 
         Returns:
             Parsed XSF adapter.
         """
-        return cls.parse_file(file)
+
+        with zopen(filename, mode="rb") as file:
+            return cls.parse_file(file)
 
     @classmethod
     def from_str(cls, input_string: str) -> Self:
@@ -436,12 +461,24 @@ class XSF:
         return cls.parse_file(BytesIO(input_string.encode("utf-8")))
 
     @classmethod
-    def _parser_file(cls, file, current_lattice):
+    def parse_file(cls, file) -> Self:
+        """Parse an XSF-family binary stream or a text wrapper exposing ``.buffer``.
+
+        Args:
+            file: Seekable binary stream with a ``readline`` method that returns ``bytes``,
+                or a text stream exposing ``.buffer``.
+        """
+
+        if hasattr(file, "buffer"):
+            file = file.buffer
+        elif not isinstance(file, (BytesIO, BufferedIOBase)):
+            raise TypeError("XSF.parse_file requires a binary stream opened in bytes mode")
         xsf = cls()
         comments = []
         block_name: str | None = None
         block_dim: int | None = None
         iframe = None
+        current_lattice = None
 
         while True:
             raw = file.readline()
@@ -530,58 +567,33 @@ class XSF:
                     iframe = index
                 if xsf.kind != "molecule":
                     raise ValueError("ATOMS is not valid in MOLECULE sections")
-                species = []
-                coords = []
-                forces = []
-                section_keywords = {
-                    b"ANIMSTEPS",
-                    b"MOLECULE",
-                    b"POLYMER",
-                    b"SLAB",
-                    b"CRYSTAL",
-                    b"PRIMVEC",
-                    b"CONVVEC",
-                    b"PRIMCOORD",
-                    b"ATOMS",
-                    b"CONVCOORD",
-                    b"BEGIN_BLOCK_DATAGRID_",
-                    b"END_BLOCK_DATAGRID",
-                    b"BEGIN_DATAGRID_",
-                    b"END_DATAGRID",
-                    b"BEGIN_INFO",
-                    b"END_INFO",
-                    b"BEGIN_BLOCK_BANDGRID_",
-                    b"END_BLOCK_BANDGRID",
-                    b"BEGIN_BANDGRID_",
-                    b"END_BANDGRID",
-                }
+                atom_species: list[str] = []
+                atom_coords: list[list[float]] = []
+                atom_forces: list[list[float]] | None = []
+
                 while True:
                     now = file.tell()
                     line = file.readline().strip()
                     if not line:
                         break
                     keyword = line.split()[0].upper()
-                    if keyword in section_keywords or any(
-                        keyword.startswith(section_keyword)
-                        for section_keyword in section_keywords
-                        if section_keyword.endswith(b"_")
-                    ):
+                    if keyword in XSF_KEYWORDS or any(keyword.startswith(k) for k in XSF_KEYWORDS if k.endswith(b"_")):
                         file.seek(now)
                         break
                     symbol, x, y, z, *force = line.split()
-                    species.append(symbol.decode("utf-8"))
-                    coords.append([float(x), float(y), float(z)])
-                    forces.append([float(f) for f in force])
-                coords = np.asarray(coords)
-                if not forces or len(forces[0]) == 0:
-                    forces = None
-                elif any(len(force) != 3 for force in forces):
+                    atom_species.append(symbol.decode("utf-8"))
+                    atom_coords.append([float(x), float(y), float(z)])
+                    atom_forces.append([float(f) for f in force])
+                atom_coords = np.asarray(atom_coords)
+                if not atom_forces or len(atom_forces[0]) == 0:
+                    atom_forces = None
+                elif any(len(force) != 3 for force in atom_forces):
                     raise ValueError("Each ATOMS row must have 3 coordinate fields followed by optional force fields")
                 else:
-                    forces = np.asarray(forces)
+                    atom_forces = np.asarray(atom_forces)
 
-                xsf.structure = Molecule(species, coords)
-                xsf.forces = forces
+                xsf.structure = Molecule(atom_species, atom_coords)
+                xsf.forces = atom_forces
                 continue
 
             if keyword == b"CONVCOORD":
@@ -597,7 +609,7 @@ class XSF:
                 if block_name in xsf.grids:
                     raise ValueError(f"Duplicate DATAGRID block name: {block_name}")
 
-                block_labels = []
+                block_labels: list[str] = []
                 block_data = []
                 block_origin = None
                 block_lattice = None
@@ -780,24 +792,6 @@ class XSF:
 
         return xsf
 
-    @classmethod
-    def parse_file(cls, file) -> Self:
-        """Parse an XSF-family binary stream.
-
-        Args:
-            file: Binary stream with a ``readline`` method that returns ``bytes``.
-
-        Returns:
-            XSF object containing parsed structures and metadata.
-
-        """
-        now = file.tell()
-        raw = file.readline()
-        file.seek(now)
-        if not isinstance(raw, bytes):
-            raise TypeError("XSF.parse_file requires a binary stream opened in bytes mode")
-        return cls._parser_file(file, current_lattice=None)
-
 
 @dataclass(eq=False, slots=True)
 class AnimatedXSF:
@@ -836,17 +830,18 @@ class AnimatedXSF:
 
     @classmethod
     def parse_file(cls, file) -> Self:
-        """Parse an animated XSF binary stream.
+        """Parse an animated XSF binary stream or file stream.
 
         Args:
-            file: Binary stream with a ``readline`` method that returns ``bytes``.
-            index: Optional frame index or slice to select specific frames from the trajectory.
-                If None, all frames are parsed.
+            file: Seekable binary stream with a ``readline`` method that returns ``bytes``.
 
         Returns:
             AnimatedXSF object containing parsed frames and metadata.
 
         """
+        if hasattr(file, "buffer"):
+            file = file.buffer
+
         raise NotImplementedError("Parsing of AnimatedXSF files is not implemented yet")
 
     def __len__(self) -> int:
