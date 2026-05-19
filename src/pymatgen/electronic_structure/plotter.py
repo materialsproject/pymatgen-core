@@ -1763,8 +1763,7 @@ class BSPlotterProjected(BSPlotter):
                     else:
                         ax.set_ylim(ylim)
                     ax.set_title(f"{elt} {numa} {o}")
-        axs = fig_main.get_axes()
-        return axs
+        return fig_main.get_axes()
 
     @classmethod
     def _Orbitals_SumOrbitals(cls, dictio, sum_morbs):
