@@ -1694,7 +1694,10 @@ class BSPlotterProjected(BSPlotter):
                             ax = plt.subplot(row, 2, count) if n_figs % 2 == 0 else plt.subplot(row + 1, 2, count)
                     elif isinstance(num_column, int):
                         row = n_figs // num_column
-                        ax = plt.subplot(row, num_column, count) if n_figs % num_column == 0 else plt.subplot(row + 1, num_column, count)
+                        if n_figs % num_column == 0:
+                            ax = plt.subplot(row, num_column, count)
+                        else:
+                            ax = plt.subplot(row + 1, num_column, count)
                     else:
                         raise ValueError("The invalid 'num_column' is assigned. It should be an integer.")
 
