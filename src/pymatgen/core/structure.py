@@ -3274,111 +3274,125 @@ class IStructure(SiteCollection, MSONable):
             return struct
 
         fname = os.path.basename(filename)
-        with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
-            contents: str = file.read()  # type:ignore[assignment]
-            if fnmatch(fname.lower(), "*.cif*") or fnmatch(fname.lower(), "*.mcif*"):
-                return cls.from_str(
-                    contents,
-                    fmt="cif",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            if fnmatch(fname, "*POSCAR*") or fnmatch(fname, "*CONTCAR*") or fnmatch(fname, "*.vasp"):
-                struct = cls.from_str(
-                    contents,
-                    fmt="poscar",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
+        if fnmatch(fname.lower(), "*.cif*") or fnmatch(fname.lower(), "*.mcif*"):
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
+                contents: str = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="cif",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        if fnmatch(fname, "*POSCAR*") or fnmatch(fname, "*CONTCAR*") or fnmatch(fname, "*.vasp"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            struct = cls.from_str(
+                contents,
+                fmt="poscar",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
 
-            elif fnmatch(fname, "CHGCAR*") or fnmatch(fname, "LOCPOT*"):
-                from pymatgen.io.vasp import Chgcar
+        elif fnmatch(fname, "CHGCAR*") or fnmatch(fname, "LOCPOT*"):
+            from pymatgen.io.vasp import Chgcar
 
-                struct = Chgcar.from_file(filename, **kwargs).structure
-            elif fnmatch(fname, "vasprun*.xml*"):
-                from pymatgen.io.vasp import Vasprun
+            struct = Chgcar.from_file(filename, **kwargs).structure
+        elif fnmatch(fname, "vasprun*.xml*"):
+            from pymatgen.io.vasp import Vasprun
 
-                struct = Vasprun(filename, **kwargs).final_structure
-            elif fnmatch(fname.lower(), "*.cssr*"):
-                return cls.from_str(
-                    contents,
-                    fmt="cssr",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "*.json*") or fnmatch(fname, "*.mson*"):
-                return cls.from_str(
-                    contents,
-                    fmt="json",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "*.yaml*") or fnmatch(fname, "*.yml*"):
-                return cls.from_str(
-                    contents,
-                    fmt="yaml",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "*.xsf"):
-                return cls.from_str(
-                    contents,
-                    fmt="xsf",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "input*.xml"):
-                from pymatgen.io.exciting import ExcitingInput
+            struct = Vasprun(filename, **kwargs).final_structure
+        elif fnmatch(fname.lower(), "*.cssr*"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="cssr",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        elif fnmatch(fname, "*.json*") or fnmatch(fname, "*.mson*"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="json",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        elif fnmatch(fname, "*.yaml*") or fnmatch(fname, "*.yml*"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="yaml",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        elif fnmatch(fname, "*.xsf*"):
+            from pymatgen.io.xcrysden import XSF
 
-                return ExcitingInput.from_file(fname, **kwargs).structure  # type:ignore[assignment, return-value]
-            elif fnmatch(fname, "*rndstr.in*") or fnmatch(fname, "*lat.in*") or fnmatch(fname, "*bestsqs*"):
-                return cls.from_str(
-                    contents,
-                    fmt="mcsqs",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "CTRL*"):
-                from pymatgen.io.lmto import LMTOCtrl
+            with zopen(filename, mode="rb") as file:
+                xsf = XSF.from_file(file, **cls._filter_kwargs(XSF.from_file, kwargs))
+            if xsf.structure is None:
+                raise ValueError("XSF data does not contain a structure; use XSF.from_file for grids or band data")
+            if isinstance(xsf.structure, Molecule):
+                raise ValueError("XSF data contains a Molecule; use pymatgen.io.xcrysden.XSF for molecular data")
+            struct = xsf.structure
+            struct.properties.update(xsf.structure_properties())
+        elif fnmatch(fname, "input*.xml"):
+            from pymatgen.io.exciting import ExcitingInput
 
-                return LMTOCtrl.from_file(filename=filename, **kwargs).structure  # type:ignore[assignment,return-value]
-            elif fnmatch(fname, "geometry.in*"):
-                return cls.from_str(
-                    contents,
-                    fmt="aims",
-                    primitive=primitive,
-                    sort=sort,
-                    merge_tol=merge_tol,
-                    **kwargs,
-                )
-            elif fnmatch(fname, "inp*.xml") or fnmatch(fname, "*.in*") or fnmatch(fname, "inp_*"):
-                from pymatgen.io.fleur import FleurInput
+            return ExcitingInput.from_file(filename, **kwargs).structure  # type:ignore[assignment, return-value]
+        elif fnmatch(fname, "*rndstr.in*") or fnmatch(fname, "*lat.in*") or fnmatch(fname, "*bestsqs*"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="mcsqs",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        elif fnmatch(fname, "CTRL*"):
+            from pymatgen.io.lmto import LMTOCtrl
 
-                struct = FleurInput.from_file(filename, **kwargs).structure
-            elif fnmatch(fname, "*.res"):
-                from pymatgen.io.res import ResIO
+            return LMTOCtrl.from_file(filename=filename, **kwargs).structure  # type:ignore[assignment,return-value]
+        elif fnmatch(fname, "geometry.in*"):
+            with zopen(filename, mode="rt", encoding="utf-8") as file:
+                contents = file.read()  # type:ignore[assignment]
+            return cls.from_str(
+                contents,
+                fmt="aims",
+                primitive=primitive,
+                sort=sort,
+                merge_tol=merge_tol,
+                **kwargs,
+            )
+        elif fnmatch(fname, "inp*.xml") or fnmatch(fname, "*.in*") or fnmatch(fname, "inp_*"):
+            from pymatgen.io.fleur import FleurInput
 
-                struct = ResIO.structure_from_file(filename, **kwargs)
-            elif fnmatch(fname.lower(), "*.config*") or fnmatch(fname.lower(), "*.pwmat*"):
-                from pymatgen.io.pwmat import AtomConfig
+            struct = FleurInput.from_file(filename, **kwargs).structure
+        elif fnmatch(fname, "*.res"):
+            from pymatgen.io.res import ResIO
 
-                struct = AtomConfig.from_file(filename, **kwargs).structure
-            else:
-                raise ValueError(f"Unrecognized extension in {filename=}")
+            struct = ResIO.structure_from_file(filename, **kwargs)
+        elif fnmatch(fname.lower(), "*.config*") or fnmatch(fname.lower(), "*.pwmat*"):
+            from pymatgen.io.pwmat import AtomConfig
+
+            struct = AtomConfig.from_file(filename, **kwargs).structure
+        else:
+            raise ValueError(f"Unrecognized extension in {filename=}")
         if sort:
             struct = struct.get_sorted_structure()
         if merge_tol:

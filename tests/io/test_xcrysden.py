@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -178,11 +179,15 @@ PRIMCOORD
 
     def test_from_file_reads_fixture(self):
         with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "crystal_primvec_primcoord.xsf", "rb") as file:
-            xsf = XSF.parse_file(file)
+            xsf = XSF.from_file(file)
 
         assert xsf.kind == "crystal"
         assert xsf.structure is not None
         assert len(xsf.structure) == 2
+
+    def test_from_file_requires_binary_stream(self):
+        with pytest.raises(TypeError, match="binary stream"):
+            XSF.from_file(StringIO("CRYSTAL\n"))
 
     def test_datagrid_roundtrip_preserves_values(self):
         with open(Path(TEST_FILES_DIR) / "io" / "xcrysden" / "datagrid_2d.xsf", "rb") as file:

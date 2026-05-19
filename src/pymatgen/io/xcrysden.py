@@ -412,17 +412,16 @@ class XSF:
             file.write(self.to_str(atom_symbol=atom_symbol))
 
     @classmethod
-    def from_file(cls, filename: PathLike) -> Self:
-        """Read an XSF-family file.
+    def from_file(cls, file) -> Self:
+        """Read an XSF-family file stream.
 
         Args:
-            filename: Source filename.
+            file: Binary stream with a ``readline`` method that returns ``bytes``.
 
         Returns:
             Parsed XSF adapter.
         """
-        with zopen(filename, mode="rb") as file:
-            return cls.parse_file(file)
+        return cls.parse_file(file)
 
     @classmethod
     def from_str(cls, input_string: str) -> Self:
@@ -792,6 +791,11 @@ class XSF:
             XSF object containing parsed structures and metadata.
 
         """
+        now = file.tell()
+        raw = file.readline()
+        file.seek(now)
+        if not isinstance(raw, bytes):
+            raise TypeError("XSF.parse_file requires a binary stream opened in bytes mode")
         return cls._parser_file(file, current_lattice=None)
 
 
