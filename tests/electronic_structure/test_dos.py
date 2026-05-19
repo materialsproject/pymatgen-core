@@ -103,6 +103,26 @@ class TestFermiDos:
         assert isinstance(dos_dict["densities"]["1"][0], float)
         assert not isinstance(dos_dict["densities"]["1"][0], np.float64)
 
+    def test_get_e_h_concs(self):
+        e_conc, h_conc = self.dos.get_e_h_concs(fermi_level=self.dos.efermi + 2.0, temperature=300)
+        assert e_conc == approx(2.6916894571633496e16)
+        assert h_conc == approx(4.906059878298583e-16)
+        assert self.dos.get_doping(fermi_level=self.dos.efermi + 2.0, temperature=300) == approx(h_conc - e_conc)
+
+        dos = Dos(
+            energies=np.array([0.0, 0.5, 1.0, 1.5, 2.0]),
+            densities={
+                Spin.up: np.array([1.0, 2.0e-4, 0.0, 3.0e-4, 4.0]),
+                Spin.down: np.array([0.5, 1.0e-4, 0.0, 1.5e-4, 2.0]),
+            },
+            efermi=0.8,
+        )
+        simple_dos = FermiDos(dos, structure=self.dos.structure)
+        e_conc, h_conc = simple_dos.get_e_h_concs(fermi_level=1.0, temperature=300)
+        assert e_conc == approx(2.4935783946261567e12)
+        assert h_conc == approx(8.311872785950934e11)
+        assert simple_dos.get_doping(fermi_level=1.0, temperature=300) == approx(h_conc - e_conc)
+
     def test_get_cbm_vbm_doping(self):
         dos = Dos(
             energies=np.array([0.0, 0.5, 1.0, 1.5, 2.0]),

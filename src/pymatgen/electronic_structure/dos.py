@@ -447,7 +447,7 @@ class FermiDos(Dos, MSONable):
         ecbm, evbm = self.get_cbm_vbm()
         self.idx_vbm = np.argmin(abs(self.energies - evbm))
         self.idx_cbm = np.argmin(abs(self.energies - ecbm))
-        self.idx_mid_gap = round(self.idx_vbm + (self.idx_cbm - self.idx_vbm) / 2)
+        self.idx_mid_gap = (self.idx_vbm + self.idx_cbm) // 2
         self.A_to_cm = 1e-8
 
         # Default integration bounds:
