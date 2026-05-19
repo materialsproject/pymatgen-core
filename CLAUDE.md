@@ -8,7 +8,7 @@ This is `pymatgen-core` — the trimmed core of the pymatgen ecosystem (the larg
 
 ## Setup & common commands
 
-Dependency management is **`uv`-based** (see `[tool.uv]` in `pyproject.toml`; default groups are `dev`, `test`, `lint`, `docs`).
+Dependency management is **`uv`-based** (see `[tool.uv]` in `pyproject.toml`; default groups are `dev`, `test`, `lint`). Docs are built downstream in the umbrella `pymatgen` repo and there is no `docs/` folder here.
 
 ```sh
 uv sync                       # install all default groups + project (editable)
@@ -25,9 +25,8 @@ Build / release helpers live in `tasks.py` (pyinvoke):
 
 ```sh
 uv run invoke lint             # ruff + mypy + ruff format
-uv run invoke make-doc         # Sphinx HTML API docs into docs/
-uv run invoke update-changelog # generate docs/CHANGES.md from PRs (uses OPENAPI_KEY for GPT summarization)
-uv run invoke release          # full PyPI release flow (maintainer-only)
+uv run invoke update-changelog # generate CHANGES.md from PRs (uses OPENAPI_KEY for GPT summarization)
+uv run invoke release          # full PyPI release flow (maintainer-only); release triggers docs rebuild in materialsproject/pymatgen via repository_dispatch
 ```
 
 ## Cython extensions — important
@@ -52,7 +51,7 @@ Compiled `.so` files live next to the `.pyx` sources (e.g. `src/pymatgen/optimiz
 - The same conftest exposes a `test_files_dir` fixture pointing at `../pymatgen-test-files` (a sibling repo, **not** the in-tree `test-files/` directory). CI sets `PMG_TEST_FILES_DIR=$GITHUB_WORKSPACE/test-files` to redirect to the in-tree copy. Locally, either clone `pymatgen-test-files` as a sibling, symlink it, or set `PMG_TEST_FILES_DIR` to the in-tree `test-files/` path.
 - `pyproject.toml` sets `addopts = "-n auto --import-mode=importlib"`. Tests must work under xdist (no shared mutable global state) and importlib mode (no implicit-namespace tricks).
 - For matplotlib-using tests in headless contexts, set `MPLBACKEND=Agg` (CI does this).
-- **Coverage caveat for optional-dependency files.** `uv sync` only installs the default groups (`dev, test, lint, docs`); it does *not* pull `[project.optional-dependencies]` extras (ase, phonopy, hiphive, netcdf4, …). Test files for those modules begin with `pytest.importorskip(...)` and silently skip when the dep is missing, so a plain local `pytest --cov` reports misleadingly low numbers (e.g. `io/ase.py` shows 18% without `ase`, 95% with it). CI installs `extras: optional` (`uv pip install <wheel>[optional] --group test`), so its coverage numbers are the authoritative ones. To reproduce CI coverage locally, run `uv pip install -e ".[optional]"` before measuring. Note: a few hard-to-install deps (OpenBabel, BoltzTraP, GULP, …) aren't even in `optional` — code gated on those is uniformly untested across all environments and won't be reachable without adding them to a conda-forge install step.
+- **Coverage caveat for optional-dependency files.** `uv sync` only installs the default groups (`dev, test, lint`); it does *not* pull `[project.optional-dependencies]` extras (ase, phonopy, hiphive, netcdf4, …). Test files for those modules begin with `pytest.importorskip(...)` and silently skip when the dep is missing, so a plain local `pytest --cov` reports misleadingly low numbers (e.g. `io/ase.py` shows 18% without `ase`, 95% with it). CI installs `extras: optional` (`uv pip install <wheel>[optional] --group test`), so its coverage numbers are the authoritative ones. To reproduce CI coverage locally, run `uv pip install -e ".[optional]"` before measuring. Note: a few hard-to-install deps (OpenBabel, BoltzTraP, GULP, …) aren't even in `optional` — code gated on those is uniformly untested across all environments and won't be reachable without adding them to a conda-forge install step.
 
 ## Architecture — how the pieces fit
 

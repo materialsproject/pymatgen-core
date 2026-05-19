@@ -13,13 +13,11 @@ import json
 import os
 import re
 import subprocess
-import webbrowser
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import requests
 from invoke import task
-from monty.os import cd
 
 from pymatgen.core import __version__
 
@@ -31,54 +29,6 @@ Provide a concise summary of the following pull requests as a change log for the
 as a markdown bulleted list. Make sure to include the GitHub ids of all the authors. Do not include any code
 blocks and timing outputs. Do not include any dependabot and pre-commit PRs.
 """
-
-
-@task
-def make_doc(ctx: Context) -> None:
-    """
-    Generate API documentation + run Sphinx.
-
-    Args:
-        ctx (Context): The context.
-    """
-    with cd("docs"):
-        ctx.run("touch apidoc/index.rst", warn=True)
-        ctx.run("rm pymatgen.*.rst", warn=True)
-        # ctx.run("rm pymatgen.*.md", warn=True)
-        ctx.run("sphinx-apidoc --implicit-namespaces -M -d 7 -o apidoc -f ../src/pymatgen ../**/tests/*")
-
-        # Note: we use HTML building for the API docs to preserve search functionality.
-        ctx.run("sphinx-build -b html apidoc html")  # HTML building.
-        ctx.run("rm apidoc/*.rst", warn=True)
-        ctx.run("mv html/pymatgen*.html .")
-        ctx.run("mv html/modules.html .")
-
-        # ctx.run("cp markdown/pymatgen*.md .")
-        # ctx.run("rm pymatgen*tests*.md", warn=True)
-        # ctx.run("rm pymatgen*.html", warn=True)
-        # for filename in glob("pymatgen*.md"):
-        #     with open(filename, encoding="utf-8") as file:
-        #         lines = [line.rstrip() for line in file if "Submodules" not in line]
-        #     if filename == "pymatgen.md":
-        #         preamble = ["---", "layout: default", "title: API Documentation", "nav_order: 6", "---", ""]
-        #     else:
-        #         preamble = [
-        #             "---",
-        #             "layout: default",
-        #             f"title: {filename}",
-        #             "nav_exclude: true",
-        #             "---",
-        #             "",
-        #             "1. TOC",
-        #             "{:toc}",
-        #             "",
-        #         ]
-        #     with open(filename, mode="w", encoding="utf-8") as file:
-        #         file.write("\n".join(preamble + lines))
-        ctx.run("rm -r markdown", warn=True)
-        ctx.run("rm -r html", warn=True)
-        ctx.run('sed -I "" "s/_static/assets/g" pymatgen*.html')
-        ctx.run("rm -rf doctrees", warn=True)
 
 
 @task
@@ -122,7 +72,7 @@ def release_github(ctx: Context, version: str) -> None:
         ctx (Context): The context.
         version (str): The version.
     """
-    with open("docs/CHANGES.md", encoding="utf-8") as file:
+    with open("CHANGES.md", encoding="utf-8") as file:
         contents = file.read()
     tokens = re.split(r"\n\#\#\s", contents)
     desc = tokens[1].strip()
@@ -206,7 +156,7 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
 
     except BaseException as ex:
         print(f"Unable to use openai due to {ex}")
-    with open("docs/CHANGES.md", encoding="utf-8") as file:
+    with open("CHANGES.md", encoding="utf-8") as file:
         contents = file.read()
     delim = "##"
     tokens = contents.split(delim)
@@ -214,7 +164,7 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
     if dry_run:
         print(tokens[0] + "##".join(tokens[1:]))
     else:
-        with open("docs/CHANGES.md", mode="w", encoding="utf-8") as file:
+        with open("CHANGES.md", mode="w", encoding="utf-8") as file:
             file.write(tokens[0] + "##".join(tokens[1:]))
         ctx.run("open docs/CHANGES.md")
     print("The following commit messages were not included...")
@@ -222,41 +172,26 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
 
 
 @task
-def release(ctx: Context, version: str | None = None, nodoc: bool = False) -> None:
+def release(ctx: Context, version: str | None = None) -> None:
     """
     Run full sequence for releasing pymatgen.
+
+    Docs are built downstream by the pymatgen repo (triggered via repository_dispatch
+    from the Release workflow), so there is no doc-generation step here.
 
     Args:
         ctx (invoke.Context): The context object.
         version (str, optional): The version to release.
-        nodoc (bool, optional): Whether to skip documentation generation.
     """
     version = version or f"{datetime.now(tz=UTC):%Y.%-m.%-d}"
     ctx.run("rm -r dist build pymatgen.egg-info", warn=True)
     set_ver(ctx, version)
-    # if not nodoc:
-    #     make_doc(ctx)
-    #     ctx.run("git add .")
-    #     ctx.run('git commit --no-verify -a -m "Update docs"')
-    #     ctx.run("git push")
     release_github(ctx, version)
 
     ctx.run("rm -f dist/*.*", warn=True)
     ctx.run("uv pip install -e .", warn=True)
     ctx.run("uv build", warn=True)
     ctx.run("uv publish", warn=True)
-
-
-@task
-def open_doc(ctx: Context) -> None:
-    """
-    Open local documentation in web browser.
-
-    Args:
-        ctx (invoke.Context): The context object.
-    """
-    pth = os.path.abspath("docs/_build/html/index.html")
-    webbrowser.open(f"file://{pth}")
 
 
 @task

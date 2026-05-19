@@ -42,6 +42,7 @@ from pymatgen.io.common import VolumetricData as BaseVolumetricData
 from pymatgen.io.core import ParseError
 from pymatgen.io.vasp.inputs import Incar, Kpoints, KpointsSupportedModes, Poscar, Potcar
 from pymatgen.io.wannier90 import Unk
+from pymatgen.optimization.fast_parser import parse_n_doubles
 from pymatgen.util.io_utils import clean_lines, micro_pyawk
 from pymatgen.util.num import make_symmetric_matrix_from_upper_tri
 
@@ -3878,19 +3879,31 @@ class VolumetricData(BaseVolumetricData):
                     continue
                 if line.startswith(b"augmentation occupancies (imaginary part)"):
                     _, k, n = line.rsplit(maxsplit=2)
-                    arr = VolumetricData._plain_loadtxt(file, int(n))
+                    nelem = int(n)
+                    arr = np.empty(nelem)
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
+                        raise ValueError(f"Expected {nelem} values, got {parsed}")
                     key = int(k)
                     all_dataset_aug[-1][key] = np.asarray(all_dataset_aug[-1][key], dtype=np.complex128) + 1j * arr
                 elif line.startswith(b"augmentation occupancies"):
                     _, k, n = line.rsplit(maxsplit=2)
-                    arr = VolumetricData._plain_loadtxt(file, int(n))
+                    nelem = int(n)
+                    arr = np.empty(nelem)
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
+                        raise ValueError(f"Expected {nelem} values, got {parsed}")
                     all_dataset_aug[-1][int(k)] = arr
                 elif b"." in line:
                     arr = np.loadtxt(BytesIO(line), max_rows=1)
                     # This line's numeric payload is parsed for format alignment but not otherwise used.
                 else:
                     dims = np.loadtxt(BytesIO(line), max_rows=1, dtype=int)
-                    arr = VolumetricData._plain_loadtxt(file, int(dims.prod())).reshape(dims, order="F")
+                    if dims.size != 3:
+                        raise ValueError(f"Expected 3 values, got {dims.size}")
+                    nelem = int(dims.prod())
+                    arr = np.empty(nelem)
+                    if (parsed := parse_n_doubles(file, arr, nelem)) != nelem:
+                        raise ValueError(f"Expected {nelem} values, got {parsed}")
+                    arr = arr.reshape(dims, order="F")
                     arr = np.ascontiguousarray(arr)
                     all_dataset.append(arr)
                     all_dataset_aug.append({})

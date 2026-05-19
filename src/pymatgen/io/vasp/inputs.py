@@ -2734,10 +2734,10 @@ class Potcar(list, MSONable):
 
     @classmethod
     def from_str(cls, data: str):
-        """
-        Read Potcar from a string.
+        """Read Potcar from a string.
 
-        :param data: Potcar as a string.
+        Args:
+            data (str): Potcar as a string.
 
         Returns:
             Potcar
@@ -2759,10 +2759,10 @@ class Potcar(list, MSONable):
 
     @classmethod
     def from_file(cls, filename: str):
-        """
-        Reads Potcar from file.
+        """Read Potcar from file.
 
-        :param filename: Filename
+        Args:
+            filename (str): Filename.
 
         Returns:
             Potcar

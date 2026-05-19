@@ -2820,7 +2820,7 @@ class IStructure(SiteCollection, MSONable):
                 is set.
 
         Returns:
-            List[Structure]
+            list[Structure]
         """
         if self.is_ordered:
             return [self]  # type:ignore[list-item]
@@ -4821,18 +4821,21 @@ class Structure(IStructure, collections.abc.MutableSequence):
         return self
 
     def perturb(self, distance: float, min_distance: float | None = 0.0, seed: int | None = None) -> Self:
-        """
-        Perturbs the positions of sites in the structure by translating each site by a random vector.
+        """Perturb the positions of sites in the structure by translating each site by a random vector.
+
         The magnitude of the translation is determined by the specified distance and, optionally,
         a minimum distance.
 
-        :param distance: The maximum distance for the translation of each site. The corresponding
-            random vector's magnitude will not exceed this distance.
-        :param min_distance: Minimum distance for the perturbation range. Defaults to None, which means all
-            perturbations are the same magnitude.
-        :param seed: Seed for the random number generator to ensure reproducibility. If None (the default for
-            numpy's generator), the generator will be initialized without a specific seed.
-        :return: The updated object with perturbed site positions.
+        Args:
+            distance (float): The maximum distance for the translation of each site. The corresponding
+                random vector's magnitude will not exceed this distance.
+            min_distance (float | None): Minimum distance for the perturbation range. Defaults to None,
+                which means all perturbations are the same magnitude.
+            seed (int | None): Seed for the random number generator to ensure reproducibility. If None
+                (the default for numpy's generator), the generator will be initialized without a specific seed.
+
+        Returns:
+            Self: The updated object with perturbed site positions.
         """
         rng = np.random.default_rng(seed=seed)
 
@@ -5045,20 +5048,18 @@ class Structure(IStructure, collections.abc.MutableSequence):
         return self._calculate(calculator, verbose=verbose)
 
     def calc_property(self, prop: str, calculator="TensorNet-MatPES-PBE-v2025.1-PES", **kwargs) -> dict:
-        """
-        Calculate the specified material property using the provided calculation method or
-        default calculator. This function dynamically maps the property to its corresponding
-        calculation class and performs the computation.
+        """Calculate the specified material property using the provided calculation method or default calculator.
 
-        :param prop: The material property to calculate. Expected values are "elastic",
-            "phonon", or "eos".
-        :type prop: str
-        :param calculator: The specific calculator to use for the computation. Defaults to
-            "TensorNet-MatPES-PBE-v2025.1-PES".
-        :type calculator: str, optional
-        :param kwargs: Additional keyword arguments passed to the calculation method.
-        :return: A dictionary containing the calculated results.
-        :rtype: dict
+        Dynamically maps the property to its corresponding calculation class and performs the computation.
+
+        Args:
+            prop (str): The material property to calculate. Expected values are "elastic", "phonon", or "eos".
+            calculator (str): The specific calculator to use for the computation. Defaults to
+                "TensorNet-MatPES-PBE-v2025.1-PES".
+            **kwargs: Additional keyword arguments passed to the calculation method.
+
+        Returns:
+            dict: A dictionary containing the calculated results.
         """
         prop_map = {
             "elasticity": "ElasticityCalc",
@@ -5464,15 +5465,18 @@ class Molecule(IMolecule, collections.abc.MutableSequence):
         return self
 
     def perturb(self, distance: float, min_distance: float | None = None, seed: int | None = None) -> Self:
-        """
-        Perturbs the positions of sites by a random vector of specified distance and minimum distance.
+        """Perturb the positions of sites by a random vector of specified distance and minimum distance.
+
         The perturbation is constrained within a norm range between min_distance and distance.
 
-        :param distance: Maximum distance by which sites can be perturbed.
-        :param min_distance: Minimum distance for the perturbation range. Defaults to None, which means all
-            perturbations are the same magnitude.
-        :param seed: The seed for the random number generator. Defaults to None.
-        :return: The perturbed Molecule.
+        Args:
+            distance (float): Maximum distance by which sites can be perturbed.
+            min_distance (float | None): Minimum distance for the perturbation range. Defaults to None, which
+                means all perturbations are the same magnitude.
+            seed (int | None): The seed for the random number generator. Defaults to None.
+
+        Returns:
+            Self: The perturbed Molecule.
         """
         rng = np.random.default_rng(seed=seed)
 

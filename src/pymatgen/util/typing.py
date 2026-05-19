@@ -34,6 +34,8 @@ SpeciesLike: TypeAlias = str | Element | Species | DummySpecies
 CompositionLike: TypeAlias = str | Element | Species | DummySpecies | dict | Composition
 
 # Entry or any of its subclasses or dicts that can be unpacked into any of them
+# Note: Union[] (not X | Y) is required here because forward-reference strings
+# cannot be combined with `|` at runtime in a TypeAlias.
 EntryLike: TypeAlias = Union[
     dict[str, Any],
     "Entry",
