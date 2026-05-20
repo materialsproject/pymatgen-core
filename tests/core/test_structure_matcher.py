@@ -14,6 +14,7 @@ from pymatgen.core.structure_matcher import (
     FrameworkComparator,
     OccupancyComparator,
     OrderDisorderElementComparator,
+    SiteOrderedIStructure,
     StructureMatcher,
     get_linear_assignment_solution,
 )
@@ -1060,3 +1061,27 @@ class TestStructureMatcher(MatSciTest):
         assert sm.fit(s1, s2) is False
         assert sm.fit_anonymous(s1, s2) is False
         assert sm.get_mapping(s1, s2) is None
+
+
+def test_site_ordered_istructure_hash_uses_coords() -> None:
+    """Same composition but different fractional coordinates must hash differently.
+
+    Guards against regressions that revert SiteOrderedIStructure.__hash__ to
+    composition-only, which would collapse all same-composition structures into
+    one lru_cache bucket and restore the O(N²) lookup cost.
+    """
+    base = Structure.from_file(f"{TEST_DIR}/Na2Fe2PNO4Se4.json")
+    s1 = SiteOrderedIStructure.from_sites(base)
+
+    shifted = base.copy()
+
+    assert hash(s1) == hash(SiteOrderedIStructure.from_sites(shifted))
+
+    frac_coords = base.frac_coords
+    frac_coords[0] = (frac_coords[0] + 0.05) % 1.0  # shift one site well beyond 1e-3 rounding tolerance
+    for site, fc in zip(shifted, frac_coords, strict=True):
+        site.frac_coords = fc
+    s2 = SiteOrderedIStructure.from_sites(shifted)
+
+    assert s1.composition == s2.composition
+    assert hash(s1) != hash(s2)
