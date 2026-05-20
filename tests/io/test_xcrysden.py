@@ -283,7 +283,7 @@ END_BLOCK_DATAGRID_3D
         assert "density" in xsf.grids
 
     def test_xsf_rejects_atoms_before_kind(self):
-        with pytest.raises(ValueError, match="ATOMS is not valid in MOLECULE sections"):
+        with pytest.raises(ValueError, match="ATOMS is only valid in MOLECULE sections"):
             XSF.from_str(
                 """ATOMS
 1 1

@@ -3286,7 +3286,7 @@ class IStructure(SiteCollection, MSONable):
                 **kwargs,
             )
         if fnmatch(fname, "*POSCAR*") or fnmatch(fname, "*CONTCAR*") or fnmatch(fname, "*.vasp"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             struct = cls.from_str(
                 contents,
@@ -3306,7 +3306,7 @@ class IStructure(SiteCollection, MSONable):
 
             struct = Vasprun(filename, **kwargs).final_structure
         elif fnmatch(fname.lower(), "*.cssr*"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             return cls.from_str(
                 contents,
@@ -3317,7 +3317,7 @@ class IStructure(SiteCollection, MSONable):
                 **kwargs,
             )
         elif fnmatch(fname, "*.json*") or fnmatch(fname, "*.mson*"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             return cls.from_str(
                 contents,
@@ -3328,7 +3328,7 @@ class IStructure(SiteCollection, MSONable):
                 **kwargs,
             )
         elif fnmatch(fname, "*.yaml*") or fnmatch(fname, "*.yml*"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             return cls.from_str(
                 contents,
@@ -3354,7 +3354,7 @@ class IStructure(SiteCollection, MSONable):
 
             return ExcitingInput.from_file(filename, **kwargs).structure  # type:ignore[assignment, return-value]
         elif fnmatch(fname, "*rndstr.in*") or fnmatch(fname, "*lat.in*") or fnmatch(fname, "*bestsqs*"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             return cls.from_str(
                 contents,
@@ -3369,7 +3369,7 @@ class IStructure(SiteCollection, MSONable):
 
             return LMTOCtrl.from_file(filename=filename, **kwargs).structure  # type:ignore[assignment,return-value]
         elif fnmatch(fname, "geometry.in*"):
-            with zopen(filename, mode="rt", encoding="utf-8") as file:
+            with zopen(filename, mode="rt", errors="replace", encoding="utf-8") as file:
                 contents = file.read()  # type:ignore[assignment]
             return cls.from_str(
                 contents,

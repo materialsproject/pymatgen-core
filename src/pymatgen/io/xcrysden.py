@@ -510,7 +510,7 @@ class XSF:
 
             if keyword == b"PRIMVEC":
                 index = int(tokens[1]) if len(tokens) > 1 else None
-                if index is not None and iframe != index:
+                if iframe is not None and index is not None and iframe != index:
                     break  # new frame starts, stop parsing for static XSF
                 if iframe is None and index is not None:
                     iframe = index
@@ -519,7 +519,7 @@ class XSF:
 
             if keyword == b"CONVVEC":
                 index = int(tokens[1]) if len(tokens) > 1 else None
-                if index is not None and iframe != index:
+                if iframe is not None and index is not None and iframe != index:
                     break  # new frame starts, stop parsing for static XSF
                 if iframe is None and index is not None:
                     iframe = index
@@ -528,7 +528,7 @@ class XSF:
 
             if keyword == b"PRIMCOORD":
                 index = int(tokens[1]) if len(tokens) > 1 else None
-                if index is not None and iframe != index:
+                if iframe is not None and index is not None and iframe != index:
                     break  # new frame starts, stop parsing for static XSF
                 if iframe is None and index is not None:
                     iframe = index
@@ -565,12 +565,12 @@ class XSF:
 
             if keyword == b"ATOMS":
                 index = int(tokens[1]) if len(tokens) > 1 else None
-                if index is not None and iframe != index:
+                if iframe is not None and index is not None and iframe != index:
                     break  # new frame starts, stop parsing for static XSF
                 if iframe is None and index is not None:
                     iframe = index
                 if xsf.kind != "molecule":
-                    raise ValueError("ATOMS is not valid in MOLECULE sections")
+                    raise ValueError("ATOMS is only valid in MOLECULE sections")
                 atom_species: list[str] = []
                 atom_coords: list[list[float]] = []
                 atom_forces: list[list[float]] | None = []
