@@ -85,10 +85,9 @@ class SiteOrderedIStructure(IStructure):
         entry to confirm a miss. Including rounded fractional coordinates means
         each lookup requires fewer __eq__ calls.
         """
-        sites_hash = hash(
-            tuple((site.species_string, *np.round(site.frac_coords * 1000).tolist()) for site in self.sites)
-        )
-        return hash((super().__hash__(), sites_hash))
+        species = tuple(site.species_string for site in self.sites)
+        coords = np.round(self.frac_coords, 3).tobytes()
+        return hash((super().__hash__(), species, coords))
 
 
 class AbstractComparator(MSONable, abc.ABC):
