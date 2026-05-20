@@ -149,7 +149,7 @@ class ElementBase(Enum):
             density_of_solid (float, optional): Density in solid phase (kg/m³).
             coefficient_of_linear_thermal_expansion (float, optional): Thermal expansion coefficient (K⁻¹).
             ground_level (float, optional): Ground energy level of the element.
-            ionization_energies (list[Optional[float]]): Ionization energies (kJ/mol), indexed from 0.
+            ionization_energies (list[float | None]): Ionization energies (kJ/mol), indexed from 0.
 
         Examples:
             Create an element instance and access its properties:

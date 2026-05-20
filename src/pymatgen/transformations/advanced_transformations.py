@@ -1941,7 +1941,7 @@ class SQSTransformation(AbstractTransformation):
                     scaling=4 would lead to a 32 atom supercell
                 b. A sequence of three scaling factors, e.g. [2, 1, 1], which
                     specifies that the supercell should have dimensions 2a x b x c
-            cluster_size_and_shell (Optional[Dict[int, int]]): Dictionary of cluster interactions with entries in
+            cluster_size_and_shell (dict[int, int] | None): Dictionary of cluster interactions with entries in
                 the form number of atoms: nearest neighbor shell
             search_time (float, optional): If sqs_method == "mcsqs", the time spent looking for the ideal SQS
                 in minutes (default: 60)

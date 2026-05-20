@@ -241,7 +241,7 @@ class CompleteCohp(Cohp):
         cohp (Sequence[float]): The average COHP.
         icohp (Sequence[float]): The average ICOHP.
         all_cohps (dict[str, Sequence[float]]): COHPs for individual bonds of the form {label: COHP}.
-        orb_res_cohp (dict[str, Dict[str, Sequence[float]]]): Orbital-resolved COHPs.
+        orb_res_cohp (dict[str, dict[str, Sequence[float]]]): Orbital-resolved COHPs.
     """
 
     def __init__(

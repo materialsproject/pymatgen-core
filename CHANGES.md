@@ -1,8 +1,3 @@
----
-layout: default
-title: Change Log
-nav_order: 4
----
 
 # Changelog
 
@@ -27,7 +22,7 @@ nav_order: 4
 
 ## v2026.5.17
 
-**Cold-import latency.** Combined import-path work brings `from pymatgen.core import Structure` from ~244 ms to ~98 ms (−60%) on the reference benchmark machine. 
+**Cold-import latency.** Combined import-path work brings `from pymatgen.core import Structure` from ~244 ms to ~98 ms (−60%) on the reference benchmark machine.
 - PR #56 `Outcar.__init__`: cache OUTCAR text once and route every `read_pattern` / `read_table_pattern` call through the in-memory cache (~1.5–1.8× faster Outcar parsing on real files); vectorize `Vasprun.force_constants` reshape; `@functools.cache` on `_load_yaml_config` in `pymatgen.io.vasp.sets` (by @shyuep)
 - PR #58 New `pymatgen.core.constants` module with embedded CODATA literals; 13 consumer modules migrated off `scipy.constants` (by @shyuep)
 - PR #49 `Composition` / `Element`: cache idempotent properties via `@cached_property` / `@cache` (by @shyuep)
@@ -80,7 +75,7 @@ nav_order: 4
 
 ## v2026.2.24
 
-- First version of pymatgen-core, which includes all basic functionality of pymatgen. 
+- First version of pymatgen-core, which includes all basic functionality of pymatgen.
 - Some refactoring of certain modules, e.g., `structure_matcher`,  `molecule_matcher`, `elasticity`, etc. into
 `pymatgen/core`.
 
@@ -4351,4 +4346,3 @@ all pymatgen objects.
 environment variable.
 - Bug fix for pymatgen.symmetry
 - Ewald sum speed up by factor of 2 or more.
-

@@ -2357,7 +2357,7 @@ class GaussianTypeOrbitalBasisSet(AtomicMetadata):
         lmin: Minimum angular momentum quantum number for each set
         nshell: Number of shells for angular momentum l for each set
         exponents: Exponents for each set
-        coefficients: Contraction coefficients for each set. Dict[exp->l->shell]
+        coefficients: Contraction coefficients for each set. dict[exp->l->shell]
     """
 
     info: BasisInfo | None = None

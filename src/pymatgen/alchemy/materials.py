@@ -354,7 +354,7 @@ class TransformedStructure(MSONable):
         """Generate a StructureNL from TransformedStructure.
 
         Args:
-            authors (List[str]): Authors contributing to the generated StructureNL.
+            authors (list[str]): Authors contributing to the generated StructureNL.
             **kwargs (Any): All kwargs supported by StructureNL.
 
         Returns:

@@ -68,7 +68,7 @@ class TestFermiDos:
         fermi0 = self.dos.efermi
         fermi_range = [fermi0 - 0.5, fermi0, fermi0 + 2.0, fermi0 + 2.2]
         dopings = [self.dos.get_doping(fermi_level=fermi_lvl, temperature=T) for fermi_lvl in fermi_range]
-        ref_dopings = [3.48077e21, 1.9235e18, -2.6909e16, -4.8723e19]
+        ref_dopings = [3.48144e21, 1.92284e18, -2.69169e16, -4.87399e19]
         for idx, c_ref in enumerate(ref_dopings):
             assert abs(dopings[idx] / c_ref - 1.0) <= 0.01
 
@@ -89,7 +89,7 @@ class TestFermiDos:
             else:
                 assert sci_dos.get_fermi(c_ref, temperature=T) - fermi_range[idx] == approx(-0.4651, abs=1e-2)
 
-        assert sci_dos.get_fermi_interextrapolated(-1e26, 300) == approx(7.50533, abs=1e-4)
+        assert sci_dos.get_fermi_interextrapolated(-1e26, 300) == approx(7.50545, abs=1e-4)
         assert sci_dos.get_fermi_interextrapolated(1e26, 300) == approx(-1.41276, abs=1e-4)
         assert sci_dos.get_fermi_interextrapolated(0.0, 300) == approx(2.9069, abs=1e-4)
 
@@ -103,7 +103,27 @@ class TestFermiDos:
         assert isinstance(dos_dict["densities"]["1"][0], float)
         assert not isinstance(dos_dict["densities"]["1"][0], np.float64)
 
-    def test_get_vbm_cbm_doping(self):
+    def test_get_e_h_concs(self):
+        e_conc, h_conc = self.dos.get_e_h_concs(fermi_level=self.dos.efermi + 2.0, temperature=300)
+        assert e_conc == approx(2.6916894571633496e16)
+        assert h_conc == approx(4.906059878298583e-16)
+        assert self.dos.get_doping(fermi_level=self.dos.efermi + 2.0, temperature=300) == approx(h_conc - e_conc)
+
+        dos = Dos(
+            energies=np.array([0.0, 0.5, 1.0, 1.5, 2.0]),
+            densities={
+                Spin.up: np.array([1.0, 2.0e-4, 0.0, 3.0e-4, 4.0]),
+                Spin.down: np.array([0.5, 1.0e-4, 0.0, 1.5e-4, 2.0]),
+            },
+            efermi=0.8,
+        )
+        simple_dos = FermiDos(dos, structure=self.dos.structure)
+        e_conc, h_conc = simple_dos.get_e_h_concs(fermi_level=1.0, temperature=300)
+        assert e_conc == approx(2.4935783946261567e12)
+        assert h_conc == approx(8.311872785950934e11)
+        assert simple_dos.get_doping(fermi_level=1.0, temperature=300) == approx(h_conc - e_conc)
+
+    def test_get_cbm_vbm_doping(self):
         dos = Dos(
             energies=np.array([0.0, 0.5, 1.0, 1.5, 2.0]),
             densities={
@@ -117,9 +137,10 @@ class TestFermiDos:
             structure=self.dos.structure,
         )
         assert fermi_dos.get_cbm_vbm() == approx((1.1667, 0.75), abs=1e-4)
+        # <0 because e doping; greater DOS in CBM than VBM here, and efermi set to mid-gap:
         assert np.isclose(
             fermi_dos.get_doping(fermi_level=1.0, temperature=300),
-            -4.1557e11,  # <0 because e doping; greater DOS in CBM than VBM here, and efermi set to mid-gap
+            -1.6624e12,
             rtol=1e-3,
         )
 

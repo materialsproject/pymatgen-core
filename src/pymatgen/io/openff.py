@@ -134,7 +134,7 @@ def get_atom_map(inferred_mol: tk.Molecule, openff_mol: tk.Molecule) -> tuple[bo
         openff_mol (tk.Molecule): The second OpenFF Molecule.
 
     Returns:
-        Tuple[bool, Dict[int, int]]: A tuple containing a boolean indicating if an
+        tuple[bool, dict[int, int]]: A tuple containing a boolean indicating if an
             isomorphism was found and a dictionary representing the atom mapping.
     """
     # do not apply formal charge restrictions
@@ -190,11 +190,11 @@ def add_conformer(openff_mol: tk.Molecule, geometry: Molecule | None) -> tuple[t
 
     Args:
         openff_mol (tk.Molecule): The OpenFF Molecule to add conformers to.
-        geometry (Union[pymatgen.core.Molecule, None]): The geometry to use for adding
+        geometry (pymatgen.core.Molecule | None): The geometry to use for adding
             conformers.
 
     Returns:
-        Tuple[tk.Molecule, Dict[int, int]]: A tuple containing the updated OpenFF
+        tuple[tk.Molecule, dict[int, int]]: A tuple containing the updated OpenFF
             Molecule with added conformers and a dictionary representing the atom
             mapping.
     """
@@ -232,10 +232,10 @@ def assign_partial_charges(
 
     Args:
         openff_mol (tk.Molecule): The OpenFF Molecule to assign partial charges to.
-        atom_map (Dict[int, int]): A dictionary representing the atom mapping.
+        atom_map (dict[int, int]): A dictionary representing the atom mapping.
         charge_method (str): The charge method to use if partial charges are
             not provided.
-        partial_charges (Union[None, List[float]]): A list of partial charges to
+        partial_charges (list[float] | None): A list of partial charges to
             assign or None to use the charge method.
 
     Returns:
@@ -270,12 +270,12 @@ def create_openff_mol(
 
     Args:
         smile (str): The SMILES string of the molecule.
-        geometry (Union[pymatgen.core.Molecule, str, Path, None], optional): The
+        geometry (pymatgen.core.Molecule | str | Path | None): The
             geometry to use for adding conformers. Can be a Pymatgen Molecule,
             file path, or None.
-        charge_scaling (float, optional): The scaling factor for partial charges.
+        charge_scaling (float): The scaling factor for partial charges.
             Default is 1.
-        partial_charges (Union[List[float], None], optional): A list of partial
+        partial_charges (list[float] | None): A list of partial
             charges to assign, or None to use the charge method.
         backup_charge_method (str, optional): The backup charge method to use if
             partial charges are not provided. Default is "am1bcc".

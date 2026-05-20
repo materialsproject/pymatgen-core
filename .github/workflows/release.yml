@@ -94,3 +94,21 @@ jobs:
         with:
           skip-existing: true
           verbose: true
+
+  trigger_pymatgen_docs:
+    # Rebuild the umbrella pymatgen docs (which merge in pymatgen-core's API) on every
+    # PyPI release. The PYMATGEN_DISPATCH_TOKEN secret is a PAT (or fine-grained token)
+    # with `actions: write` on materialsproject/pymatgen.
+    needs: release
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch to materialsproject/pymatgen
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PYMATGEN_DISPATCH_TOKEN }}
+          repository: materialsproject/pymatgen
+          event-type: pymatgen-core-release
+          client-payload: |
+            {"version": "${{ github.event.release.tag_name }}",
+             "release_url": "${{ github.event.release.html_url }}"}

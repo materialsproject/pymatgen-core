@@ -1833,7 +1833,7 @@ def get_points_in_spheres(
         return_fcoords: (bool) whether to return fractional coords when pbc is set.
 
     Returns:
-        List[List[Tuple[coords, distance, index, image]]]
+        list[list[tuple[coords, distance, index, image]]]
     """
     if isinstance(pbc, bool):
         pbc = [pbc] * 3

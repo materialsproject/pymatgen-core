@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/materialsproject/pymatgen-core/raw/main/docs/assets/pymatgen-white.svg">
-    <img alt="Logo" src="https://github.com/materialsproject/pymatgen-core/raw/main/docs/assets/pymatgen.svg"
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/materialsproject/pymatgen/raw/master/docs/assets/pymatgen-white.svg">
+    <img alt="Logo" src="https://github.com/materialsproject/pymatgen/raw/master/docs/assets/pymatgen.svg"
 height="70">
   </picture>
 </h1>
@@ -87,7 +87,7 @@ Note that `pymatgen-core` imports under the same `pymatgen` namespace (e.g. `fro
 
 ## Change Log
 
-See [GitHub releases](https://github.com/materialsproject/pymatgen-core/releases), [`docs/CHANGES.md`](docs/CHANGES.md) or [commit history](https://github.com/materialsproject/pymatgen-core/commits/master) in increasing order of details.
+See [GitHub releases](https://github.com/materialsproject/pymatgen-core/releases), [`CHANGES.md`](CHANGES.md) or [commit history](https://github.com/materialsproject/pymatgen-core/commits/master) in increasing order of details. Rendered docs (including the merged changelog) live at <https://pymatgen.org>.
 
 ## Using pymatgen
 

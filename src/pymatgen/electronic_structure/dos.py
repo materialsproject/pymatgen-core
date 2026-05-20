@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
 from monty.json import MSONable
+from scipy.integrate import trapezoid
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import hilbert
 from scipy.special import expit
@@ -443,58 +444,77 @@ class FermiDos(Dos, MSONable):
         self.energies = np.array(dos.energies)
         self.de = np.hstack((self.energies[1:], self.energies[-1])) - self.energies
 
-        # Normalize total density of states based on integral at 0 K
-        tdos = np.array(self.get_densities())
-        self.tdos = tdos * self.nelecs / (tdos * self.de)[self.energies <= self.efermi].sum()
-
         ecbm, evbm = self.get_cbm_vbm()
-        self.idx_vbm = int(np.argmin(abs(self.energies - evbm)))
-        self.idx_cbm = int(np.argmin(abs(self.energies - ecbm)))
-        self.idx_mid_gap = int(self.idx_vbm + (self.idx_cbm - self.idx_vbm) / 2)
+        self.idx_vbm = np.argmin(abs(self.energies - evbm))
+        self.idx_cbm = np.argmin(abs(self.energies - ecbm))
+        self.idx_mid_gap = (self.idx_vbm + self.idx_cbm) // 2
         self.A_to_cm = 1e-8
 
+        # Default integration bounds:
+        self.idx_h_integration = max(self.idx_mid_gap, self.idx_vbm + 1)
+        self.idx_e_integration = min(self.idx_mid_gap, self.idx_cbm - 1) + 1
+
+        # Normalize total density of states based on integral at 0 K; use trapezoid for accurate DOS
+        # integration, consistent with get_e_h_concs:
+        tdos = np.array(self.get_densities())
+        self.tdos = (
+            tdos * self.nelecs / trapezoid(tdos[: self.idx_h_integration], x=self.energies[: self.idx_h_integration])
+        )
+
         if bandgap:
-            eref = self.efermi if evbm < self.efermi < ecbm else (evbm + ecbm) / 2.0
+            self.energies[: self.idx_mid_gap] -= (bandgap - (ecbm - evbm)) / 2.0
+            self.energies[self.idx_mid_gap :] += (bandgap - (ecbm - evbm)) / 2.0
 
-            idx_fermi = int(np.argmin(abs(self.energies - eref)))
-
-            if idx_fermi == self.idx_vbm:
-                # Fermi level and VBM should have different indices
-                idx_fermi += 1
-
-            self.energies[:idx_fermi] -= (bandgap - (ecbm - evbm)) / 2.0
-            self.energies[idx_fermi:] += (bandgap - (ecbm - evbm)) / 2.0
-
-    def get_doping(self, fermi_level: float, temperature: float) -> float:
+    def get_e_h_concs(self, fermi_level: float, temperature: float) -> tuple[float, float]:
         """
-        Calculate the doping (majority carrier concentration) at a given
-        Fermi level and temperature. A simple Left Riemann sum is used for
-        integrating the density of states over energy & equilibrium Fermi-Dirac
-        distribution.
+        Get the electron and hole concentrations (in cm^-3) at a given Fermi
+        level and temperature.
 
         Args:
             fermi_level (float): The Fermi level in eV.
             temperature (float): The temperature in Kelvin.
 
         Returns:
-            float: The doping concentration in units of 1/cm^3. Negative values
-                indicate that the majority carriers are electrons (N-type),
-                whereas positive values indicates the majority carriers are holes
-                (P-type).
+            tuple[float, float]: The electron and hole concentrations in cm^-3.
         """
-        cb_integral = np.sum(
-            self.tdos[max(self.idx_mid_gap, self.idx_vbm + 1) :]
-            * f0(self.energies[max(self.idx_mid_gap, self.idx_vbm + 1) :], fermi_level, temperature)
-            * self.de[max(self.idx_mid_gap, self.idx_vbm + 1) :],
-            axis=0,
+        scale = self.volume * self.A_to_cm**3
+        ih, ie = self.idx_h_integration, self.idx_e_integration
+        e_conc: float = (
+            trapezoid(  # use trapezoid rule for accurate DOS integration
+                self.tdos[ie:] * f0(self.energies[ie:], fermi_level, temperature),
+                x=self.energies[ie:],
+            )
+            / scale
         )
-        vb_integral = np.sum(
-            self.tdos[: min(self.idx_mid_gap, self.idx_cbm - 1) + 1]
-            * f0(-self.energies[: min(self.idx_mid_gap, self.idx_cbm - 1) + 1], -fermi_level, temperature)
-            * self.de[: min(self.idx_mid_gap, self.idx_cbm - 1) + 1],
-            axis=0,
+        h_conc: float = (
+            trapezoid(
+                self.tdos[:ih] * f0(-self.energies[:ih], -fermi_level, temperature),
+                x=self.energies[:ih],
+            )
+            / scale
         )
-        return (vb_integral - cb_integral) / (self.volume * self.A_to_cm**3)
+
+        return e_conc, h_conc
+
+    def get_doping(self, fermi_level: float, temperature: float) -> float:
+        """
+        Calculate the doping (majority carrier concentration) at a given
+        Fermi level and temperature. Trapezoid sum is used for integrating the
+        density of states over energy & equilibrium Fermi-Dirac distribution.
+
+        Args:
+            fermi_level (float): The Fermi level in eV.
+            temperature (float): The temperature in Kelvin.
+
+        Returns:
+            float:
+                The doping concentration in units of 1/cm^3. Negative values
+                indicate that the majority carriers are electrons (N-type),
+                whereas positive values indicates the majority carriers are
+                holes (P-type).
+        """
+        e, h = self.get_e_h_concs(fermi_level, temperature)
+        return h - e
 
     def get_fermi(
         self,

@@ -64,10 +64,10 @@ def extract_info_from_cp_text(
     Extract specific information from a Multiwfn QTAIM output.
 
     Args:
-        lines_split (List[List[str]]): List of lines from a (pre-processed) CP file, containing only information
+        lines_split (list[list[str]]): List of lines from a (pre-processed) CP file, containing only information
             regarding one critical point, split by whitespace
         cp_type: Type of critical point. Currently, can be "atom", "bond", "ring", or "cage"
-        conditionals (Dict[str, List[str]]): Parameters to extract with strings to search for to see if the
+        conditionals (dict[str, list[str]]): Parameters to extract with strings to search for to see if the
             data is present
 
     Returns:
@@ -137,7 +137,7 @@ def parse_cp(lines: list[str]) -> tuple[str | None, dict[str, Any]]:
     Parse information from a single QTAIM critical point.
 
     Args:
-        lines (List[str]): list of lines from a (preparsed) CP file, containing only information regarding one
+        lines (list[str]): list of lines from a (preparsed) CP file, containing only information regarding one
             critical point
     Returns:
         cp_dict: dictionary of critical point information
@@ -173,7 +173,7 @@ def get_qtaim_descs(file: PathLike) -> dict[str, dict[str, Any]]:
         file (PathLike): path to CPprop file
 
     Returns:
-        descriptors (Dict[str, Dict[str, Any]]): Output dictionary of QTAIM descriptors
+        descriptors (dict[str, dict[str, Any]]): Output dictionary of QTAIM descriptors
 
     """
 
@@ -211,11 +211,11 @@ def separate_cps_by_type(qtaim_descs: dict[Any, dict[str, Any]]) -> dict[str, di
     Separates QTAIM descriptors by type (atom, bond, ring, or cage)
 
     Args:
-        qtaim_descs (Dict[str, Dict[str, Any]]): Dictionary where keys are CP names and values are dictionaries of
+        qtaim_descs (dict[str, dict[str, Any]]): Dictionary where keys are CP names and values are dictionaries of
             descriptors obtained from `get_qtaim_descs` and `parse_cp`
 
     Returns:
-        organized_descs (Dict[str, Dict[str, Dict[str, Any]]]): Dictionary of organized QTAIM critical points and their
+        organized_descs (dict[str, dict[str, dict[str, Any]]]): Dictionary of organized QTAIM critical points and their
             descriptors. Keys are "atom", "bond", "ring", and "cage", and values are dicts
             {<CP name>: <QTAIM descriptors>}
     """
@@ -252,7 +252,7 @@ def match_atom_cp(
     Args:
         molecule (Molecule): structure corresponding to this Multiwfn calculation
         index (int): index of the atom to be matched
-        atom_cp_dict (Dict[str, Dict[str, Any]]): Dictionary where keys are critical point names and values are
+        atom_cp_dict (dict[str, dict[str, Any]]): Dictionary where keys are critical point names and values are
             descriptors, including element symbol and position
         max_distance (float): Maximum distance (in Angstrom) that a critical point can be away from an atom center
             and be associated with that atom. Default is 0.5 Angstrom
@@ -293,14 +293,14 @@ def map_atoms_cps(
 
     Args:
         molecule (Molecule): structure corresponding to this Multiwfn calculation
-        atom_cp_dict (Dict[str, Dict[str, Any]]): Dictionary where keys are critical point names and values are
+        atom_cp_dict (dict[str, dict[str, Any]]): Dictionary where keys are critical point names and values are
             descriptors, including element symbol and position
         max_distance (float): Maximum distance (in Angstrom) that a critical point can be away from an atom center
             and be associated with that atom. Default is 0.5 Angstrom
     Returns:
-        index_to_cp_desc (Dict[int, Dict[str, Any]]): Dictionary mapping atomic indices to atom critical point
+        index_to_cp_desc (dict[int, dict[str, Any]]): Dictionary mapping atomic indices to atom critical point
             descriptors
-        missing_atoms (List[int]): list of dft atoms that do not have a cp found in qtaim
+        missing_atoms (list[int]): list of dft atoms that do not have a cp found in qtaim
     """
 
     index_to_cp_desc = dict()
@@ -337,7 +337,7 @@ def add_atoms(
 
     Args:
         molecule (Molecule): structure corresponding to this Multiwfn calculation
-        organized_cps (Dict[str, Dict[Any, Dict[str, Any]]]): Keys are CP categories ("atom", "bond", "ring", and
+        organized_cps (dict[str, dict[Any, dict[str, Any]]]): Keys are CP categories ("atom", "bond", "ring", and
             "cage"). Values are themselves dictionaries, where the keys are CP names (or atom indices) and the values
             are CP descriptors
         bond_atom_criterion (Literal["qtaim", "distance", "combined"]): If this is "qtaim", the inherent bonding
@@ -357,7 +357,7 @@ def add_atoms(
             bond/ring CP, plus this margin. Default is 0.5 Angstrom
 
     Returns:
-        modified_organized_cps (Dict[str, Dict[str, Dict[str, Any]]]): CP dict with additional information added.
+        modified_organized_cps (dict[str, dict[str, dict[str, Any]]]): CP dict with additional information added.
     """
 
     def sort_cps_by_distance(
@@ -536,7 +536,7 @@ def process_multiwfn_qtaim(
             bond/ring CP, plus this margin. Default is 0.5 Angstrom
 
     Returns:
-        with_atoms (Dict[str, Dict[str, Dict[str, Any]]]): QTAIM descriptors, organized by type ("atom", "bond",
+        with_atoms (dict[str, dict[str, dict[str, Any]]]): QTAIM descriptors, organized by type ("atom", "bond",
             "ring", "cage"), with additional metadata added to bond, ring, and cage CPs
     """
 

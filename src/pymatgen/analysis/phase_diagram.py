@@ -1631,13 +1631,13 @@ class CompoundPhaseDiagram(PhaseDiagram):
 
     @staticmethod
     def num2str(num):
-        """
-        Convert number to a list of letter(s). First letter must be `f`.
+        """Convert number to a list of letter(s). First letter must be `f`.
 
-        :param num int: Number to convert
+        Args:
+            num (int): Number to convert.
 
-        :rtype: str
-        :return Converted string
+        Returns:
+            str: Converted string.
         """
 
         # `f` letter was hard coded, do not modify. Alphabet consists of letters
