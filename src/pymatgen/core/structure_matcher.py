@@ -86,12 +86,10 @@ class SiteOrderedIStructure(IStructure):
         each lookup requires fewer __eq__ calls.
         """
         sites_hash = hash(
-            tuple(
-                (site.species_string, *np.round(site.frac_coords*1000).tolist())
-                for site in self.sites
-            )
+            tuple((site.species_string, *np.round(site.frac_coords * 1000).tolist()) for site in self.sites)
         )
         return hash((super().__hash__(), sites_hash))
+
 
 class AbstractComparator(MSONable, abc.ABC):
     """
