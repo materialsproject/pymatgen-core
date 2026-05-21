@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/materialsproject/pymatgen/raw/master/docs/assets/pymatgen-white.svg">
-    <img alt="Logo" src="https://github.com/materialsproject/pymatgen/raw/master/docs/assets/pymatgen.svg"
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/materialsproject/pymatgen-core/raw/main/assets/pymatgen-core.svg">
+    <img alt="Logo" src="https://github.com/materialsproject/pymatgen-core/raw/main/assets/pymatgen-core.svg"
 height="70">
   </picture>
 </h1>
@@ -132,7 +132,6 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR TH
 ## About the Pymatgen Development Team
 
 Shyue Ping Ong (@shyuep) of the [Materialyze Lab] started Pymatgen in 2011 and is still the project lead.
-Janosh Riebesell (@janosh) and Matthew Horton (@mkhorton) are co-maintainers.
 
 The [`pymatgen` development team] is the set of all contributors to the `pymatgen` project, including all subprojects.
 

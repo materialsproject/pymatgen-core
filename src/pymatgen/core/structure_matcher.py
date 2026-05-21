@@ -77,8 +77,17 @@ class SiteOrderedIStructure(IStructure):
         return list(self.sites) == list(other.sites)
 
     def __hash__(self) -> int:
-        """Use the composition hash for now."""
-        return super().__hash__()
+        """Hash incorporating site positions to avoid LRU cache collisions.
+
+        The lru_cache on _get_reduced_istructure uses this hash as a key.
+        With a composition-only hash, structures sharing the same composition
+        all collide, requiring an O(N_sites) __eq__ call against each cached
+        entry to confirm a miss. Including rounded fractional coordinates means
+        each lookup requires fewer __eq__ calls.
+        """
+        species = tuple(site.species_string for site in self.sites)
+        coords = np.round(self.frac_coords, 3).tobytes()
+        return hash((super().__hash__(), species, coords))
 
 
 class AbstractComparator(MSONable, abc.ABC):
