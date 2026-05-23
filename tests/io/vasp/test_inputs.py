@@ -658,7 +658,7 @@ class TestIncar(MatSciTest):
         assert float(incar["EDIFF"]) == approx(1e-4), "Wrong EDIFF"
         assert isinstance(incar["LORBIT"], int)
 
-    def test_lattice_constaints(self):
+    def test_lattice_constraints_and_ROPT(self):
         incar_str = """
         ALGO = Fast
 EDIFF = 0.00045000000000000004
@@ -676,9 +676,16 @@ MAGMOM = 9*0.6
 NELM = 100
 NSW = 99
 PREC = Accurate
+ROPT = 1e-3 1e-3
 SIGMA = 0.05"""
         incar = Incar.from_str(incar_str)
         assert incar["LATTICE_CONSTRAINTS"] == [False, False, True]
+        assert incar["ROPT"] == [1e-3, 1e-3]
+        assert incar["MAGMOM"] == [0.6] * 9
+        assert incar["PREC"] == "Accurate"
+
+        incar = Incar.from_str("ROPT = 2*1e-3")
+        assert incar["ROPT"] == [1e-3, 1e-3]
 
     def test_check_for_duplicate(self):
         incar_str: str = """encut = 400
