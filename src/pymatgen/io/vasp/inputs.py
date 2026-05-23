@@ -1042,11 +1042,14 @@ class Incar(UserDict, MSONable):
                     return int(str_)
 
                 output = []
-                tokens = re.findall(r"(-?\d+\.?\d*|[\.A-Z]+)\*?(-?\d+\.?\d*|[\.A-Z]+)?\*?(-?\d+\.?\d*|[\.A-Z]+)?", val)
+                # a single token is a number (incl. scientific notation, e.g. 1e-3) or an uppercase/dot
+                # string (e.g. .TRUE.); up to 3 tokens may be joined by "*" multipliers (e.g. 9*0.6)
+                num_or_str = r"-?\d+\.?\d*(?:[eE][-+]?\d+)?|[\.A-Z]+"
+                tokens = re.findall(rf"({num_or_str})\*?({num_or_str})?\*?({num_or_str})?", val)
                 for tok in tokens:
-                    if tok[2] and "3" in tok[0]:
+                    if tok[2]:  # nested multiplier "count1*count2*value" (e.g. 3*3*-1)
                         output.extend([smart_int_or_float_bool(tok[2])] * int(tok[0]) * int(tok[1]))
-                    elif tok[1]:
+                    elif tok[1]:  # multiplier "count*value" (e.g. 9*0.6)
                         output.extend([smart_int_or_float_bool(tok[1])] * int(tok[0]))
                     else:
                         output.append(smart_int_or_float_bool(tok[0]))
