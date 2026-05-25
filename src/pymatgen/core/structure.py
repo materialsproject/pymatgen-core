@@ -1158,7 +1158,7 @@ class IStructure(SiteCollection, MSONable):
         scale_matrix = np.array(scaling_matrix, int)
         if scale_matrix.shape != (3, 3):
             scale_matrix = scale_matrix * np.eye(3)  # (ruff-preview) noqa: PLR6104
-        new_lattice = Lattice(np.dot(scale_matrix, self.lattice.matrix))
+        new_lattice = Lattice(np.dot(scale_matrix, self.lattice.matrix), pbc=self.lattice.pbc)
 
         frac_lattice = lattice_points_in_supercell(scale_matrix)
         cart_lattice: NDArray = new_lattice.get_cartesian_coords(frac_lattice)
