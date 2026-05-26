@@ -1046,6 +1046,10 @@ class TestStructure(MatSciTest):
         self.disordered = Structure.from_spacegroup("Im-3m", Lattice.cubic(3), [Composition("Fe0.5Mn0.5")], [[0, 0, 0]])
         self.labeled_structure = Structure(lattice, ["Si", "Si"], coords, labels=["Si1", "Si2"])
 
+        # 2-D slab: periodic in x,y only - used by pbc-preservation tests
+        slab_lattice = Lattice([[3, 0, 0], [0, 3, 0], [0, 0, 20]], pbc=(True, True, False))
+        self.slab = Structure(slab_lattice, ["Si"], [[0, 0, 0]])
+
     def test_calc_property(self):
         pytest.importorskip("matcalc")
         d = self.struct.calc_property("elasticity")
@@ -1463,6 +1467,16 @@ class TestStructure(MatSciTest):
         struct.apply_operation(op, fractional=False)
         assert struct.get_space_group_info() == spg_info
 
+        # pbc must survive symmetry operations
+        op = SymmOp.from_axis_angle_and_translation([0, 0, 1], 90)
+        slab = self.slab.copy()
+        slab.apply_operation(op)  # Cartesian branch
+        assert slab.pbc == (True, True, False)
+
+        slab = self.slab.copy()
+        slab.apply_operation(op, fractional=True)  # fractional branch
+        assert slab.pbc == (True, True, False)
+
     def test_apply_strain(self):
         struct = self.struct
         initial_coord = struct[1].coords
@@ -1558,6 +1572,10 @@ class TestStructure(MatSciTest):
         assert struct.formula == "Si8"
         assert_allclose(struct.lattice.abc, [7.6803959, 17.5979979, 7.6803959])
 
+        # pbc must be preserved for every scaling form
+        for scaling in [(2, 2, 1), 2, [[2, 0, 0], [0, 2, 0], [0, 0, 1]]]:
+            assert (self.slab * scaling).pbc == (True, True, False)
+
     def test_make_supercell(self):
         supercell = self.struct.make_supercell([2, 1, 1])
         assert supercell.formula == "Si4"
@@ -1576,6 +1594,11 @@ class TestStructure(MatSciTest):
         supercell = self.struct.make_supercell([2.5, 1, 1], in_place=False)
         assert len(self.struct) == orig_len
         assert len(supercell) == 2 * orig_len
+
+        # pbc must be preserved for in-place make_supercell
+        slab = self.slab.copy()
+        slab.make_supercell((2, 2, 1))
+        assert slab.pbc == (True, True, False)
 
     def test_make_supercell_labeled(self):
         struct = self.labeled_structure.copy()

@@ -4316,7 +4316,7 @@ class Structure(IStructure, collections.abc.MutableSequence):
         """
         if fractional:
             new_latt = np.dot(symm_op.rotation_matrix, self._lattice.matrix)
-            self._lattice = Lattice(new_latt)
+            self._lattice = Lattice(new_latt, pbc=self._lattice.pbc)
 
             def operate_site(site):
                 return PeriodicSite(
@@ -4330,7 +4330,9 @@ class Structure(IStructure, collections.abc.MutableSequence):
                 )
 
         else:
-            self._lattice = Lattice([symm_op.apply_rotation_only(row) for row in self._lattice.matrix])
+            self._lattice = Lattice(
+                [symm_op.apply_rotation_only(row) for row in self._lattice.matrix],
+                pbc=self._lattice.pbc)
 
             def operate_site(site):
                 new_cart = symm_op.operate(site.coords)
