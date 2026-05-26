@@ -573,6 +573,12 @@ class TestIStructure(MatSciTest):
         struct = IStructure(Lattice.cubic(4.09), ["Ag"] * 4, coords)
         assert len(struct.get_primitive_structure()) == 4
 
+        # pbc must survive primitive-cell reduction
+        coords = [[0, 0, 0], [0.75, 0.5, 0.75]]
+        struct_pbc = IStructure(self.lattice_pbc, ["Si"] * 2, coords)
+        struct_pbc_prim = struct_pbc.get_primitive_structure()
+        assert struct_pbc_prim.pbc == (True, True, False)
+
     def test_primitive_cell_site_merging(self):
         lattice = Lattice.cubic(10)
         coords = [[0, 0, 0], [0, 0, 0.5], [0, 0, 0.26], [0, 0, 0.74]]
