@@ -213,7 +213,7 @@ class TestBSPlotterProjected:
         assert len(axes) == 2, f"{len(axes)=}"
         assert len(axes[0].get_lines()) == 4903, f"{len(axes[0].get_lines())=}"
         assert len(axes[-1].get_lines()) == 4903, f"{len(axes[-1].get_lines())=}"
-        
+
         axs = self.plotter_Cu2O.get_projected_plots_dots_patom_pmorb(
             {"Cu": ["dxy", "s", "px"], "O": ["px", "py", "pz"]},
             {"Cu": [3, 5], "O": [1]},
