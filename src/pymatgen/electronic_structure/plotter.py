@@ -1019,10 +1019,10 @@ class BSPlotterProjected(BSPlotter):
 
         for col_idx, element in enumerate(dictio):
             for row_idx in range(n_rows):
-                if n_cols == 1 and n_cols == 1:
+                if n_cols == 1 and n_rows == 1:
                     ax = axs
-                elif n_rows == 1:
-                    ax = axs[col_idx]
+                elif n_cols == 1 or n_rows == 1:
+                    ax = axs[max(row_idx, col_idx)]
                 else:
                     ax = axs[row_idx, col_idx]
 
