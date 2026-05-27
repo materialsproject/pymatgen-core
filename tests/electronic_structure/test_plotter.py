@@ -201,6 +201,19 @@ class TestBSPlotterProjected:
         assert len(axes) == 4, f"{len(axes)=}"
         assert len(axes[0].get_lines()) == 4903, f"{len(axes[0].get_lines())=}"
         assert len(axes[-1].get_lines()) == 0, f"{len(axes[-1].get_lines())=}"
+
+        # Test if a plot with a single column works
+        axes = self.plotter_Cu2O.get_projected_plots_dots({"Cu": ["d", "s"]})
+        assert len(axes) == 2, f"{len(axes)=}"
+        assert len(axes[0].get_lines()) == 4903, f"{len(axes[0].get_lines())=}"
+        assert len(axes[-1].get_lines()) == 4903, f"{len(axes[-1].get_lines())=}"
+
+        # Test if a plot with a single row works
+        axes = self.plotter_Cu2O.get_projected_plots_dots({"Cu": ["d"], "O": ["p"]})
+        assert len(axes) == 2, f"{len(axes)=}"
+        assert len(axes[0].get_lines()) == 4903, f"{len(axes[0].get_lines())=}"
+        assert len(axes[-1].get_lines()) == 4903, f"{len(axes[-1].get_lines())=}"
+        
         axs = self.plotter_Cu2O.get_projected_plots_dots_patom_pmorb(
             {"Cu": ["dxy", "s", "px"], "O": ["px", "py", "pz"]},
             {"Cu": [3, 5], "O": [1]},
