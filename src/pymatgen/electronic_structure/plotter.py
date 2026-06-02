@@ -1366,7 +1366,7 @@ class BSPlotterProjected(BSPlotter):
                             for anum in dictpa[elt]:
                                 edict[f"{elt}{anum}"] = {}
                                 for morb in dictio[elt]:
-                                    edict[f"{elt}{anum}"][morb] = proj[Spin.up][band_idx][j][setos[morb]][anum - 1]
+                                    edict[f"{elt}{anum}"][morb] = proj[Spin.down][band_idx][j][setos[morb]][anum - 1]
                         proj_br[-1][str(Spin.down)][band_idx].append(edict)
 
         # Adjust projections for plot
