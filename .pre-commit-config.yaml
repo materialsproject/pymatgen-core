@@ -2,7 +2,7 @@
 # invoke ``tasks.py``, and the ``dev/`` directory of local helpers /
 # reproducers (not part of the installed package; lint debt there is out
 # of scope for the regular pre-commit pipeline).
-exclude: ^(docs|.*test_files|tasks\.py|dev/)
+exclude: ^(docs|.*test[_-]files|tasks\.py|dev/)
 
 # Install both pre-commit and commit-msg hook types when contributors run
 # ``pre-commit install`` — required for codespell's ``commit-msg`` stage
@@ -60,7 +60,9 @@ repos:
         stages: [pre-commit, commit-msg]
         exclude_types: [html]
         args: [--check-filenames]
-        exclude: ^pretrained_models/.*/model\.json$
+        # CHANGES.md quotes historical PR titles verbatim (typos included),
+        # so spell-checking it only flags text we can't meaningfully fix.
+        exclude: ^(pretrained_models/.*/model\.json|CHANGES\.md)$
 
   - repo: https://github.com/MarcoGorelli/cython-lint
     rev: v0.19.0
