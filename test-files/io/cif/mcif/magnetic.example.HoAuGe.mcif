@@ -1,0 +1,135 @@
+#\#CIF_2.0
+# Created by the Bilbao Crystallographic Server
+# http://www.cryst.ehu.es
+# Date: 11/19/2017 17:07:11
+# Database entry: 1.34 HoAuGe
+# Cif-like file for the case 1.34
+
+
+data_5yOhtAoR
+_audit_creation_date            2017-11-19
+_audit_creation_method          "Bilbao Crystallographic Server"
+
+_chemical_name_systematic
+;
+;
+_chemical_name_common                    ?
+_chemical_formula_moiety                 ?
+_chemical_formula_structural             ?
+_chemical_formula_analytical             ?
+_chemical_formula_iupac                  ?
+_chemical_formula_sum                    'Ho Au Ge'
+_chemical_formula_weight                 ?
+_chemical_melting_point                  ?
+_chemical_compound_source                ?
+_chemical_absolute_configuration         .
+
+
+_citation_journal_abbrev        "Journal of Magnetism and Magnetic Materials"
+_citation_journal_volume        236
+_citation_page_first            293
+_citation_page_last             301
+_citation_article_id            .
+_citation_year                  2001
+_citation_DOI                   10.1016/s0304-8853(01)00463-2
+
+loop_
+_citation_author_name
+"S. Baran"
+"M. Hofmann"
+"G. Lampert"
+"N. Stusser"
+"A. Szytula"
+"D. Tobbens"
+"P. Smeibidl"
+"S. Kausche"
+
+
+
+
+
+_atomic_positions_source_database_code_ICSD  .
+_atomic_positions_source_other               .
+
+_transition_temperature     6
+_experiment_temperature     1.5
+
+loop_
+_irrep_id
+_irrep_dimension
+_irrep_small_dimension
+_irrep_direction_type
+_irrep_action
+_irrep_modes_number
+_irrep_presence
+mM2 3 1 . primary ? ?
+
+_exptl_crystal_magnetic_properties_details
+;
+NPD
+Magnetic moment Ho1: 6.7(7)
+magnetic moment transformations do not agree with those of the listed symmetry operations, due to the different a,b parameters
+;
+
+_active_magnetic_irreps_details
+;
+1k magnetic structure
+k-maximal magnetic symmetry (4 possible)
+;
+
+_parent_space_group.name_H-M_alt  'P  6_3m  c'
+_parent_space_group.IT_number                       186
+_parent_space_group.transform_Pp_abc  'a,b,c;0,0,0'
+
+loop_
+_parent_propagation_vector.id
+_parent_propagation_vector.kxkykz
+k1 [1/2 0 0]
+
+_parent_space_group.child_transform_Pp_abc  '2a,b,c;0,0,0'
+_space_group_magn.transform_BNS_Pp_abc  'a+b,b,c;0,0,0'
+
+
+_space_group_magn.number_BNS  33.154
+_space_group_magn.name_BNS  "P_C  n  a  2_1"
+_space_group_magn.point_group_name  "mm21'"
+_space_group_magn.point_group_number  "7.2.21"
+_cell_length_a                 8.80400
+_cell_length_b                 4.40200
+_cell_length_c                 7.20400
+_cell_angle_alpha              90.00
+_cell_angle_beta               90.00
+_cell_angle_gamma              120.00
+
+loop_
+_space_group_symop_magn_operation.id
+_space_group_symop_magn_operation.xyz
+1 x,y,z,+1
+2 -x+1/2,-2x+y,z+1/2,+1
+3 -x,-y,z+1/2,+1
+4 x+1/2,2x-y,z,+1
+
+loop_
+_space_group_symop_magn_centering.id
+_space_group_symop_magn_centering.xyz
+1 x,y,z,+1
+2 x+1/2,y,z,-1
+
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Ho1 Ho 0.00000 0.00000 0.25000 1
+Au1 Au 0.16667 0.66667 0.040(25) 1
+Ge1 Ge 0.16667 0.66667 0.459(24) 1
+
+loop_
+_atom_site_moment.label
+_atom_site_moment.crystalaxis_x
+_atom_site_moment.crystalaxis_y
+_atom_site_moment.crystalaxis_z
+_atom_site_moment.symmform
+Ho1 -3.4 -1.7 6. 2my,my,mz
