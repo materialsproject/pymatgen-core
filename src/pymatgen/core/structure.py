@@ -2776,6 +2776,7 @@ class IStructure(SiteCollection, MSONable):
                         tolerance=tolerance,
                         use_site_props=use_site_props,
                         constrain_latt=constrain_latt,
+                        reduce=reduce,
                     )
                     if reduce:
                         primitive = primitive.get_reduced_structure()
