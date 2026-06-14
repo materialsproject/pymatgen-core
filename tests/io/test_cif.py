@@ -1096,6 +1096,23 @@ Gd1 5.05 5.05 0.0"""
 
         assert s_ncl.matches(s_ncl_from_msg)
 
+    def test_axial_moment_transform_non_orthogonal_cell(self):
+        # MAGNDATA 1.34 (HoAuGe): child cell of a hexagonal parent (a doubled, so
+        # a = 2b, gamma = 120 deg);
+        # symmetry operations containing -2x+y mix the unequal a/b axes. Regression
+        # test for unit-crystal-axis moments being rotated by the rotation matrix in
+        # crystallographic axes without rescaling by the axis lengths, which inflated |m| on the
+        # symmetry-expanded sites (gave 7.499 instead of 6.684 on two of them).
+        parser = CifParser(f"{MCIF_TEST_DIR}/magnetic.example.HoAuGe.mcif")
+        struct = parser.parse_structures(primitive=False)[0]
+        ho_moments = np.array([site.properties["magmom"].moment for site in struct if site.specie.symbol == "Ho"])
+        assert len(ho_moments) == 4
+        # asymmetric-unit moment (-3.4, -1.7, 6.0) in unit-crystal-axis components;
+        # |m| = sqrt(m.G.m) with the pure-cosine metric G (gamma = 120) = 6.6836 uB,
+        # and every image must keep that magnitude
+        norms = np.linalg.norm(ho_moments, axis=1)
+        assert norms == approx([6.6836] * 4, abs=1e-3)
+
     def test_write(self):
         with open(f"{MCIF_TEST_DIR}/GdB4-writer-ref.mcif", encoding="utf-8") as file:
             cw_ref_str = file.read()

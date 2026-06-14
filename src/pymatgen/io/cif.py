@@ -652,14 +652,23 @@ class CifParser:
                     coord = op.operate(tmp_coord)
                     coord = np.array([i - math.floor(i) for i in coord])
                     if isinstance(op, MagSymmOp):
-                        # Up to this point, magmoms have been defined relative
-                        # to crystal axis. Now convert to Cartesian and into
-                        # a Magmom object.
                         if lattice is None:
                             raise ValueError("Lattice cannot be None.")
-                        magmom = Magmom.from_moment_relative_to_crystal_axes(
-                            op.operate_magmom(tmp_magmom), lattice=lattice
+                        # Up to this point, magmoms have been defined by components along
+                        # unit crystal axes, while op.rotation_matrix is expressed in
+                        # crystallographic axes. Convert both the moment and the rotation
+                        # matrix to Cartesian coordinates before operating; applying the
+                        # crystallographic-axes rotation matrix to unit-axis components
+                        # directly changes the moment magnitude whenever the op mixes axes
+                        # of unequal length.
+                        magmom_cart = Magmom.from_moment_relative_to_crystal_axes(
+                            cast("tuple[float, float, float]", tmp_magmom), lattice=lattice
                         )
+                        rot_cart = lattice.matrix.T @ op.rotation_matrix @ np.linalg.inv(lattice.matrix.T)
+                        op_cart = MagSymmOp.from_rotation_and_translation_and_time_reversal(
+                            rot_cart, op.translation_vector, op.time_reversal
+                        )
+                        magmom = op_cart.operate_magmom(magmom_cart)
                     else:
                         magmom = Magmom(tmp_magmom)
 
