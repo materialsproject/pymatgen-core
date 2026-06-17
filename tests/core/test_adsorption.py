@@ -83,6 +83,8 @@ class TestAdsorbateSiteFinder(MatSciTest):
         sites = self.asf_struct.find_adsorption_sites()
 
     def test_generate_adsorption_structures(self):
+        atol = 1e-9  # required for comparing values ~0 using assert_allclose
+
         co = Molecule("CO", [[0, 0, 0], [0, 0, 1.23]])
         structures = self.asf_111.generate_adsorption_structures(co, repeat=[2, 2, 1])
         assert len(structures) == 4
@@ -92,7 +94,7 @@ class TestAdsorbateSiteFinder(MatSciTest):
             self.asf_111.slab
         )
         for n, structure in enumerate(structures):
-            assert_allclose(structure[-2].coords, sites["all"][n], atol=1e-9)
+            assert_allclose(structure[-2].coords, sites["all"][n], atol=atol)
         find_args = {"positions": ["hollow"]}
         structures_hollow = self.asf_111.generate_adsorption_structures(co, find_args=find_args)
         assert len(structures_hollow) == len(sites["hollow"])
@@ -107,14 +109,14 @@ class TestAdsorbateSiteFinder(MatSciTest):
         ads_site_coords = sites["all"][0]
         c_site = structures[0][-2]
         assert str(c_site.specie) == "C"
-        assert_allclose(c_site.coords, sites["all"][0])
+        assert_allclose(c_site.coords, sites["all"][0], atol=atol)
         # Check no translation
         structures = self.asf_111.generate_adsorption_structures(co, translate=False)
         assert co == Molecule("CO", [[1.0, -0.5, 3], [0.8, 0.46, 3.75]])
         sites = self.asf_111.find_adsorption_sites()
         ads_site_coords = sites["all"][0]
         c_site = structures[0][-2]
-        assert_allclose(c_site.coords, ads_site_coords + np.array([1.0, -0.5, 3]))
+        assert_allclose(c_site.coords, ads_site_coords + np.array([1.0, -0.5, 3]), atol=atol)
 
     def test_adsorb_both_surfaces(self):
         # Test out for monatomic adsorption
