@@ -223,7 +223,13 @@ class GruneisenParameter(MSONable):
         # Use phonopy classes to compute Debye frequency.
         t = self.tdos
         if hasattr(t, "run_debye_frequency"):
-            f_d = t.run_debye_frequency(num_atoms=len(self.structure), freq_max_fit=freq_max_fit)
+            try:
+                f_d = t.run_debye_frequency(freq_max_fit=freq_max_fit)
+            except AttributeError as exc:
+                raise RuntimeError(
+                    "Installed phonopy exposes run_debye_frequency() but cannot compute "
+                    "Debye frequency in this environment."
+                ) from exc
             if f_d is None and hasattr(t, "get_Debye_frequency"):
                 f_d = t.get_Debye_frequency()
         elif hasattr(t, "set_Debye_frequency") and hasattr(t, "get_Debye_frequency"):
