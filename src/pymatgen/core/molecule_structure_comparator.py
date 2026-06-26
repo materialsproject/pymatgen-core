@@ -13,11 +13,9 @@ from __future__ import annotations
 import itertools
 from typing import TYPE_CHECKING
 
-from scipy.spatial import cKDTree
 import numpy as np
-
-
 from monty.json import MSONable
+from scipy.spatial import cKDTree
 
 from pymatgen.util.due import Doi, due
 
@@ -231,12 +229,11 @@ class MoleculeStructureComparator(MSONable):
         bonds_13 = all_2_and_13_bonds - {tuple(b) for b in priority_bonds}
         return tuple(sorted(bonds_13))
 
-    def _get_bonds(self, mol, max_cutoff=20):
+    def _get_bonds(self, mol):
         """Find all bonds in a molecule.
 
         Args:
             mol: pymatgen Molecule object.
-            max_cutoff: The maximum radial distance and Angstrom to search for bonds
 
         Returns:
             List[tuple[int, int]]: bonded atom pairs.
@@ -252,6 +249,14 @@ class MoleculeStructureComparator(MSONable):
             raise ValueError(f"The covalent radius for element {unavailable_elements} is not available")
 
         coords = mol.cart_coords[covalent_atoms]
+
+        max_radius = max(self.covalent_radius.values())
+        max_cap = max(
+            self.bond_length_cap,
+            self.priority_cap,
+            self.bond_13_cap,
+        )
+        max_cutoff = 2 * max_radius * (1 + max_cap)
 
         # Use a KDTree to avoid N^2 operations in building the pair list
         tree = cKDTree(coords)
