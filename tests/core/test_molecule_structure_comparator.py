@@ -139,12 +139,12 @@ class TestMoleculeStructureComparator:
         d2 = MoleculeStructureComparator.from_dict(d1).as_dict()
         assert d1 == d2
 
-    @pytest.mark.xfail(reason="TODO: need someone to fix this")
     def test_structural_change_in_geom_opt(self):
         qcout_path = f"{TEST_DIR}/mol_1_3_bond.qcout"
         qcout = QCOutput(qcout_path)
-        mol1 = qcout.data[0]["molecules"][0]
-        mol2 = qcout.data[0]["molecules"][-1]
+
+        mol1 = qcout.data["initial_molecule"]
+        mol2 = qcout.data["molecule_from_last_geometry"]
         priority_bonds = [
             [0, 1],
             [0, 2],
