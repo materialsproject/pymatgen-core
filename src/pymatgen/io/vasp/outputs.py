@@ -875,7 +875,7 @@ class Vasprun(MSONable):
             run_type = "HF"
         elif math.isclose(self.parameters.get("HFSCREEN", 0.30), 0.30):
             run_type = "HSE03"
-        elif math.isclose(self.parameters.get("HFSCREEN", 0.20), 0.20):
+        elif 0.2 <= self.parameters.get("HFSCREEN", 0.20) <= 0.21:
             run_type = "HSE06"
         elif math.isclose(self.parameters.get("AEXX", 0.20), 0.20):
             run_type = "B3LYP"
