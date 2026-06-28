@@ -352,7 +352,7 @@ class TestVasprun(MatSciTest):
         assert entry_id_toks[2] == "15.0"
         assert entry_id_toks[3] == "da7b01a471dc249323505c0676ae7350"
 
-        assert entry.parameters["run_type"] == "PBEO or other Hybrid Functional"
+        assert entry.parameters["run_type"] == "HSE06"
 
     def test_unconverged(self):
         filepath = f"{VASP_OUT_DIR}/vasprun.unconverged.xml.gz"
