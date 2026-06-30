@@ -875,7 +875,7 @@ class Vasprun(MSONable):
             run_type = "HF"
         elif math.isclose(self.parameters.get("HFSCREEN", 0.30), 0.30):
             run_type = "HSE03"
-        elif math.isclose(self.parameters.get("HFSCREEN", 0.20), 0.20):
+        elif 0.2 <= self.parameters.get("HFSCREEN", 0.20) <= 0.21:
             run_type = "HSE06"
         elif math.isclose(self.parameters.get("AEXX", 0.20), 0.20):
             run_type = "B3LYP"
@@ -6650,6 +6650,47 @@ class Vaspwave(Vasprun):
         data = self._read_hdf5_dataset(data_path, h5_file=h5_file)
         return self._validate_volumetric_dataset(grid, data, data_path)
 
+    def _read_charge_augmentation_data(self) -> dict[str, dict[int, np.ndarray]]:
+        """Read charge augmentation occupancies from ``vaspwave.h5``."""
+        data_aug: dict[str, dict[int, np.ndarray]] = {}
+
+        with self._open_hdf5_file() as h5_file:
+            if "/charge/charge" not in h5_file:
+                return data_aug
+
+            component_count = h5_file["/charge/charge"].shape[0]
+            data_keys: tuple[str, ...]
+            if component_count == 1:
+                data_keys = ("total",)
+            elif component_count == 2:
+                data_keys = ("total", "diff")
+            elif component_count == 4:
+                data_keys = ("total", "diff_x", "diff_y", "diff_z")
+            else:
+                if any(name.startswith("aug_occupancies") for name in h5_file["/charge"]):
+                    warnings.warn(
+                        f"Unsupported /charge/charge component count {component_count}; "
+                        "skipping charge augmentation occupancies.",
+                        stacklevel=2,
+                    )
+                return data_aug
+
+            for idx, data_key in enumerate(data_keys, start=1):
+                ions_path = f"/charge/aug_occupancies_ions_s{idx:02d}"
+                values_path = f"/charge/aug_occupancies_s{idx:02d}"
+                if ions_path not in h5_file or values_path not in h5_file:
+                    continue
+
+                lengths = np.array(h5_file[ions_path])
+                values = np.array(h5_file[values_path])
+                data_aug[data_key] = {
+                    ion_idx: values[ion_idx - 1, :length]
+                    for ion_idx, length in enumerate(lengths.astype(int), start=1)
+                    if length
+                }
+
+        return data_aug
+
     # -------------------------------------------------------------------------
     # Coefficient conversion pipeline
     # -------------------------------------------------------------------------
@@ -6949,7 +6990,11 @@ class Vaspwave(Vasprun):
             ValueError: If ``vaspwave.h5`` does not contain structure data.
         """
         data = self._read_validated_volumetric_dataset("/charge/grid", "/charge/charge")
-        return Chgcar(self._get_volumetric_structure(), data)
+        return Chgcar(
+            self._get_volumetric_structure(),
+            data,
+            data_aug=cast("Any", self._read_charge_augmentation_data()),
+        )
 
     def get_locpot(self) -> Locpot:
         """Read the native local-potential grid stored in ``/locpot/total``.

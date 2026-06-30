@@ -236,11 +236,13 @@ class ThermalDisplacementMatrices(MSONable):
 
     @staticmethod
     def _angle_dot(a: ArrayLike, b: ArrayLike) -> float:
-        dot_product = np.dot(a, b)
+        a = np.real_if_close(a)
+        b = np.real_if_close(b)
+        dot_product = np.real_if_close(np.dot(a, b))
         prod_of_norms = np.linalg.norm(a) * np.linalg.norm(b)
-        divided = dot_product / prod_of_norms
+        divided = np.clip(np.real_if_close(dot_product / prod_of_norms), -1, 1)
         angle_rad = np.arccos(np.round(divided, 10))
-        return np.degrees(angle_rad)
+        return float(np.degrees(angle_rad))
 
     @due.dcite(
         Doi("10.1039/C9CE00794F"),

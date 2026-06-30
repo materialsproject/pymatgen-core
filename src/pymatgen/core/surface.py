@@ -165,7 +165,7 @@ class Slab(Structure):
 
             self.oriented_unit_cell = Structure(
                 ouc_lattice,
-                oriented_unit_cell.species,
+                oriented_unit_cell.species_and_occu,
                 oriented_unit_cell.frac_coords,
                 charge=oriented_unit_cell.charge,
                 coords_are_cartesian=False,

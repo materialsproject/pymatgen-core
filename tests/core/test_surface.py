@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 
 import pymatgen.core
-from pymatgen.core import Lattice, Structure
+from pymatgen.core import Composition, Lattice, Structure
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.core.surface import (
     ReconstructionGenerator,
@@ -658,6 +658,13 @@ class TestSlabGenerator(MatSciTest):
         # flag check and subsequent transformation of slabs.
         assert slabs[0].energy == approx(2.0)
         assert slabs[1].energy == approx(6.0)
+
+    def test_disordered_slab(self):
+        # Test that generation of a disordered Slab is possible
+        comp = Composition({"Na": 0.5, "K": 0.5})
+        struct = Structure([[1, 0, 0], [0, 1, 0], [0, 0, 1]], [comp], np.zeros((1, 3), dtype=np.float64))
+        slabs = SlabGenerator(struct, (0, 0, 1), 1, 0).get_slabs()
+        assert slabs[0].sites[0].species == comp
 
 
 class TestReconstructionGenerator(MatSciTest):

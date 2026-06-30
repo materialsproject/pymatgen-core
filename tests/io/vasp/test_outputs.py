@@ -352,7 +352,7 @@ class TestVasprun(MatSciTest):
         assert entry_id_toks[2] == "15.0"
         assert entry_id_toks[3] == "da7b01a471dc249323505c0676ae7350"
 
-        assert entry.parameters["run_type"] == "PBEO or other Hybrid Functional"
+        assert entry.parameters["run_type"] == "HSE06"
 
     def test_unconverged(self):
         filepath = f"{VASP_OUT_DIR}/vasprun.unconverged.xml.gz"
@@ -3426,6 +3426,11 @@ class TestVaspwave(MatSciTest):
         assert set(chgcar_h5.data) == {"total", "diff"}
         assert_allclose(chgcar_h5.data["total"], chgcar.data["total"], atol=1e-6)
         assert_allclose(chgcar_h5.data["diff"], chgcar.data["diff"], atol=1e-6)
+        assert chgcar_h5.data_aug.keys() == chgcar.data_aug.keys()
+        for data_key, aug_data in chgcar.data_aug.items():
+            assert chgcar_h5.data_aug[data_key].keys() == aug_data.keys()
+            for ion_idx, values in aug_data.items():
+                assert_allclose(chgcar_h5.data_aug[data_key][ion_idx], values, atol=1e-6)
 
     @pytest.mark.skipif(
         not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
@@ -3476,6 +3481,11 @@ class TestVaspwave(MatSciTest):
         assert diff_y_rel_err < 2e-4
         assert diff_z_rel_err < 1e-3
         assert diff_rel_err < 2e-4
+        assert chgcar_h5.data_aug.keys() == chgcar.data_aug.keys()
+        for data_key, aug_data in chgcar.data_aug.items():
+            assert chgcar_h5.data_aug[data_key].keys() == aug_data.keys()
+            for ion_idx, values in aug_data.items():
+                assert_allclose(chgcar_h5.data_aug[data_key][ion_idx], values.real, atol=1e-6)
 
     @pytest.mark.skipif(
         not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
