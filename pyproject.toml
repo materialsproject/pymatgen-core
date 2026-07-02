@@ -64,7 +64,7 @@ dependencies = [
     "orjson>=3.10,<4",
     "palettable>=3.3.3",
     "pandas>=2",
-    "plotly>=6.0",
+    "plotly>=5.0",
     "requests>=2.32.5",
     "scipy>=1.13.0",
     # scipy<1.14.1 is incompatible with NumPy 2.0 on Windows
