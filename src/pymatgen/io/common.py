@@ -405,7 +405,10 @@ class VolumetricData(MSONable):
             lines = f.readlines()
 
         # Parse the number of atoms from line 3 (first two lines are headers)
-        n_atoms = int(lines[2].split()[0])
+        # Format: n_atoms origin_x origin_y origin_z
+        header = lines[2].split()
+        n_atoms = int(header[0])
+        origin = np.array(header[1:4], dtype=float) * bohr_to_angstrom
 
         # Pre-parse voxel data into arrays
         def parse_voxel(line):
@@ -422,7 +425,7 @@ class VolumetricData(MSONable):
         atom_data_start = 6
         atom_data_end = atom_data_start + n_atoms
         sites = [
-            Site(line.split()[0], np.array(line.split()[2:], dtype=float) * bohr_to_angstrom)  # type:ignore[arg-type]
+            Site(line.split()[0], np.array(line.split()[2:], dtype=float) * bohr_to_angstrom - origin) # type:ignore[arg-type]
             for line in lines[atom_data_start:atom_data_end]
         ]
 

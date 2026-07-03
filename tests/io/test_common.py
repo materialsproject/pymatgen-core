@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
 from pymatgen.io.common import PMGDir, VolumetricData
@@ -23,7 +24,17 @@ def test_cube_io_faithful(tmp_path: Path) -> None:
     assert cube_file.structure.volume == out_cube.structure.volume
     assert cube_file.structure == out_cube.structure
 
+def test_cube_nonzero_origin() -> None:
+    """Regression test for gh-4607: from_cube must account for the grid origin on line 3."""
+    vd = VolumetricData.from_cube(f"{TEST_FILES_DIR}/electronic_structure/boltztrap/fermi/boltztrap_BZ.cube")
 
+    assert len(vd.structure) == 96
+    assert str(vd.structure[0].specie) == "Fe"
+    np.testing.assert_allclose(
+        vd.structure[0].frac_coords,
+        [0.16528953, 0.6611559, 0.24615391],
+        atol=1e-6,
+    )
 class TestPMGDir:
     def test_getitem(self):
         # Some simple testing of loading and reading since all these were tested in other classes.
