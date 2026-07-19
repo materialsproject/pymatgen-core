@@ -676,6 +676,7 @@ class BandStructure:
         labels_dict = {k.strip(): v for k, v in dct["labels_dict"].items()}
         projections: dict = {}
         structure = None
+        warned_legacy_dx2 = False
         if dct.get("projections"):
             structure = Structure.from_dict(dct["structure"])
             projections = {}
@@ -687,10 +688,18 @@ class BandStructure:
                         dddd = []
                         for kk in range(len(dct["projections"][spin][ii][jj])):
                             orb = Orbital(kk).name
-                            ddddd = [
-                                dct["projections"][spin][ii][jj][orb][ll]
-                                for ll in range(len(dct["projections"][spin][ii][jj][orb]))
-                            ]
+                            projection = dct["projections"][spin][ii][jj]
+                            if orb == "dx2_y2" and "dx2_y2" not in projection and "dx2" in projection:
+                                if not warned_legacy_dx2:
+                                    warnings.warn(
+                                        "The 'dx2' orbital name in serialized band structures is deprecated; "
+                                        "use 'dx2_y2' instead.",
+                                        DeprecationWarning,
+                                        stacklevel=2,
+                                    )
+                                    warned_legacy_dx2 = True
+                                orb = "dx2"
+                            ddddd = [projection[orb][ll] for ll in range(len(projection[orb]))]
 
                             dddd.append(np.array(ddddd))
                         ddd.append(np.array(dddd))

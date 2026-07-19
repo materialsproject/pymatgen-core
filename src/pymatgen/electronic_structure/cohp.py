@@ -658,6 +658,7 @@ class CompleteCohp(Cohp):
 
         if "orb_res_cohp" in dct:
             orb_cohp: dict[str, dict[Orbital, dict[str, Any]]] = {}
+            warned_legacy_dx2 = False
             for label in dct["orb_res_cohp"]:
                 orb_cohp[label] = {}
                 for orb in dct["orb_res_cohp"][label]:
@@ -672,8 +673,22 @@ class CompleteCohp(Cohp):
                         }
                     except KeyError:
                         icohp = None
-                    orbitals = [(int(o[0]), Orbital[o[1]]) for o in dct["orb_res_cohp"][label][orb]["orbitals"]]
-                    orb_cohp[label][orb] = {
+                    orbitals = []
+                    for orbital in dct["orb_res_cohp"][label][orb]["orbitals"]:
+                        orbital_name = orbital[1]
+                        if orbital_name == "dx2":
+                            if not warned_legacy_dx2:
+                                warnings.warn(
+                                    "The 'dx2' orbital name in serialized COHP data is deprecated; "
+                                    "use 'dx2_y2' instead.",
+                                    DeprecationWarning,
+                                    stacklevel=2,
+                                )
+                                warned_legacy_dx2 = True
+                            orbital_name = "dx2_y2"
+                        orbitals.append((int(orbital[0]), Orbital[orbital_name]))
+                    canonical_orb = orb if "dx2_y2" in orb else orb.replace("dx2", "dx2_y2")
+                    orb_cohp[label][canonical_orb] = {
                         "COHP": cohp,
                         "ICOHP": icohp,
                         "orbitals": orbitals,

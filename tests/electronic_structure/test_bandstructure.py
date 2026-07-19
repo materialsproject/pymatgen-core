@@ -233,8 +233,9 @@ class TestBandStructureSymmLine(MatSciTest):
     def test_old_format_load(self):
         with open(f"{TEST_DIR}/bs_ZnS_old.json", "rb") as file:
             dct = orjson.loads(file.read())
+        with pytest.warns(DeprecationWarning, match="'dx2' orbital name"):
             bs_old = BandStructureSymmLine.from_dict(dct)
-            assert bs_old.get_projection_on_elements()[Spin.up][0][0]["Zn"] == approx(0.0971)
+        assert bs_old.get_projection_on_elements()[Spin.up][0][0]["Zn"] == approx(0.0971)
 
     def test_apply_scissor_insulator(self):
         # test applying a scissor operator to a metal

@@ -214,6 +214,14 @@ class TestCompleteDos:
         # The sums of the SPD or the element doses should be the same.
         assert_allclose(sum_spd.energies, sum_element.energies, atol=1e-4)
 
+    def test_legacy_dx2_orbital_name(self):
+        dct = self.dos.as_dict()
+        pdos = next(site_pdos for site_pdos in dct["pdos"] if "dx2_y2" in site_pdos)
+        pdos["dx2"] = pdos.pop("dx2_y2")
+        with pytest.warns(DeprecationWarning, match="'dx2' orbital name"):
+            dos = CompleteDos.from_dict(dct)
+        assert any(Orbital.dx2_y2 in orbital_dos for orbital_dos in dos.pdos.values())
+
     def test_str(self):
         assert str(self.dos).startswith("Complete DOS for Full Formula (Li1 Fe4 P4 O16)\nReduced Formula: LiFe4(PO4)4")
 

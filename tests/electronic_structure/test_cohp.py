@@ -974,6 +974,15 @@ class TestCompleteCohp(MatSciTest):
         #             if bond != "average":
         #                 assert cohp_lmto_dict[key][bond] == self.cohp_lmto_dict.as_dict()[key][bond]
 
+    def test_legacy_dx2_orbital_name(self):
+        with open(f"{TEST_DIR}/complete_cohp_forb.json", "rb") as file:
+            dct = orjson.loads(file.read())
+        with pytest.warns(DeprecationWarning, match="'dx2' orbital name"):
+            cohp = CompleteCohp.from_dict(dct)
+        cohp_dict = cohp.as_dict()
+        assert all("dx2-" not in orb for orb in cohp_dict["orb_res_cohp"]["49"])
+        assert CompleteCohp.from_dict(cohp_dict).as_dict() == cohp_dict
+
     def test_icohp_values(self):
         # icohp_ef are the ICHOP(Ef) values taken from
         # the ICOHPLIST.lobster file.

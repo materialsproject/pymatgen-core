@@ -1387,10 +1387,20 @@ class CompleteDos(Dos):
         tdos = Dos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
         pdoss = {}
+        warned_legacy_dx2 = False
         for idx in range(len(dct["pdos"])):
             at = struct[idx]
             orb_dos = {}
             for orb_str, odos in dct["pdos"][idx].items():
+                if orb_str == "dx2":
+                    if not warned_legacy_dx2:
+                        warnings.warn(
+                            "The 'dx2' orbital name in serialized DOS data is deprecated; use 'dx2_y2' instead.",
+                            DeprecationWarning,
+                            stacklevel=2,
+                        )
+                        warned_legacy_dx2 = True
+                    orb_str = "dx2_y2"
                 orb = Orbital[orb_str]
                 orb_dos[orb] = {Spin(int(k)): v for k, v in odos["densities"].items()}
             pdoss[at] = orb_dos
