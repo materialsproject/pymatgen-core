@@ -34,6 +34,17 @@ class TestOrbital:
     def test_cached(self):
         assert id(Orbital(0)) == id(Orbital.s)
 
+    def test_dx2_y2_name(self):
+        assert Orbital.dx2_y2.value == 8
+        assert str(Orbital.dx2_y2) == "dx2_y2"
+        assert Orbital["dx2_y2"] is Orbital.dx2_y2
+
+    def test_deprecated_dx2_name(self):
+        with pytest.warns(DeprecationWarning, match="Orbital.dx2 is deprecated"):
+            assert Orbital.dx2 is Orbital.dx2_y2
+        with pytest.warns(DeprecationWarning, match="'dx2' orbital name is deprecated"):
+            assert Orbital["dx2"] is Orbital.dx2_y2
+
 
 class TestMagmom:
     def test_init(self):
