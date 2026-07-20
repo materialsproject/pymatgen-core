@@ -2624,6 +2624,21 @@ class Outcar:
         else:
             with zopen(self.filename, mode="rt", encoding="utf-8") as file:
                 text = file.read()  # type:ignore[assignment]
+
+        # Check for truncated table which could cause parser to hang
+        header_match = re.search(header_pattern, text, re.MULTILINE | re.DOTALL)
+        if header_match is None or not re.search(footer_pattern, text[header_match.end() :], re.MULTILINE | re.DOTALL):
+            if header_match is not None:
+                warnings.warn(
+                    f"Table in {getattr(self, 'filename', 'OUTCAR')} is truncated; "
+                    f"expected footer matching {footer_pattern!r}.",
+                    stacklevel=2,
+                )
+            retained_data = []
+            if attribute_name is not None:
+                self.data[attribute_name] = retained_data
+            return retained_data
+
         table_pattern_text = header_pattern + r"\s*^(?P<table_body>(?:\s+" + row_pattern + r")+)\s+" + footer_pattern
         table_pattern = re.compile(table_pattern_text, re.MULTILINE | re.DOTALL)
         rp = re.compile(row_pattern)
