@@ -67,3 +67,13 @@ body:
       description: Please upload relevant files to help reproduce this bug, or logs if helpful.
     validations:
       required: false
+
+  - type: checkboxes
+    id: reproduction-file-license
+    attributes:
+      label: Rights for uploaded reproduction files
+      description: |
+        Do not upload confidential, personal, proprietary, export-controlled, or otherwise restricted data. If maintainers add an uploaded file to the test suite, it will be distributed under this repository's license. Check the box below only if you upload a file and grant this permission.
+      options:
+        - label: >
+            If I upload files, I confirm that I have authority to share them publicly and grant permission to copy, modify, distribute, and sublicense them under this repository's license.
