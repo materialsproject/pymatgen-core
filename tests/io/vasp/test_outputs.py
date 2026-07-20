@@ -1489,25 +1489,9 @@ class TestOutcar:
             )
 
     def test_truncated_table_returns_without_hanging(self):
-        outcar = Outcar.__new__(Outcar)
-        outcar._text = (
-            "\n\n\n"
-            + "-" * 104
-            + "\n\n\n"
-            + "\n".join(f" k-point {idx:4d} : 0.0000 0.0000 0.0000 plane waves: 8230" for idx in range(1, 159))
-        )
-
-        with pytest.warns(UserWarning, match="Table in OUTCAR is truncated"):
-            assert (
-                outcar.read_table_pattern(
-                    r"\n{3}-{104}\n{3}",
-                    r".+plane waves:\s+(\*{6,}|\d+)",
-                    r"maximum and minimum number of plane-waves",
-                    last_one_only=False,
-                    first_one_only=True,
-                )
-                == []
-            )
+        with pytest.warns(UserWarning, match="Table in .* is truncated"):
+            outcar = Outcar(f"{VASP_OUT_DIR}/OUTCAR.truncated.gz")
+        assert outcar.data["nplwvs_at_kpoints"] == []
 
 
 class TestBSVasprun(MatSciTest):
