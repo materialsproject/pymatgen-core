@@ -35,7 +35,7 @@ from pymatgen.core.structure import Molecule, Structure
 from pymatgen.core.units import Energy, FloatWithUnit
 
 if TYPE_CHECKING:
-    from typing import Any, ClassVar, Self
+    from typing import Any, ClassVar, Self, TypeAlias
 
     from pymatgen.analysis.excitation import ExcitationSpectrum
     from pymatgen.util.typing import PathLike
@@ -44,7 +44,7 @@ NWCHEM_BASIS_LIBRARY: set | None = None
 if os.getenv("NWCHEM_BASIS_LIBRARY"):
     NWCHEM_BASIS_LIBRARY = set(os.listdir(os.environ["NWCHEM_BASIS_LIBRARY"]))
 
-NwTaskTheory = Literal[
+NwTaskTheory: TypeAlias = Literal[
     "g3gn",
     "scf",
     "dft",
@@ -64,7 +64,7 @@ NwTaskTheory = Literal[
     "tce",
     "tddft",
 ]
-NwTaskOperation = Literal[
+NwTaskOperation: TypeAlias = Literal[
     "energy",
     "gradient",
     "optimize",
@@ -78,15 +78,15 @@ NwTaskOperation = Literal[
     "thermodynamics",
     "",
 ]
-NwTaskDirectiveValue = str | int | float
-NwTaskDirectives = Mapping[str, NwTaskDirectiveValue]
-NwTaskAlternateDirectives = Mapping[str, str | NwTaskDirectives]
+NwTaskDirectiveValue: TypeAlias = str | int | float
+NwTaskDirectives: TypeAlias = Mapping[str, NwTaskDirectiveValue]
+NwTaskAlternateDirectives: TypeAlias = Mapping[str, str | NwTaskDirectives]
 
 
 class NwTask(MSONable):
     """Base task for Nwchem."""
 
-    theories: ClassVar[dict[str, str]] = {
+    theories: ClassVar[dict[NwTaskTheory, str]] = {
         "g3gn": "some description",
         "scf": "Hartree-Fock",
         "dft": "DFT",
@@ -107,7 +107,7 @@ class NwTask(MSONable):
         "tddft": "Time Dependent DFT",
     }
 
-    operations: ClassVar[dict[str, str]] = {
+    operations: ClassVar[dict[NwTaskOperation, str]] = {
         "energy": "Evaluate the single point energy.",
         "gradient": "Evaluate the derivative of the energy with respect to nuclear coordinates.",
         "optimize": "Minimize the energy by varying the molecular structure.",
