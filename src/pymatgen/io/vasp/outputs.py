@@ -3070,7 +3070,7 @@ class Outcar:
             search = []
 
             # Non-spin cases
-            def er_ev(results, match):
+            def er_ev(results: Outcar, match: re.Match[str]) -> None:
                 results.er_ev[Spin.up] = np.array(map(float, match.groups()[1:4])) / 2
                 results.er_ev[Spin.down] = results.er_ev[Spin.up]
                 results.context = 2
@@ -3078,7 +3078,7 @@ class Outcar:
             er_ev_pattern = r"^ *e<r>_ev=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
             search.append([er_ev_pattern, None, er_ev])
 
-            def er_bp(results, match):
+            def er_bp(results: Outcar, match: re.Match[str]) -> None:
                 results.er_bp[Spin.up] = np.array([float(match[i]) for i in range(1, 4)]) / 2
                 results.er_bp[Spin.down] = results.er_bp[Spin.up]
 
@@ -3086,14 +3086,14 @@ class Outcar:
             search.append([er_bp_pattern, lambda results, _line: results.context == 2, er_bp])
 
             # Spin cases
-            def er_ev_up(results, match):
+            def er_ev_up(results: Outcar, match: re.Match[str]) -> None:
                 results.er_ev[Spin.up] = np.array([float(match[i]) for i in range(1, 4)])
                 results.context = Spin.up
 
             spin1_ev_pattern = r"^.*Spin component 1 *e<r>_ev=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
             search.append([spin1_ev_pattern, None, er_ev_up])
 
-            def er_bp_up(results, match):
+            def er_bp_up(results: Outcar, match: re.Match[str]) -> None:
                 results.er_bp[Spin.up] = np.array([float(match[1]), float(match[2]), float(match[3])])
 
             spin_bp_pattern = r"^ *e<r>_bp=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
@@ -3105,14 +3105,14 @@ class Outcar:
                 ]
             )
 
-            def er_ev_dn(results, match):
+            def er_ev_dn(results: Outcar, match: re.Match[str]) -> None:
                 results.er_ev[Spin.down] = np.array([float(match[1]), float(match[2]), float(match[3])])
                 results.context = Spin.down
 
             spin2_pattern = r"^.*Spin component 2 *e<r>_ev=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
             search.append([spin2_pattern, None, er_ev_dn])
 
-            def er_bp_dn(results, match):
+            def er_bp_dn(results: Outcar, match: re.Match[str]) -> None:
                 results.er_bp[Spin.down] = np.array([float(match[i]) for i in range(1, 4)])
 
             e_r_bp_pattern = r"^ *e<r>_bp=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
@@ -3125,7 +3125,7 @@ class Outcar:
             )
 
             # Always present spin/non-spin
-            def p_elc(results, match):
+            def p_elc(results: Outcar, match: re.Match[str]) -> None:
                 results.p_elc = np.array([float(match[i]) for i in range(1, 4)])
 
             elec_dipole_moment_pattern = (
@@ -3133,7 +3133,7 @@ class Outcar:
             )
             search.append([elec_dipole_moment_pattern, None, p_elc])
 
-            def p_ion(results, match):
+            def p_ion(results: Outcar, match: re.Match[str]) -> None:
                 results.p_ion = np.array([float(match[i]) for i in range(1, 4)])
 
             ionic_dipole_moment_pattern = (
@@ -3213,7 +3213,7 @@ class Outcar:
         try:
             search = []
 
-            def dielectric_section_start(results, match):
+            def dielectric_section_start(results: Outcar, match: re.Match[str]) -> None:
                 results.dielectric_index = -1
 
             search.append(
@@ -3224,7 +3224,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_section_start2(results, match):
+            def dielectric_section_start2(results: Outcar, match: re.Match[str]) -> None:
                 results.dielectric_index = 0
 
             search.append(
@@ -3235,7 +3235,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_data(results, match):
+            def dielectric_data(results: Outcar, match: re.Match[str]) -> None:
                 results.dielectric_tensor[results.dielectric_index, :] = np.array(
                     [float(match[i]) for i in range(1, 4)]
                 )
@@ -3251,7 +3251,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_section_stop(results, match):
+            def dielectric_section_stop(results: Outcar, match: re.Match[str]) -> None:
                 results.dielectric_index = None
 
             search.append(
@@ -3267,7 +3267,7 @@ class Outcar:
             self.dielectric_index = None
             self.dielectric_tensor = np.zeros((3, 3))
 
-            def piezo_section_start(results, _match):
+            def piezo_section_start(results: Outcar, _match: re.Match[str]) -> None:
                 results.piezo_index = 0
 
             search.append(
@@ -3278,7 +3278,7 @@ class Outcar:
                 ]
             )
 
-            def piezo_data(results, match):
+            def piezo_data(results: Outcar, match: re.Match[str]) -> None:
                 results.piezo_tensor[results.piezo_index, :] = np.array([float(match[i]) for i in range(1, 7)])
                 results.piezo_index += 1
 
@@ -3291,7 +3291,7 @@ class Outcar:
                 ]
             )
 
-            def piezo_section_stop(results, _match):
+            def piezo_section_stop(results: Outcar, _match: re.Match[str]) -> None:
                 results.piezo_index = None
 
             search.append(
@@ -3305,12 +3305,12 @@ class Outcar:
             self.piezo_index = None
             self.piezo_tensor = np.zeros((3, 6))
 
-            def born_section_start(results, _match):
+            def born_section_start(results: Outcar, _match: re.Match[str]) -> None:
                 results.born_ion = -1
 
             search.append([r"BORN EFFECTIVE CHARGES ", None, born_section_start])
 
-            def born_ion(results, match):
+            def born_ion(results: Outcar, match: re.Match[str]) -> None:
                 results.born_ion = int(match[1]) - 1
                 results.born.append(np.zeros((3, 3)))
 
@@ -3322,7 +3322,7 @@ class Outcar:
                 ]
             )
 
-            def born_data(results, match):
+            def born_data(results: Outcar, match: re.Match[str]) -> None:
                 results.born[results.born_ion][int(match[1]) - 1, :] = np.array([float(match[i]) for i in range(2, 5)])
 
             search.append(
@@ -3333,7 +3333,7 @@ class Outcar:
                 ]
             )
 
-            def born_section_stop(results, _match):
+            def born_section_stop(results: Outcar, _match: re.Match[str]) -> None:
                 results.born_ion = None
 
             search.append(
@@ -3367,7 +3367,7 @@ class Outcar:
         try:
             search = []
 
-            def dielectric_section_start(results, _match):
+            def dielectric_section_start(results: Outcar, _match: re.Match[str]) -> None:
                 results.dielectric_ionic_index = -1
 
             search.append(
@@ -3378,7 +3378,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_section_start2(results, _match):
+            def dielectric_section_start2(results: Outcar, _match: re.Match[str]) -> None:
                 results.dielectric_ionic_index = 0
 
             search.append(
@@ -3393,7 +3393,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_data(results, match):
+            def dielectric_data(results: Outcar, match: re.Match[str]) -> None:
                 results.dielectric_ionic_tensor[results.dielectric_ionic_index, :] = np.array(
                     [float(match[i]) for i in range(1, 4)]
                 )
@@ -3411,7 +3411,7 @@ class Outcar:
                 ]
             )
 
-            def dielectric_section_stop(results, _match):
+            def dielectric_section_stop(results: Outcar, _match: re.Match[str]) -> None:
                 results.dielectric_ionic_index = None
 
             search.append(
@@ -3429,7 +3429,7 @@ class Outcar:
             self.dielectric_ionic_index = None
             self.dielectric_ionic_tensor = np.zeros((3, 3))
 
-            def piezo_section_start(results, _match):
+            def piezo_section_start(results: Outcar, _match: re.Match[str]) -> None:
                 results.piezo_ionic_index = 0
 
             search.append(
@@ -3440,7 +3440,7 @@ class Outcar:
                 ]
             )
 
-            def piezo_data(results, match):
+            def piezo_data(results: Outcar, match: re.Match[str]) -> None:
                 results.piezo_ionic_tensor[results.piezo_ionic_index, :] = np.array(
                     [float(match[i]) for i in range(1, 7)]
                 )
@@ -3459,7 +3459,7 @@ class Outcar:
                 ]
             )
 
-            def piezo_section_stop(results, _match):
+            def piezo_section_stop(results: Outcar, _match: re.Match[str]) -> None:
                 results.piezo_ionic_index = None
 
             search.append(
@@ -3503,7 +3503,7 @@ class Outcar:
             search = []
 
             # Always present spin/non-spin
-            def p_elec(results, match):
+            def p_elec(results: Outcar, match: re.Match[str]) -> None:
                 results.p_elec = np.array(
                     [
                         float(match[1]),
@@ -3526,7 +3526,7 @@ class Outcar:
             # save spin-polarized electronic values
             if self.spin and not self.noncollinear:
 
-                def p_sp1(results, match):
+                def p_sp1(results: Outcar, match: re.Match[str]) -> None:
                     results.p_sp1 = np.array(
                         [
                             float(match[1]),
@@ -3543,7 +3543,7 @@ class Outcar:
                     ]
                 )
 
-                def p_sp2(results, match):
+                def p_sp2(results: Outcar, match: re.Match[str]) -> None:
                     results.p_sp2 = np.array(
                         [
                             float(match[1]),
@@ -3560,7 +3560,7 @@ class Outcar:
                     ]
                 )
 
-            def p_ion(results, match):
+            def p_ion(results: Outcar, match: re.Match[str]) -> None:
                 results.p_ion = np.array(
                     [
                         float(match[1]),
@@ -3602,13 +3602,13 @@ class Outcar:
         """
         try:
 
-            def atom_symbols(results, match):
+            def atom_symbols(results: Outcar, match: re.Match[str]) -> None:
                 element_symbol = match[1]
                 if not hasattr(results, "atom_symbols"):
                     results.atom_symbols = []
                 results.atom_symbols.append(element_symbol.strip())
 
-            def zvals(results, match):
+            def zvals(results: Outcar, match: re.Match[str]) -> None:
                 zvals = match[1]
                 results.zvals = map(float, re.findall(r"-?\d+\.\d*", zvals))
 
