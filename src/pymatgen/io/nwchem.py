@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from string import Template
 from typing import TYPE_CHECKING, Literal
 
@@ -37,6 +37,7 @@ from pymatgen.core.units import Energy, FloatWithUnit
 if TYPE_CHECKING:
     from typing import Any, ClassVar, Self
 
+    from pymatgen.analysis.excitation import ExcitationSpectrum
     from pymatgen.util.typing import PathLike
 
 NWCHEM_BASIS_LIBRARY: set | None = None
@@ -610,7 +611,7 @@ class NwOutput:
     eV in the parser.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename: PathLike) -> None:
         """Initialize a NwOutput.
 
         Args:
@@ -626,11 +627,20 @@ class NwOutput:
             chunks.pop()
         preamble = chunks.pop(0)
 
-        self.raw = data
-        self.job_info = self._parse_preamble(preamble)
-        self.data = [self._parse_job(c) for c in chunks]
+        self.raw: str = data
+        self.job_info: dict[str, str] = self._parse_preamble(preamble)
+        self.data: list[dict[str, Any]] = [self._parse_job(chunk) for chunk in chunks]
 
-    def parse_tddft(self):
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        return iter(self.data)
+
+    def __getitem__(self, ind: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        return self.data[ind]
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def parse_tddft(self) -> dict[str, list[dict[str, float]]]:
         """
         Parses TDDFT roots. Adapted from nw_spectrum.py script.
 
@@ -674,7 +684,11 @@ class NwOutput:
 
         return roots
 
-    def get_excitation_spectrum(self, width=0.1, npoints=2000):
+    def get_excitation_spectrum(
+        self,
+        width: float = 0.1,
+        npoints: int = 2000,
+    ) -> ExcitationSpectrum:
         """Generate an excitation spectra from the singlet roots of TDDFT calculations.
 
         Args:
@@ -720,7 +734,7 @@ class NwOutput:
         return ExcitationSpectrum(x, y)
 
     @staticmethod
-    def _parse_preamble(preamble):
+    def _parse_preamble(preamble: str) -> dict[str, str]:
         info = {}
         for line in preamble.split("\n"):
             tokens = line.split("=")
@@ -728,17 +742,8 @@ class NwOutput:
                 info[tokens[0].strip()] = tokens[-1].strip()
         return info
 
-    def __iter__(self):
-        return iter(self.data)
-
-    def __getitem__(self, ind):
-        return self.data[ind]
-
-    def __len__(self):
-        return len(self.data)
-
     @staticmethod
-    def _parse_job(output):
+    def _parse_job(output: str) -> dict[str, Any]:
         energy_patt = re.compile(r"Total \w+ energy\s+=\s+([.\-\d]+)")
         energy_gas_patt = re.compile(r"gas phase energy\s+=\s+([.\-\d]+)")
         energy_sol_patt = re.compile(r"sol phase energy\s+=\s+([.\-\d]+)")
@@ -759,10 +764,10 @@ class NwOutput:
             "dft optimize failed": "Geometry optimization failed",
         }
 
-        def fort2py(x):
+        def fort2py(x: str) -> str:
             return x.replace("D", "e")
 
-        def isfloatstring(in_str):
+        def isfloatstring(in_str: str) -> bool:
             return in_str.find(".") == -1
 
         parse_hess = False
