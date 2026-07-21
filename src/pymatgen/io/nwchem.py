@@ -23,8 +23,9 @@ from __future__ import annotations
 import os
 import re
 import warnings
+from collections.abc import Mapping
 from string import Template
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from monty.io import zopen
@@ -35,11 +36,49 @@ from pymatgen.core.units import Energy, FloatWithUnit
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import ClassVar, Self
+    from typing import Any, ClassVar, Self
 
-NWCHEM_BASIS_LIBRARY = None
+NWCHEM_BASIS_LIBRARY: set | None = None
 if os.getenv("NWCHEM_BASIS_LIBRARY"):
     NWCHEM_BASIS_LIBRARY = set(os.listdir(os.environ["NWCHEM_BASIS_LIBRARY"]))
+
+NwTaskTheory = Literal[
+    "g3gn",
+    "scf",
+    "dft",
+    "esp",
+    "sodft",
+    "mp2",
+    "direct_mp2",
+    "rimp2",
+    "ccsd",
+    "ccsd(t)",
+    "ccsd+t(ccsd)",
+    "mcscf",
+    "selci",
+    "md",
+    "pspw",
+    "band",
+    "tce",
+    "tddft",
+]
+NwTaskOperation = Literal[
+    "energy",
+    "gradient",
+    "optimize",
+    "saddle",
+    "hessian",
+    "frequencies",
+    "freq",
+    "vscf",
+    "property",
+    "dynamics",
+    "thermodynamics",
+    "",
+]
+NwTaskDirectiveValue = str | int | float
+NwTaskDirectives = Mapping[str, NwTaskDirectiveValue]
+NwTaskAlternateDirectives = Mapping[str, str | NwTaskDirectives]
 
 
 class NwTask(MSONable):
@@ -83,16 +122,16 @@ class NwTask(MSONable):
 
     def __init__(
         self,
-        charge,
-        spin_multiplicity,
-        basis_set,
-        basis_set_option="cartesian",
-        title=None,
-        theory="dft",
-        operation="optimize",
-        theory_directives=None,
-        alternate_directives=None,
-    ):
+        charge: float,
+        spin_multiplicity: int,
+        basis_set: dict[str, str],
+        basis_set_option: Literal["cartesian", "spherical"] = "cartesian",
+        title: str | None = None,
+        theory: NwTaskTheory = "dft",
+        operation: NwTaskOperation = "optimize",
+        theory_directives: NwTaskDirectives | None = None,
+        alternate_directives: NwTaskAlternateDirectives | None = None,
+    ) -> None:
         """
         Very flexible arguments to support many types of potential setups.
         Users should use more friendly static methods unless they need the
@@ -100,7 +139,7 @@ class NwTask(MSONable):
 
         Args:
             charge: Charge of the molecule. If None, charge on molecule is
-                used. Defaults to None. This allows the input file to be set a
+                used. This allows the input file to be set a
                 charge independently from the molecule itself.
             spin_multiplicity: Spin multiplicity of molecule. Defaults to None,
                 which means that the spin multiplicity is set to 1 if the
@@ -147,7 +186,7 @@ class NwTask(MSONable):
         self.theory_directives = theory_directives or {}
         self.alternate_directives = alternate_directives or {}
 
-    def __str__(self):
+    def __str__(self) -> str:
         bset_spec = []
         for el, bset in sorted(self.basis_set.items(), key=lambda x: x[0]):
             bset_spec.append(f' {el} library "{bset}"')
@@ -187,7 +226,7 @@ $theory_spec
             output += f"task {self.theory} {self.operation}"
         return output
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, Any]:
         """Get MSONable dict."""
         return {
             "@module": type(self).__module__,
@@ -204,7 +243,7 @@ $theory_spec
         }
 
     @classmethod
-    def from_dict(cls, dct: dict) -> Self:
+    def from_dict(cls, dct: dict[str, Any]) -> Self:
         """Reconstruct NwTask from its MSONable dict representation.
 
         Args:
@@ -228,16 +267,16 @@ $theory_spec
     @classmethod
     def from_molecule(
         cls,
-        mol,
-        theory,
-        charge=None,
-        spin_multiplicity=None,
-        basis_set="6-31g",
-        basis_set_option="cartesian",
-        title=None,
-        operation="optimize",
-        theory_directives=None,
-        alternate_directives=None,
+        mol: Molecule,
+        theory: NwTaskTheory,
+        charge: float | None = None,
+        spin_multiplicity: int | None = None,
+        basis_set: dict[str, str] | str = "6-31g",
+        basis_set_option: Literal["cartesian", "spherical"] = "cartesian",
+        title: str | None = None,
+        operation: NwTaskOperation = "optimize",
+        theory_directives: NwTaskDirectives | None = None,
+        alternate_directives: NwTaskAlternateDirectives | None = None,
     ) -> Self:
         """
         Very flexible arguments to support many types of potential setups.
@@ -246,6 +285,7 @@ $theory_spec
 
         Args:
             mol: Input molecule
+            theory: The theory used for the task.
             charge: Charge of the molecule. If None, charge on molecule is
                 used. Defaults to None. This allows the input file to be set a
                 charge independently from the molecule itself.
@@ -260,7 +300,6 @@ $theory_spec
             title: Title for the task. Defaults to None, which means a title
                 based on the theory and operation of the task is
                 autogenerated.
-            theory: The theory used for the task. Defaults to "dft".
             operation: The operation for the task. Defaults to "optimize".
             theory_directives: A dict of theory directives. For example,
                 if you are running dft calculations, you may specify the
@@ -299,7 +338,7 @@ $theory_spec
         )
 
     @classmethod
-    def dft_task(cls, mol, xc="b3lyp", **kwargs):
+    def dft_task(cls, mol: Molecule, xc: str = "b3lyp", **kwargs) -> Self:
         """
         A class method for quickly creating DFT tasks with optional
         cosmo parameter .
@@ -310,12 +349,12 @@ $theory_spec
             kwargs: Any of the other kwargs supported by NwTask. Note the
                 theory is always "dft" for a dft task.
         """
-        t = NwTask.from_molecule(mol, theory="dft", **kwargs)
-        t.theory_directives |= {"xc": xc, "mult": t.spin_multiplicity}
-        return t
+        task = NwTask.from_molecule(mol, theory="dft", **kwargs)
+        task.theory_directives |= {"xc": xc, "mult": task.spin_multiplicity}
+        return task
 
     @classmethod
-    def esp_task(cls, mol, **kwargs):
+    def esp_task(cls, mol: Molecule, **kwargs) -> Self:
         """
         A class method for quickly creating ESP tasks with RESP
         charge fitting.
