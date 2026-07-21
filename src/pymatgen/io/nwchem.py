@@ -140,13 +140,8 @@ class NwTask(MSONable):
         flexibility.
 
         Args:
-            charge: Charge of the molecule. If None, charge on molecule is
-                used. This allows the input file to be set a
-                charge independently from the molecule itself.
-            spin_multiplicity: Spin multiplicity of molecule. Defaults to None,
-                which means that the spin multiplicity is set to 1 if the
-                molecule has no unpaired electrons and to 2 if there are
-                unpaired electrons.
+            charge: Charge used for the task.
+            spin_multiplicity: Spin multiplicity used for the task.
             basis_set: The basis set used for the task as a dict. e.g.
                 {"C": "6-311++G**", "H": "6-31++G**"}.
             basis_set_option: cartesian (default) | spherical,
