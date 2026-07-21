@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 import warnings
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from string import Template
 from typing import TYPE_CHECKING, Literal
 
@@ -35,8 +35,9 @@ from pymatgen.core.structure import Molecule, Structure
 from pymatgen.core.units import Energy, FloatWithUnit
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from typing import Any, ClassVar, Self
+
+    from pymatgen.util.typing import PathLike
 
 NWCHEM_BASIS_LIBRARY: set | None = None
 if os.getenv("NWCHEM_BASIS_LIBRARY"):
@@ -375,19 +376,17 @@ class NwInput(MSONable):
 
     def __init__(
         self,
-        mol,
-        tasks,
-        directives=None,
-        geometry_options=("units", "angstroms"),
-        symmetry_options=None,
-        memory_options=None,
-    ):
+        mol: Molecule,
+        tasks: list[NwTask],
+        directives: list[tuple[str, ...]] | None = None,
+        geometry_options: Sequence[str] = ("units", "angstroms"),
+        symmetry_options: Sequence[str] | None = None,
+        memory_options: str | None = None,
+    ) -> None:
         """Initialize a NwInput.
 
         Args:
-            mol: Input molecule. If molecule is a single string, it is used as a
-                direct input to the geometry section of the Gaussian input
-                file.
+            mol: Input molecule.
             tasks: List of NwTasks.
             directives: List of root level directives as tuple. e.g.
                 [("start", "water"), ("print", "high")]
@@ -406,12 +405,7 @@ class NwInput(MSONable):
         self.symmetry_options = symmetry_options
         self.memory_options = memory_options
 
-    @property
-    def molecule(self):
-        """Molecule associated with this GaussianInput."""
-        return self._mol
-
-    def __str__(self):
+    def __str__(self) -> str:
         out = []
         if self.memory_options:
             out.append(f"memory {self.memory_options}")
@@ -427,7 +421,12 @@ class NwInput(MSONable):
             out.extend((str(task), ""))
         return "\n".join(out)
 
-    def write_file(self, filename):
+    @property
+    def molecule(self) -> Molecule:
+        """Molecule associated with this NwInput."""
+        return self._mol
+
+    def write_file(self, filename: PathLike) -> None:
         """Write the input to a file.
 
         Args:
@@ -436,7 +435,7 @@ class NwInput(MSONable):
         with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(str(self))
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, Any]:
         """Get MSONable dict."""
         return {
             "mol": self._mol.as_dict(),
@@ -448,7 +447,7 @@ class NwInput(MSONable):
         }
 
     @classmethod
-    def from_dict(cls, dct: dict) -> Self:
+    def from_dict(cls, dct: dict[str, Any]) -> Self:
         """Reconstruct NwInput from its MSONable dict representation.
 
         Args:
@@ -523,10 +522,13 @@ class NwInput(MSONable):
                     coords.append([float(x) for x in tokens[1:]])
 
                 mol = Molecule(species, coords)
+
             elif tokens[0].lower() == "charge":
                 charge = int(tokens[1])
+
             elif tokens[0].lower() == "title":
                 title = line[5:].strip().strip('"')
+
             elif tokens[0].lower() == "basis":
                 # Parse basis sets
                 line = lines.pop(0).strip()
@@ -535,6 +537,7 @@ class NwInput(MSONable):
                     tokens = line.split()
                     basis_set[tokens[0]] = tokens[-1].strip('"')
                     line = lines.pop(0).strip()
+
             elif tokens[0].lower() in NwTask.theories:
                 # read the basis_set_option
                 if len(tokens) > 1:
@@ -549,6 +552,7 @@ class NwInput(MSONable):
                     if tokens[0] == "mult":
                         spin_multiplicity = float(tokens[1])
                     line = lines.pop(0).strip()
+
             elif tokens[0].lower() == "task":
                 tasks.append(
                     NwTask(
@@ -562,8 +566,10 @@ class NwInput(MSONable):
                         theory_directives=theory_directives.get(tokens[1]),
                     )
                 )
+
             elif tokens[0].lower() == "memory":
                 memory_options = " ".join(tokens[1:])
+
             else:
                 directives.append(line.strip().split())
 
@@ -577,7 +583,7 @@ class NwInput(MSONable):
         )
 
     @classmethod
-    def from_file(cls, filename: str | Path) -> Self:
+    def from_file(cls, filename: PathLike) -> Self:
         """
         Read an NwInput from a file. Currently tested to work with
         files generated from this class itself.
@@ -589,7 +595,7 @@ class NwInput(MSONable):
             NwInput object
         """
         with zopen(filename, mode="rt", encoding="utf-8") as file:
-            return cls.from_str(file.read())  # type:ignore[arg-type]
+            return cls.from_str(file.read())
 
 
 class NwInputError(Exception):
