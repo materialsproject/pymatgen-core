@@ -4079,19 +4079,14 @@ class VolumetricData(BaseVolumetricData):
             file.write(lines)  # type:ignore[arg-type]
             dim = self.dim
 
-            write_spin("total")
-            write_aug("total")
-            if self.is_spin_polarized:
-                if self.is_soc:
-                    write_spin("diff_x")
-                    write_aug("diff_x")
-                    write_spin("diff_y")
-                    write_aug("diff_y")
-                    write_spin("diff_z")
-                    write_aug("diff_z")
-                else:
-                    write_spin("diff")
-                    write_aug("diff")
+            data_keys = ("spin_up", "spin_down") if {"spin_up", "spin_down"}.issubset(self.data) else ("total",)
+            if self.is_soc:
+                data_keys = ("total", "diff_x", "diff_y", "diff_z")
+            elif self.is_spin_polarized and data_keys == ("total",):
+                data_keys = ("total", "diff")
+            for data_key in data_keys:
+                write_spin(data_key)
+                write_aug(data_key)
 
 
 class Locpot(VolumetricData):
@@ -4114,7 +4109,23 @@ class Locpot(VolumetricData):
         else:
             raise TypeError("Unsupported POSCAR type.")
 
-        super().__init__(struct, data, **kwargs)
+        # Normalize legacy "total"/"diff" keys to native "spin_up"/"spin_down" keys
+        data = _normalize_direct_spin_channels(data)
+        deprecated_keys = {"total": "spin_up", "diff": "spin_down"} if "spin_up" in data else None
+        kwargs.pop("data_key", None)
+        super().__init__(struct, data, data_key="spin_up" if "spin_up" in data else "total", **kwargs)
+        if deprecated_keys:
+            # Preserve legacy keys as warning-backed aliases of the native spin-channel keys
+            self.data = type(self.data)(self.data, deprecated_keys=deprecated_keys)
+
+    @staticmethod
+    def _normalize_spin_channels(data: dict[str, NDArray]) -> dict[str, NDArray]:
+        """Map VASP's direct collinear-potential blocks to unambiguous keys."""
+        if {"spin_up", "spin_down"}.issubset(data):
+            return data
+        if set(data) == {"total", "diff"}:
+            return {"spin_up": data["total"], "spin_down": data["diff"]}
+        return data
 
     @classmethod
     def from_file(cls, filename: PathLike, **kwargs) -> Self:
@@ -4184,7 +4195,9 @@ class Chgcar(VolumetricData):
 class Elfcar(VolumetricData):
     """Read an ELFCAR file which contains the Electron Localization Function (ELF).
 
-    For ELF, "total" key refers to Spin.up, and "diff" refers to Spin.down.
+    For collinear spin-polarized calculations, the data is stored under the
+    ``"spin_up"`` and ``"spin_down"`` keys. The legacy ``"total"`` and
+    ``"diff"`` aliases are deprecated.
 
     This also contains information on the kinetic energy density.
     """
@@ -4211,12 +4224,14 @@ class Elfcar(VolumetricData):
         else:
             raise TypeError("Unsupported POSCAR type.")
 
-        super().__init__(tmp_struct, data, **kwargs)
-        # TODO: (mkhorton) modify VolumetricData so that the correct keys can be used.
-        # for ELF, instead of "total" and "diff" keys we have
-        # "Spin.up" and "Spin.down" keys
-        # I believe this is correct, but there's not much documentation.
-        self.data = data
+        # Normalize legacy "total"/"diff" keys to native "spin_up"/"spin_down" keys
+        data = _normalize_direct_spin_channels(data)
+        deprecated_keys = {"total": "spin_up", "diff": "spin_down"} if "spin_up" in data else None
+        kwargs.pop("data_key", None)
+        super().__init__(tmp_struct, data, data_key="spin_up" if "spin_up" in data else "total", **kwargs)
+        if deprecated_keys:
+            # Preserve legacy keys as warning-backed aliases of the native spin-channel keys
+            self.data = type(self.data)(self.data, deprecated_keys=deprecated_keys)
 
     @classmethod
     def from_file(cls, filename: str) -> Self:

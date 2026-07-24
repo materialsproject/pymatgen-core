@@ -1652,6 +1652,17 @@ class TestLocpot(MatSciTest):
         assert locpot.dim == (2, 2, 5)
         assert {str(ele) for ele in locpot.structure.composition} == {"Mg", "Si"}
 
+    def test_collinear_spin_channels(self):
+        locpot = Locpot(
+            Structure(Lattice.cubic(1), ["H"], [[0, 0, 0]]),
+            {"total": np.ones((2, 2, 2)), "diff": np.full((2, 2, 2), 2)},
+        )
+        assert set(locpot.data) == {"spin_up", "spin_down"}
+        assert_allclose(locpot.spin_data[Spin.up], 1)
+        assert_allclose(locpot.spin_data[Spin.down], 2)
+        with pytest.warns(DeprecationWarning, match="'total'.*'spin_up'"):
+            assert_allclose(locpot.data["total"], 1)
+
 
 class TestChgcar(MatSciTest):
     @classmethod
@@ -1824,11 +1835,26 @@ class TestAeccars(MatSciTest):
 class TestElfcar(MatSciTest):
     def test_init(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
-        assert np.mean(elfcar.data["total"]) == approx(0.19076207645194002)
-        assert np.mean(elfcar.data["diff"]) == approx(0.19076046677910055)
+        assert np.mean(elfcar.data["spin_up"]) == approx(0.19076207645194002)
+        assert np.mean(elfcar.data["spin_down"]) == approx(0.19076046677910055)
+        assert_allclose(elfcar.spin_data[Spin.up], elfcar.data["spin_up"])
+        assert_allclose(elfcar.spin_data[Spin.down], elfcar.data["spin_down"])
+        with pytest.warns(DeprecationWarning, match="'total'.*'spin_up'"):
+            assert_allclose(elfcar.data["total"], elfcar.data["spin_up"])
+        with pytest.warns(DeprecationWarning, match="'diff'.*'spin_down'"):
+            assert_allclose(elfcar.data["diff"], elfcar.data["spin_down"])
+        with pytest.raises(ValueError, match="total/difference"):
+            elfcar.get_integrated_diff(0, 1)
         reconstituted = Elfcar.from_dict(elfcar.as_dict())
         assert elfcar.data == reconstituted.data
         assert elfcar.poscar.structure == reconstituted.poscar.structure
+
+        legacy_dict = elfcar.as_dict()
+        legacy_dict["data"] = {"total": elfcar.data["spin_up"], "diff": elfcar.data["spin_down"]}
+        migrated = Elfcar.from_dict(legacy_dict)
+        assert set(migrated.data) == {"spin_up", "spin_down"}
+        assert_allclose(migrated.data["spin_up"], elfcar.data["spin_up"])
+        assert_allclose(migrated.data["spin_down"], elfcar.data["spin_down"])
 
         # Test copy preserve type
         elfcar_copy = elfcar.copy()
@@ -1839,8 +1865,8 @@ class TestElfcar(MatSciTest):
         out_path = f"{self.tmp_path}/ELFCAR_pmg"
         elfcar.write_file(out_path)
         reloaded = Elfcar.from_file(out_path)
-        assert_allclose(reloaded.data["total"], elfcar.data["total"])
-        assert_allclose(reloaded.data["diff"], elfcar.data["diff"])
+        assert_allclose(reloaded.data["spin_up"], elfcar.data["spin_up"])
+        assert_allclose(reloaded.data["spin_down"], elfcar.data["spin_down"])
         assert reloaded.poscar.structure == elfcar.poscar.structure
 
     def test_truncated_file(self):
@@ -1863,7 +1889,7 @@ class TestElfcar(MatSciTest):
     def test_alpha(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
         alpha = elfcar.get_alpha()
-        assert np.median(alpha.data["total"]) == approx(2.936678808979031)
+        assert np.median(alpha.data["spin_up"]) == approx(2.936678808979031)
 
     def test_interpolation(self):
         elfcar = Elfcar.from_file(f"{VASP_OUT_DIR}/ELFCAR.gz")
@@ -3485,9 +3511,9 @@ class TestVaspwave(MatSciTest):
         assert locpot_h5.dim == locpot.dim
         assert locpot_h5.is_spin_polarized
         assert not locpot_h5.is_soc
-        assert set(locpot_h5.data) == {"total", "diff"}
-        assert_allclose(locpot_h5.data["total"], locpot.data["total"], atol=8e-5)
-        assert_allclose(locpot_h5.data["diff"], locpot.data["diff"], atol=8e-5)
+        assert set(locpot_h5.data) == {"spin_up", "spin_down"}
+        assert_allclose(locpot_h5.data["spin_up"], locpot.data["spin_up"], atol=8e-5)
+        assert_allclose(locpot_h5.data["spin_down"], locpot.data["spin_down"], atol=8e-5)
 
     @pytest.mark.skipif(
         not (Path(TEST_DIR) / "outputs" / "vaspwave-H2.tar.gz").exists(),
