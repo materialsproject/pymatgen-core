@@ -4089,6 +4089,15 @@ class VolumetricData(BaseVolumetricData):
                 write_aug(data_key)
 
 
+def _normalize_direct_spin_channels(data: dict[str, NDArray]) -> dict[str, NDArray]:
+    """Map VASP's direct collinear-spin blocks to unambiguous keys."""
+    if {"spin_up", "spin_down"}.issubset(data):
+        return data
+    if set(data) == {"total", "diff"}:
+        return {"spin_up": data["total"], "spin_down": data["diff"]}
+    return data
+
+
 class Locpot(VolumetricData):
     """LOCPOT file reader."""
 
@@ -4117,15 +4126,6 @@ class Locpot(VolumetricData):
         if deprecated_keys:
             # Preserve legacy keys as warning-backed aliases of the native spin-channel keys
             self.data = type(self.data)(self.data, deprecated_keys=deprecated_keys)
-
-    @staticmethod
-    def _normalize_spin_channels(data: dict[str, NDArray]) -> dict[str, NDArray]:
-        """Map VASP's direct collinear-potential blocks to unambiguous keys."""
-        if {"spin_up", "spin_down"}.issubset(data):
-            return data
-        if set(data) == {"total", "diff"}:
-            return {"spin_up": data["total"], "spin_down": data["diff"]}
-        return data
 
     @classmethod
     def from_file(cls, filename: PathLike, **kwargs) -> Self:
