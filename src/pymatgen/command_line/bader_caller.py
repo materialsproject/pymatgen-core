@@ -24,7 +24,6 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import numpy as np
-from monty.dev import deprecated
 from monty.shutil import decompress_file
 from monty.tempfile import ScratchDir
 
@@ -230,73 +229,6 @@ class BaderAnalysis:
                 self.nelectrons = float(tokens[1])
 
         return data
-
-    @deprecated(
-        message="See issue #3652 for details.",
-        deadline=(2025, 2, 26),
-    )
-    def _parse_atomic_densities(self) -> list[dict]:
-        """Parse atom-centered charge densities with excess zeros removed.
-
-        Each dictionary has the keys:
-            "data", "shift", "dim", where "data" is the charge density array,
-            "shift" is the shift used to center the atomic charge density, and
-            "dim" is the dimension of the original charge density.
-        """
-
-        def slice_from_center(data: np.ndarray, x_width: int, y_width: int, z_width: int) -> np.ndarray:
-            """Slices a central window from the data array."""
-            x, y, z = data.shape
-            start_x = x // 2 - (x_width // 2)
-            start_y = y // 2 - (y_width // 2)
-            start_z = z // 2 - (z_width // 2)
-            return data[
-                start_x : start_x + x_width,
-                start_y : start_y + y_width,
-                start_z : start_z + z_width,
-            ]
-
-        def find_encompassing_vol(data: np.ndarray) -> np.ndarray | None:
-            """Find the central encompassing volume which
-            holds all the data within a precision.
-            """
-            total = np.sum(data)
-            for idx in range(np.max(data.shape)):
-                sliced_data = slice_from_center(data, idx, idx, idx)
-                if total - np.sum(sliced_data) < 0.1:
-                    return sliced_data
-            return None
-
-        # convert the charge density for each atom spit out by Bader
-        # into Chgcar objects for easy parsing
-        atom_chgcars = [Chgcar.from_file(f"BvAt{idx + 1:04}.dat") for idx in range(len(self.chgcar.structure))]
-
-        atomic_densities = []
-        # For each atom in the structure
-        for _site, loc, chg in zip(
-            self.chgcar.structure,
-            self.chgcar.structure.frac_coords,
-            atom_chgcars,
-            strict=True,
-        ):
-            # Find the index of the atom in the charge density atom
-            index = np.round(np.multiply(loc, chg.dim))
-
-            # Find the shift vector in the array
-            shift = (np.divide(chg.dim, 2) - index).astype(int)
-
-            # Shift the data so that the atomic charge density
-            # to the center for easier manipulation
-            shifted_data = np.roll(chg.data["total"], shift, axis=(0, 1, 2))
-
-            dct = {
-                "data": find_encompassing_vol(shifted_data),
-                "shift": shift,
-                "dim": self.chgcar.dim,
-            }
-            atomic_densities.append(dct)
-
-        return atomic_densities
 
     def get_charge(self, atom_index: int) -> float:
         """Convenience method to get the charge on a particular atom. This is the "raw"

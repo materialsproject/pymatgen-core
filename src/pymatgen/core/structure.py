@@ -308,12 +308,6 @@ class SiteCollection(collections.abc.Sequence, ABC):
         return len(self.types_of_species)
 
     @property
-    @deprecated(n_elems, deadline=(2025, 6, 7))
-    def ntypesp(self) -> int:
-        """Number of types of atoms."""
-        return self.n_elems
-
-    @property
     def types_of_species(self) -> tuple[Element | Species | DummySpecies, ...]:
         """Tuple of types of species."""
         types: list[Element | Species | DummySpecies] = []

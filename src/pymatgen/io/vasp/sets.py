@@ -1215,11 +1215,6 @@ class VaspInputSet(InputGenerator, abc.ABC):
 VaspInputGenerator = VaspInputSet
 
 
-@deprecated(VaspInputSet, deadline=(2025, 12, 31))
-class DictSet(VaspInputSet):
-    """Alias for VaspInputSet."""
-
-
 # Helper functions to determine valid FFT grids for VASP
 def next_num_with_prime_factors(n: int, max_prime_factor: int, must_inc_2: bool = True) -> int:
     """Get the next number greater than or equal to n that only has the desired prime factors.

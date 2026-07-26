@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from monty.dev import deprecated
 
 from pymatgen.core import Lattice
 from pymatgen.core.units import Ha_to_eV
@@ -768,10 +767,6 @@ class JDFTXOutfile:
             value = getattr(self, fld)
             dct[fld] = value
         return dct
-
-    @deprecated(as_dict, deadline=(2025, 10, 4))
-    def to_dict(self):
-        return self.as_dict()
 
     ###########################################################################
     # Magic methods

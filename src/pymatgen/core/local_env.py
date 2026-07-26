@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, cast, get_args, overload
 
 import numpy as np
 import orjson
-from monty.dev import deprecated, requires
+from monty.dev import requires
 from monty.serialization import loadfn
 from ruamel.yaml import YAML
 from scipy.spatial import Voronoi
@@ -3515,11 +3515,6 @@ class BrunnerNNReciprocal(NearNeighbors):
         return siw
 
 
-@deprecated(BrunnerNNReciprocal, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class BrunnerNN_reciprocal(BrunnerNNReciprocal):
-    """Deprecated alias for BrunnerNNReciprocal."""
-
-
 class BrunnerNNRelative(NearNeighbors):
     """
     Determine coordination number using Brunner's algorithm which counts the
@@ -3592,11 +3587,6 @@ class BrunnerNNRelative(NearNeighbors):
         return siw
 
 
-@deprecated(BrunnerNNRelative, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class BrunnerNN_relative(BrunnerNNRelative):
-    """Deprecated alias for BrunnerNNRelative."""
-
-
 class BrunnerNNReal(NearNeighbors):
     """
     Determine coordination number using Brunner's algorithm which counts the
@@ -3667,11 +3657,6 @@ class BrunnerNNReal(NearNeighbors):
                     }
                 )
         return siw
-
-
-@deprecated(BrunnerNNReal, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class BrunnerNN_real(BrunnerNNReal):
-    """Deprecated alias for BrunnerNNReal."""
 
 
 class EconNN(NearNeighbors):

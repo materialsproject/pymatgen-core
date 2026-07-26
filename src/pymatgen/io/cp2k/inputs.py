@@ -32,7 +32,6 @@ import textwrap
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from monty.dev import deprecated
 from monty.io import zopen
 from monty.json import MSONable
 
@@ -1591,11 +1590,6 @@ class VHartreeCube(Section):
         )
 
 
-@deprecated(VHartreeCube, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class V_Hartree_Cube(VHartreeCube):
-    pass
-
-
 class MOCubes(Section):
     """Controls printing of the molecular orbital eigenvalues."""
 
@@ -1632,11 +1626,6 @@ class MOCubes(Section):
         )
 
 
-@deprecated(MOCubes, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class MO_Cubes(MOCubes):
-    pass
-
-
 class EDensityCube(Section):
     """Controls printing of the electron density cube file."""
 
@@ -1653,11 +1642,6 @@ class EDensityCube(Section):
             keywords=keywords or {},
             **kwargs,
         )
-
-
-@deprecated(EDensityCube, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class E_Density_Cube(EDensityCube):
-    pass
 
 
 class Smear(Section):
@@ -1847,11 +1831,6 @@ class XCFunctional(Section):
             repeats=False,
             **kwargs,
         )
-
-
-@deprecated(XCFunctional, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class Xc_Functional(XCFunctional):
-    pass
 
 
 class PBE(Section):
@@ -2086,11 +2065,6 @@ class KpointSet(Section):
         )
 
 
-@deprecated(KpointSet, "Kpoint_Set has been deprecated on 2024-03-16", deadline=(2025, 3, 16))
-class Kpoint_Set(KpointSet):
-    pass
-
-
 class BandStructure(Section):
     """Specify high symmetry paths for outputting the band structure in CP2K."""
 
@@ -2168,11 +2142,6 @@ class BandStructure(Section):
                 "Unsupported k-point style. Must be line-mode or explicit k-points (reciprocal/cartesian)."
             )
         return cls(kpoint_sets=kpoint_sets, filename="BAND.bs")
-
-
-@deprecated(BandStructure, "Deprecated on 2024-03-29.", deadline=(2025, 3, 29))
-class Band_Structure(BandStructure):
-    pass
 
 
 @dataclass
