@@ -4,7 +4,6 @@ import re
 import shutil
 import warnings
 
-import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
@@ -13,6 +12,15 @@ from pymatgen.command_line.bader_caller import BaderAnalysis, bader_analysis_fro
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/command_line/bader"
+
+
+@pytest.mark.parametrize("parse_atomic_densities", [True, False])
+def test_parse_atomic_densities_deprecation(parse_atomic_densities):
+    with (
+        pytest.warns(DeprecationWarning, match="parse_atomic_densities is deprecated"),
+        pytest.raises(ValueError, match="You must provide either a Cube file or a CHGCAR"),
+    ):
+        BaderAnalysis(bader_path="bader", parse_atomic_densities=parse_atomic_densities)
 
 
 @pytest.mark.skipif(not shutil.which("bader"), reason="bader executable not present")
@@ -116,22 +124,15 @@ class TestBaderAnalysis(MatSciTest):
         assert summary["reference_used"]
         assert sum(summary["magmom"]) == approx(28, abs=1e-1)
 
-    @pytest.mark.filterwarnings("ignore:_parse_atomic_densities is deprecated")
-    def test_atom_parsing(self):
-        """TODO: Deprecated, remove after 2025-2-26, see PR3652."""
-        # test with reference file
-        analysis = BaderAnalysis(
-            chgcar_filename=f"{VASP_OUT_DIR}/CHGCAR.Fe3O4.gz",
-            potcar_filename=f"{VASP_IN_DIR}/POTCAR_Fe3O4.gz",
-            chgref_filename=f"{VASP_OUT_DIR}/CHGCAR.Fe3O4_ref.gz",
-            parse_atomic_densities=True,
-        )
+    def test_parse_atomic_densities_deprecation(self):
+        with pytest.warns(DeprecationWarning, match="parse_atomic_densities is deprecated"):
+            analysis = BaderAnalysis(
+                chgcar_filename=f"{VASP_OUT_DIR}/CHGCAR.Fe3O4.gz",
+                parse_atomic_densities=True,
+            )
 
-        assert len(analysis.atomic_densities) == len(analysis.chgcar.structure)
-
-        assert np.sum(analysis.chgcar.data["total"]) == approx(
-            np.sum([np.sum(dct["data"]) for dct in analysis.atomic_densities])
-        )
+        assert not hasattr(analysis, "atomic_densities")
+        assert "charge_densities" not in analysis.summary
 
     def test_missing_file_bader_exe_path(self):
         # Mock which("bader") to return None so we always fall back to use bader_exe_path

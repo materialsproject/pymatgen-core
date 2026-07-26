@@ -56,11 +56,6 @@ class BaderAnalysis:
         vacuum_charge (float): Vacuum charge of the Bader analysis.
         nelectrons (int): Number of electrons of the Bader analysis.
         chgcar (Chgcar): Chgcar object associated with input CHGCAR file.
-        atomic_densities (list[dict]): List of charge densities for each
-            atom centered on the atom. Each dictionary has the keys:
-            "data", "shift", "dim", where "data" is the charge density array,
-            "shift" is the shift used to center the atomic charge density, and
-            "dim" is the dimension of the original charge density.
     """
 
     def __init__(
@@ -70,7 +65,7 @@ class BaderAnalysis:
         chgref_filename: str = "",
         cube_filename: str = "",
         bader_path: str | None = None,
-        parse_atomic_densities: bool = False,
+        parse_atomic_densities: bool | None = None,
     ) -> None:
         """Initialize the Bader caller.
 
@@ -81,9 +76,15 @@ class BaderAnalysis:
                 reference charge density.
             cube_filename (str, optional): The filename of the cube file.
             bader_path (str, optional): The path to the bader executable.
-            parse_atomic_densities (bool, optional): Enable atomic partition of the
-                charge density. Charge densities are atom centered. Defaults to False.
+            parse_atomic_densities (bool | None, optional): Deprecated and has no effect.
+                It will be removed on 2026-12-31.
         """
+        if parse_atomic_densities is not None:
+            warnings.warn(
+                "parse_atomic_densities is deprecated and will be removed on 2026-12-31; it no longer has any effect.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         def temp_decompress(file: str | Path, target_dir: str = ".") -> str:
             """Utility function to copy a compressed file to a target directory (ScratchDir)
@@ -127,8 +128,6 @@ class BaderAnalysis:
         if cube_filename and chgcar_filename:
             raise ValueError("Cannot parse cube and CHGCAR at the same time.")
 
-        self.parse_atomic_densities = parse_atomic_densities
-
         with ScratchDir("."):
             if chgcar_filename:
                 filepath = chgcar_fpath = temp_decompress(chgcar_filename)
@@ -166,9 +165,6 @@ class BaderAnalysis:
             if self.reference_used:
                 bader_args += ["-ref", chgref_fpath]
 
-            if parse_atomic_densities:
-                bader_args += ["-p", "all_atom"]
-
             with subprocess.Popen(
                 bader_args,
                 stdout=subprocess.PIPE,
@@ -196,10 +192,6 @@ class BaderAnalysis:
 
             # Parse ACF.dat file
             self.data = self._parse_acf()
-
-            # Parse atomic densities
-            if self.parse_atomic_densities:
-                self.atomic_densities = self._parse_atomic_densities()
 
     def _parse_acf(self) -> list[dict]:
         """Parse Bader output file ACF.dat."""
@@ -358,9 +350,6 @@ class BaderAnalysis:
             "reference_used": self.reference_used,
             "bader_version": self.version,
         }
-
-        if self.parse_atomic_densities:
-            summary["charge_densities"] = self.atomic_densities
 
         if self.potcar:
             charge_transfer = [self.get_charge_transfer(i) for i in range(len(self.data))]
