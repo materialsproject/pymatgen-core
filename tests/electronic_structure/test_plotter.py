@@ -192,6 +192,9 @@ class TestBSPlotterProjected:
         with open(f"{TEST_FILES_DIR}/electronic_structure/boltztrap2/PbTe_bandstructure.json", "rb") as file:
             self.bs_PbTe = BandStructureSymmLine.from_dict(orjson.loads(file.read()))
 
+    def test_orbitals_sum_orbitals_without_sum_morbs(self):
+        assert self.plotter_Cu2O._Orbitals_SumOrbitals({"Cu": ["dxy"]}, None) == ({"Cu": ["dxy"]}, None)
+
     def test_methods(self):
         # Minimal baseline testing for get_plot. not a true test. Just checks that
         # it can actually execute.
