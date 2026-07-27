@@ -669,6 +669,7 @@ class TestVasprun(MatSciTest):
         filepath = f"{VASP_OUT_DIR}/vasprun.sc_overflow.xml.gz"
         with pytest.warns(UserWarning, match="Float overflow .* encountered in vasprun"):
             vasp_run = Vasprun(filepath)
+
         first_ionic_step = vasp_run.ionic_steps[0]
         elec_step = first_ionic_step["electronic_steps"][29]
         assert np.isnan(elec_step["e_wo_entrp"])
@@ -1564,6 +1565,26 @@ class TestOszicar(MatSciTest):
         oszicar = Oszicar(fpath)
         assert oszicar.final_energy == approx(-10.645278)
         assert set(oszicar.ionic_steps[-1]) == {"F", "E0", "dE", "mag"}
+
+    def test_float_overflow(self):
+        oszicar_path = Path(self.tmp_path) / "OSZICAR"
+        oszicar_path.write_text(
+            """\
+       N       E                     dE             d eps       ncg     rms          rms(c)
+DAV:   1     0.831012218308E+03    0.83101E+03   -0.25939E+05  4672   0.894E+02
+          1 T= ****** E= 0.64876404E+06 F= 0.49220367E+06 E0= 0.49220367E+06  EK= 0.15656E+06 SP= 0.00E+00 SK= 0.00E+00
+""",
+            encoding="utf-8",
+        )
+
+        with pytest.warns(UserWarning, match="Float overflow .* encountered in vasprun"):
+            oszicar = Oszicar(oszicar_path)
+
+        ionic_step = oszicar.ionic_steps[0]
+        assert np.isnan(ionic_step["T"])
+
+        assert ionic_step["E"] == approx(648_764.04)
+        assert ionic_step["F"] == approx(492_203.67)
 
 
 class TestGetBandStructureFromVaspMultipleBranches:

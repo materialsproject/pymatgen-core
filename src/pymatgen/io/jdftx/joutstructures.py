@@ -10,8 +10,6 @@ import pprint
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from monty.dev import deprecated
-
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
@@ -240,10 +238,6 @@ class JOutStructures:
             else:
                 dct[fld] = value
         return dct
-
-    @deprecated(as_dict, deadline=(2025, 10, 4))
-    def to_dict(self):
-        return self.as_dict()
 
     def __getitem__(self, key: int | str) -> JOutStructure | Any:
         """Return item.

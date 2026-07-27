@@ -308,12 +308,6 @@ class SiteCollection(collections.abc.Sequence, ABC):
         return len(self.types_of_species)
 
     @property
-    @deprecated(n_elems, deadline=(2025, 6, 7))
-    def ntypesp(self) -> int:
-        """Number of types of atoms."""
-        return self.n_elems
-
-    @property
     def types_of_species(self) -> tuple[Element | Species | DummySpecies, ...]:
         """Tuple of types of species."""
         types: list[Element | Species | DummySpecies] = []
@@ -1052,9 +1046,9 @@ class IStructure(SiteCollection, MSONable):
                 ii. List of dict of elements/species and occupancies, e.g.
                     [{"Fe" : 0.5, "Mn":0.5}, ...]. This allows the setup of
                     disordered structures.
-            coords (Nx3 array): list of fractional/Cartesian coordinates of
+            coords (Nx3 array): Array of fractional/Cartesian coordinates of
                 each species.
-            charge (int): overall charge of the structure. Defaults to behavior
+            charge (int): Overall charge of the structure. Defaults to behavior
                 in SiteCollection where total charge is the sum of the oxidation
                 states.
             validate_proximity (bool): Whether to check if there are sites
@@ -3922,9 +3916,9 @@ class Structure(IStructure, collections.abc.MutableSequence):
                 ii. List of dict of elements/species and occupancies, e.g.
                     [{"Fe" : 0.5, "Mn":0.5}, ...]. This allows the setup of
                     disordered structures.
-            coords (Nx3 array): list of fractional/cartesian coordinates of
+            coords (Nx3 array): Array of fractional/cartesian coordinates of
                 each species.
-            charge (float): overall charge of the structure. Defaults to behavior
+            charge (float): Overall charge of the structure. Defaults to behavior
                 in SiteCollection where total charge is the sum of the oxidation
                 states.
             validate_proximity (bool): Whether to check if there are sites

@@ -21,7 +21,7 @@ import math
 import os
 import warnings
 from functools import reduce
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 import numpy as np
 import orjson
@@ -29,13 +29,14 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 
 from pymatgen.core import Lattice, PeriodicSite, Structure, get_el_sp
+from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.util.coord import in_coord_list
 from pymatgen.util.due import Doi, due
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
     from typing import Any, Self
 
     from numpy.typing import ArrayLike, NDArray
@@ -2052,80 +2053,197 @@ def get_symmetrically_equivalent_miller_indices(
     return equivalent_millers
 
 
+@overload
+def get_symmetrically_distinct_miller_indices(
+    structure: Structure | IStructure,
+    max_index: int,
+    return_hkil: Literal[False] = False,
+    cell: Literal["input", "conventional", "primitive", "conv_np", "prim_2conv"] = "input",
+) -> list[tuple[int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_distinct_miller_indices(
+    structure: Structure | IStructure,
+    max_index: int,
+    return_hkil: Literal[True] = True,
+    cell: Literal["input", "conventional", "primitive", "conv_np", "prim_2conv"] = "input",
+) -> list[tuple[int, int, int, int]]: ...
+
+
 def get_symmetrically_distinct_miller_indices(
     structure: Structure | IStructure,
     max_index: int,
     return_hkil: bool = False,
-) -> list:
+    cell: Literal["input", "conventional", "primitive", "conv_np", "prim_2conv"] = "input",
+) -> list[tuple[int, int, int]] | list[tuple[int, int, int, int]]:
     """Find all symmetrically distinct indices below a certain max-index
     for a given structure. Analysis is based on the symmetry of the
     reciprocal lattice of the structure.
 
     Args:
         structure (Structure): The input structure.
-        max_index (int): The maximum index. For example, 1 means that
+        max_index (int): The maximum absolute index h/k/l. For example, 1 means that
             (100), (110), and (111) are returned for the cubic structure.
             All other indices are equivalent to one of these.
+            Keep in mind that for hkil, `abs(i) > max_index` is possible.
         return_hkil (bool): Whether to return hkil (True) form of Miller
-            index for hexagonal systems, or hkl (False).
+            index for hexagonal systems, or hkl (False). Only valid for cells in the hexagonal family.
+        cell (Literal["input", "conventional", "primitive", "conv_np", "prim_2conv"] = "conventional"):
+            Cell type to base the Miller indices on.
+
+            "input": Use the structure as given and its direct symmetry operations.
+
+            "conventional": Use the conventional standard structure and its symmetry operations, except if the structure
+            is centered, use the symmetry operations of the primitive standard structure.
+            Use "conv_np" if this centering behaviour is unwanted.
+
+            "primitive": Use the primitive standard structure and its symmetry operations. Note that this means the
+            Miller indices apply to the primitive structure, not its conventional form. Use "prim_2conv" if you need
+            the equivalent conventional indices.
+
+            "conv_np": Use the conventional standard structure and its symmetry operations.
+            This is equivalent to "conventional", except if the conventional cell is centered. In that case,
+            it is treated as a larger cell instead of using the symmetry operations of the primitive cell.
+
+            "prim_2conv": Use the primitive standard structure and its symmetry operations, then convert the unique
+            indices (in the primitive basis) back to conventional indices.
+            Note that this is *not* the same as using "conventional" with the same `max_index`, as the latter will
+            include all distinct miller indices with a *conventional* index up to `max_index`, while the former returns
+            all distinct miller indices with a *primitive* index up to `max_index`
+            (but converted afterwards to conventional).
+
+    Returns:
+        unique_hkl (list[tuple[int, int, int]] | list[tuple[int, int, int, int]]): List of all hk(i)l indices up to
+            `max_index` that are symmetrically distinct. Only includes indices whose first nonzero index is positive.
+            The hk(i)l apply to the cell type as defined by `cell` and are sorted by ascending maximum absolute index,
+            with indices to the same maximum absolute index being sorted by ascending absolute sum over hkl.
     """
-    # Get a list of all hkls for conventional (including equivalent)
-    rng = list(range(-max_index, max_index + 1))[::-1]
-    conv_hkl_list = [miller for miller in itertools.product(rng, rng, rng) if any(i != 0 for i in miller)]
 
-    # Sort by the maximum absolute values of Miller indices so that
-    # low-index planes come first. This is important for trigonal systems.
-    conv_hkl_list = sorted(conv_hkl_list, key=lambda x: max(np.abs(x)))
+    def hkl_key(hkl: tuple[int, int, int]) -> tuple[int, int, int, int, int]:
+        """Returns a deterministic sorting key for hkl tuples.
 
-    # Get distinct hkl planes from the rhombohedral setting if trigonal
-    spg_analyzer = SpacegroupAnalyzer(structure)
-    if spg_analyzer.get_crystal_system() == "trigonal":
-        transf = spg_analyzer.get_conventional_to_primitive_transformation_matrix()
-        miller_list: list[tuple[int, int, int]] = [hkl_transformation(transf, hkl) for hkl in conv_hkl_list]
-        prim_structure = SpacegroupAnalyzer(structure).get_primitive_standard_structure()
-        symm_ops = prim_structure.lattice.get_recp_symmetry_operation()
+        This key was chosen to prefer smaller absolute maximum values and
+        First: Lower maximum absolute index (e. g. (100) over (200)).
+        Second: Lower sum of absolute values (e. g. (100) over (110)).
+        Then: Highest value in h, then k, then l (e. g. (100) over (-100)/(010)).
+        """
+        h, k, L = hkl
+        ah = abs(h)
+        ak = abs(k)
+        al = abs(L)
+        return (max(ah, ak, al), ah + ak + al, -h, -k, -L)
 
+    sga = SpacegroupAnalyzer(structure)
+    # Transform the cell as requested
+    if cell == "input":
+        transformed = structure
+        rec_symm_ops = transformed.lattice.get_recp_symmetry_operation()
+
+    elif cell in {"conventional", "conv_np"}:
+        transformed = sga.get_conventional_standard_structure()
+        # Don't generate primitive if unneeded or unwanted
+        if sga.get_space_group_symbol().startswith("P") or cell == "conv_np":
+            rec_symm_ops = transformed.lattice.get_recp_symmetry_operation()
+
+        # Use symmetry ops from primitive (but keep conventional hkl)
+        else:
+            c2p_matrix = sga.get_conventional_to_primitive_transformation_matrix()
+            p2c_matrix = np.linalg.inv(c2p_matrix)
+
+            primitive_ops = sga.get_primitive_standard_structure().lattice.get_recp_symmetry_operation()
+
+            # Transform primitive ops to conventional lattice
+            rec_symm_ops = []
+            zero = np.zeros(3)
+            for op in primitive_ops:
+                # Conjugate the rotation matrix by the conv2prim matrix
+                # so the rotation applies to the conventional basis
+                rotation_conv = p2c_matrix @ op.rotation_matrix @ c2p_matrix
+
+                # For a valid conventional hkl basis, the rotation should only
+                # contain integer values
+                rounded_rotation = np.rint(rotation_conv)
+
+                if not np.allclose(rotation_conv, rounded_rotation, atol=1e-8):
+                    raise ValueError(
+                        "Failed to convert primitive reciprocal symmetry operation "
+                        "to conventional reciprocal-index operation, as the values were not integer: "
+                        f"Primitive rotation: {op.rotation_matrix}, obtained conventional rotation: {rotation_conv}."
+                    )
+                # Regenerate SymmOp (no translation component)
+                rec_symm_ops.append(
+                    SymmOp.from_rotation_and_translation(
+                        rounded_rotation,
+                        zero,
+                    )
+                )
+
+    elif cell in {"primitive", "prim_2conv"}:
+        transformed = sga.get_primitive_standard_structure()
+        rec_symm_ops = transformed.lattice.get_recp_symmetry_operation()
     else:
-        miller_list = conv_hkl_list
-        symm_ops = structure.lattice.get_recp_symmetry_operation()
+        raise ValueError(f"Unsupported cell type {cell}.")
 
-    unique_millers: list = []
-    unique_millers_conv: list = []
+    # Get a list of all hkls up to the defined maximum
+    # Exclude (0, 0, 0) and linearly dependent multiples
+    indices = range(-max_index, max_index + 1)
+    candidate_hkl = cast("list[tuple[int, int, int]]", list(itertools.product(indices, repeat=3)))
 
-    for idx, miller in enumerate(miller_list):
-        denom = abs(reduce(math.gcd, miller))  # type: ignore[arg-type]
-        miller = cast("tuple[int, int, int]", tuple(int(idx / denom) for idx in miller))
-        if not _is_in_miller_family(miller, unique_millers, symm_ops):
-            if spg_analyzer.get_crystal_system() == "trigonal":
-                # Now we find the distinct primitive hkls using
-                # the primitive symmetry operations and their
-                # corresponding hkls in the conventional setting
-                unique_millers.append(miller)
-                denom = abs(reduce(math.gcd, conv_hkl_list[idx]))  # type: ignore[arg-type]
-                cmiller = tuple(int(idx / denom) for idx in conv_hkl_list[idx])
-                unique_millers_conv.append(cmiller)
-            else:
-                unique_millers.append(miller)
-                unique_millers_conv.append(miller)
+    # Sort by the maximum absolute values of Miller indices so that low-index planes come first.
+    # Inside a maximum index, sort by lowest absolute sum so simpler planes come first.
+    # This is also relevant to get the smallest-index representation (see pymatgen#2944/2949)
+    # By adding -hkl itself as a third key, candidate_hkl has an explicit order
+    candidate_hkl.sort(key=hkl_key)
 
-    if return_hkil and spg_analyzer.get_crystal_system() in {"trigonal", "hexagonal"}:
-        return [(hkl[0], hkl[1], -1 * hkl[0] - hkl[1], hkl[2]) for hkl in unique_millers_conv]
+    # Collect all unique hkl (stays sorted like candidate_hkl is)
+    unique_hkl: list[tuple[int, int, int]] = []
+    for hkl in candidate_hkl:
+        # Non-reduced hkl indices are equal to their smaller form,
+        # therefore check that gcd is 1 (gcd is always positive)
+        # GCD also removes (0, 0, 0), as that is gcd 0.
+        # Also exclude the negative equivalents, as (hkl) and (-h, -k, -l)
+        # are the same set of planes. We keep the one where the first
+        # nonzero index is positive.
+        if math.gcd(*hkl) != 1 or next(i for i in hkl if i != 0) < 0:
+            continue
+        if not _is_in_miller_family(hkl, unique_hkl, rec_symm_ops):
+            unique_hkl.append(hkl)
 
-    return unique_millers_conv
+    # Transform primitive indices back to conventional, if requested
+    # If the spacegroup is not centered, the matrix will not change the values
+    if cell == "prim_2conv" and not sga.get_space_group_symbol().startswith("P"):
+        p2c_matrix = np.linalg.inv(sga.get_conventional_to_primitive_transformation_matrix())
+        unique_hkl = [hkl_transformation(p2c_matrix, hkl) for hkl in unique_hkl]
+        # Re-sort, as indices changed
+        unique_hkl.sort(key=hkl_key)
+
+    if return_hkil:
+        # hkil only make sense for the hexagonal family
+        # For "input" cells we trust the user to know if hkil make sense for them
+        if cell != "input" and (cell == "primitive" or sga.get_crystal_family() != "hexagonal"):
+            warnings.warn(
+                "hkil miller indices for a conventional hexagonal cell were requested, but the cell is in "
+                f"the {sga.get_crystal_family()} family and the indices are "
+                f"{' not' if cell == 'primitive' else ''} conventional.",
+                stacklevel=2,
+            )
+        return [(h, k, -h - k, L) for (h, k, L) in unique_hkl]
+    return unique_hkl
 
 
 def _is_in_miller_family(
     miller_index: tuple[int, int, int],
     miller_list: Sequence[tuple[int, int, int]],
-    symm_ops: list,
+    symm_ops: Iterable[SymmOp],
 ) -> bool:
     """Helper function to check if the given Miller index belongs
     to the same family of any index in the provided list.
 
     Args:
         miller_index (tuple[int, int, int]): The Miller index to analyze.
-        miller_list (list): List of Miller indices.
-        symm_ops (list): Symmetry operations for a lattice,
+        miller_list (Sequence[tuple[int, int, int]]): Sequence of Miller indices.
+        symm_ops (Iterable[SymmOp]): Symmetry operations for a lattice,
             used to define the indices family.
     """
     return any(in_coord_list(miller_list, op.operate(miller_index)) for op in symm_ops)

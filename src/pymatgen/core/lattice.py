@@ -1740,7 +1740,7 @@ class Lattice(MSONable):
         to be used for hkl transformations.
 
         Args:
-            symprec: default is 0.001.
+            symprec: default is 0.01.
         """
         recp_lattice = self.reciprocal_lattice_crystallographic
         # Get symmetry operations from input conventional unit cell

@@ -23,7 +23,6 @@ from pymatgen.io.vasp.sets import (
     MODULE_DIR,
     BadInputSetWarning,
     CINEBSet,
-    DictSet,
     MatPESStaticSet,
     MITMDSet,
     MITNEBSet,
@@ -2192,15 +2191,6 @@ class TestMPAbsorptionSet(MatSciTest):
 
 def test_vasp_input_set_alias():
     assert VaspInputSet is VaspInputGenerator
-
-
-def test_dict_set_alias():
-    with pytest.warns(
-        FutureWarning,
-        match="DictSet is deprecated, and will be removed on 2025-12-31\nUse VaspInputSet",
-    ):
-        dictset = DictSet()
-    assert isinstance(dictset, VaspInputSet)
 
 
 class TestMP24Sets:

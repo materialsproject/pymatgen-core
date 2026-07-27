@@ -789,9 +789,22 @@ class TestMillerIndexFinder(MatSciTest):
         # Tests to see if the function obtains the known number of unique slabs
 
         indices = get_symmetrically_distinct_miller_indices(self.cscl, 1)
-        assert len(indices) == 3
+        # Check that the positive versions were returned
+        # and that an earlier index is preferred ((100) over (010)/(001))
+        # and that positive indices are preferred ((111) over (1-1-1) etc.)
+        # and that the indices are sorted by absolute sum
+        cubic_exp = [(1, 0, 0), (1, 1, 0), (1, 1, 1)]
+        assert indices == cubic_exp
         indices = get_symmetrically_distinct_miller_indices(self.cscl, 2)
         assert len(indices) == 6
+
+        # For a P... space group, all modes returning conventional indices should
+        # return the same indices (as long as the input cell is standard)
+        p_conv = get_symmetrically_distinct_miller_indices(self.cscl, 2, cell="conventional")
+        p_conv_np = get_symmetrically_distinct_miller_indices(self.cscl, 2, cell="conv_np")
+        p_prim = get_symmetrically_distinct_miller_indices(self.cscl, 2, cell="primitive")
+        p_prim2conv = get_symmetrically_distinct_miller_indices(self.cscl, 2, cell="prim_2conv")
+        assert p_conv == p_conv_np == p_prim == p_prim2conv
 
         assert len(get_symmetrically_distinct_miller_indices(self.lifepo4, 1)) == 7
 
@@ -808,16 +821,46 @@ class TestMillerIndexFinder(MatSciTest):
         indices = get_symmetrically_distinct_miller_indices(self.graphite, 2)
         assert len(indices) == 12
 
-        # Now try a trigonal system.
-        indices = get_symmetrically_distinct_miller_indices(self.trig_bi, 2, return_hkil=True)
+        # Now try a trigonal system and hkil.
+        # Note that a trigonal cell must use cell="conventional" to restore the old behaviour
+        # of using the primitive symmetry.
+        indices = get_symmetrically_distinct_miller_indices(self.trig_bi, 2, return_hkil=True, cell="conventional")
         assert len(indices) == 17
         assert all(len(hkl) == 4 for hkl in indices)
+        assert all(i == -h - k for h, k, i, _ in indices)
 
         # Test to see if the output with max_index i is a subset of the output with max_index i+1
-        for idx in range(1, 4):
-            assert set(get_symmetrically_distinct_miller_indices(self.trig_bi, idx)) <= set(
-                get_symmetrically_distinct_miller_indices(self.trig_bi, idx + 1)
-            )
+        # Also check that the order of the smaller index values remains unchanged
+        prev: list[tuple[int, int, int]] = []
+        for idx in range(1, 5):
+            new = get_symmetrically_distinct_miller_indices(self.trig_bi, idx)
+            assert prev == new[: len(prev)]
+            prev = new
+
+        # Using the conventional symmetry ops will lead to less distinct indices (as there is centering):
+        # (the input cell is conventional, so input==conv_np)
+        indices_i = get_symmetrically_distinct_miller_indices(self.trig_bi, 2, cell="input")
+        assert len(indices_i) == 12
+        indices_np = get_symmetrically_distinct_miller_indices(self.trig_bi, 2, cell="conv_np")
+        assert indices_i == indices_np
+
+        # With primitive symmetry, the count *can* be different (depends on the lattice)
+        indices_p = get_symmetrically_distinct_miller_indices(self.trig_bi, 2, cell="primitive")
+        assert len(indices_p) == 13
+        # Count has to be the same with converted indices, but the indices are different
+
+        # Test a non-conventional cell: Supercell of CsCl
+        super_cscl = self.cscl.make_supercell((2, 1, 1), in_place=False)
+        # CsCl is cubic, but this supercell is only tetragonal -> "input" and "conventional" differ
+        # Also, it is expanded in a, not in c - so a is the unique axis!
+        tetra_nonconv_exp = [(1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 1, 1), (1, 1, 1)]
+        assert get_symmetrically_distinct_miller_indices(super_cscl, 1) == tetra_nonconv_exp
+        assert get_symmetrically_distinct_miller_indices(super_cscl, 1, cell="conventional") == cubic_exp
+
+        # With a conventional tetragonal cell, return the planes for a c-unique cell
+        tetra_conv_exp = [(1, 0, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (1, 1, 1)]
+        tetra = Structure(Lattice.tetragonal(2, 3), ["H"], [[0, 0, 0]])
+        assert get_symmetrically_distinct_miller_indices(tetra, 1) == tetra_conv_exp
 
     def test_get_symmetrically_equivalent_miller_indices(self):
         # Tests to see if the function obtains all equivalent hkl for cubic (100)

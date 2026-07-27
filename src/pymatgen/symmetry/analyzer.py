@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from pymatgen.core import Element, IStructure, Species
     from pymatgen.core.sites import Site
-    from pymatgen.symmetry.groups import CrystalSystem
+    from pymatgen.symmetry.groups import CrystalFamily, CrystalSystem
     from pymatgen.util.typing import Kpoint
 
     LatticeType = Literal[
@@ -211,7 +211,7 @@ class SpacegroupAnalyzer:
             ValueError: on invalid space group numbers < 1 or > 230.
 
         Returns:
-            str: Crystal system for structure
+            str: Crystal system of the structure.
         """
         n = self._space_group_data.number
 
@@ -219,7 +219,7 @@ class SpacegroupAnalyzer:
         if n != int(n) or not 0 < n < 231:
             raise ValueError(f"Received invalid space group {n}")
 
-        if 0 < n < 3:
+        if n < 3:
             return "triclinic"
         if n < 16:
             return "monoclinic"
@@ -233,22 +233,36 @@ class SpacegroupAnalyzer:
             return "hexagonal"
         return "cubic"
 
-    def get_lattice_type(self) -> LatticeType:
-        """Get the lattice for the structure, e.g. (triclinic, orthorhombic, cubic,
-        etc.). This is the same as the crystal system with the exception of the
-        hexagonal/rhombohedral lattice.
+    def get_crystal_family(self) -> CrystalFamily:
+        """Get the crystal family of the structure.
+
+        Equivalent to the crystal system, except for the trigonal system, which
+        is part of the hexagonal family.
 
         Raises:
             ValueError: on invalid space group numbers < 1 or > 230.
 
         Returns:
-            str: Lattice type for structure
+            str: Crystal family of the structure.
         """
-        spg_num = self._space_group_data.number
         system = self.get_crystal_system()
-        if spg_num in {146, 148, 155, 160, 161, 166, 167}:
-            return "rhombohedral"
         return "hexagonal" if system == "trigonal" else system
+
+    def get_lattice_type(self) -> LatticeType:
+        """Get the lattice for the structure, e.g. (triclinic, orthorhombic, cubic,
+        etc.). This is the same as the crystal family with the exception of the
+        rhombohedral trigonal cells.
+
+        Raises:
+            ValueError: on invalid space group numbers < 1 or > 230.
+
+        Returns:
+            str: Lattice type of the structure.
+        """
+        # R-centered trigonal cells are the rhombohedral lattice type
+        if self.get_space_group_symbol().startswith("R"):
+            return "rhombohedral"
+        return self.get_crystal_family()
 
     def get_pearson_symbol(self) -> str:
         """Get the Pearson symbol for the structure.

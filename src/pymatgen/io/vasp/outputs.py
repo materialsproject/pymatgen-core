@@ -4701,7 +4701,7 @@ class Oszicar:
                 elif line.strip() != "":
                     # remove space first and apply field agnostic extraction
                     matches = re.findall(ionic_general_pattern, re.sub(r"d E ", "dE", line))
-                    ionic_steps.append({key: float(value) for key, value in matches})
+                    ionic_steps.append({key: _vasprun_float(value) for key, value in matches})
 
         self.electronic_steps = electronic_steps
         self.ionic_steps = ionic_steps

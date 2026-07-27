@@ -40,6 +40,15 @@ if TYPE_CHECKING:
         "trigonal",
     ]
 
+    CrystalFamily: TypeAlias = Literal[
+        "cubic",
+        "hexagonal",
+        "monoclinic",
+        "orthorhombic",
+        "tetragonal",
+        "triclinic",
+    ]
+
 
 SYMM_DATA = loadfn(os.path.join(os.path.dirname(__file__), "symm_data.json"))
 

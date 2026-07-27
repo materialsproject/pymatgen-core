@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
-from monty.dev import deprecated
 
 if TYPE_CHECKING:
     from typing import Any
@@ -1294,10 +1293,6 @@ class JDFTXOutfileSlice:
             else:
                 dct[fld] = value
         return dct
-
-    @deprecated(as_dict, deadline=(2025, 10, 4))
-    def to_dict(self):
-        return self.as_dict()
 
     # TODO: Re-do this now that there are no properties
     def __repr__(self) -> str:

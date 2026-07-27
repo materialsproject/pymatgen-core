@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import numpy as np
 
-from monty.dev import deprecated
 
 from pymatgen.core.units import Ha_to_eV
 from pymatgen.io.jdftx._output_utils import get_colon_val
@@ -236,10 +235,6 @@ class JElStep:
                 dct[fld] = value
         return dct
 
-    @deprecated(as_dict, deadline=(2025, 10, 4))
-    def to_dict(self):
-        return self.as_dict()
-
     def __str__(self) -> str:
         """
         Return string representation of JElStep object.
@@ -409,10 +404,6 @@ class JElSteps:
             else:
                 dct[fld] = value
         return dct
-
-    @deprecated(as_dict, deadline=(2025, 10, 4))
-    def to_dict(self):
-        return self.as_dict()
 
     def __getitem__(self, key: int | str) -> JElStep | Any:
         """Return item.
