@@ -29,6 +29,11 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v6
+        with:
+          # Build the published release from its tag so setuptools-scm can
+          # derive the distribution version from that tag.
+          ref: ${{ github.event.release.tag_name || github.sha }}
+          fetch-depth: 0
 
       - name: Install Python
         uses: actions/setup-python@v6
@@ -55,6 +60,10 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v6
+        with:
+          # See build_sdist: a version derived from Git needs the release tag.
+          ref: ${{ github.event.release.tag_name || github.sha }}
+          fetch-depth: 0
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1

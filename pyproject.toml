@@ -5,6 +5,7 @@ requires = [
     # https://numpy.org/devdocs/dev/depending_on_numpy.html#build-time-dependency
     "numpy>=2.1.0",
     "setuptools>=77.0.0", # for PEP 639 SPDX `project.license` support
+    "setuptools-scm>=8",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -76,7 +77,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "uncertainties>=3.1",
 ]
-version = "2026.7.27"
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://pymatgen.org"
@@ -116,6 +117,10 @@ pmg = "pymatgen.cli.pmg:main"
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools_scm]
+tag_regex = '^v(?P<version>\d{4}\.\d{1,2}\.\d{1,2})$'
+version_scheme = "no-guess-dev"
 
 [tool.setuptools.packages.find]
 where = ["src"]
