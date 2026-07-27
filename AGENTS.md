@@ -21,12 +21,11 @@ uv run pyright src             # secondary type check (CI runs this on src only)
 uv run pre-commit run --all-files
 ```
 
-Build / release helpers live in `tasks.py` (pyinvoke):
+Build and changelog helpers live in `tasks.py` (pyinvoke):
 
 ```sh
 uv run invoke lint             # ruff + mypy + ruff format
 uv run invoke update-changelog # generate CHANGES.md from PRs (uses OPENAPI_KEY for GPT summarization)
-uv run invoke release          # full PyPI release flow (maintainer-only); release triggers docs rebuild in materialsproject/pymatgen via repository_dispatch
 ```
 
 ## Cython extensions — important
@@ -85,6 +84,5 @@ The package version is generated from an exact, clean `vYYYY.M.D` Git tag; do no
 `pyproject.toml`. Tag the release commit, push the tag, then publish its GitHub Release to
 build and upload the sdist and wheels. `uv build` tests this locally without publishing.
 
-Unreleased or dirty builds get a development version based on the latest tag. Do not use the
-legacy `invoke set-ver` or `invoke release` tasks until they are migrated. See `ADMIN.md` for
-the maintainer playbook.
+Unreleased or dirty builds get a development version based on the latest tag. See `ADMIN.md`
+for the maintainer playbook.

@@ -4,6 +4,7 @@ Pyinvoke tasks.py file for automating releases and admin stuff.
 To cut a new pymatgen release:
 
     invoke update-changelog
+    git commit -am "Update changelog"
     invoke release
 """
 
@@ -19,8 +20,6 @@ from typing import TYPE_CHECKING
 import requests
 from invoke import task
 
-from pymatgen.core import __version__
-
 if TYPE_CHECKING:
     from invoke import Context
 
@@ -29,38 +28,6 @@ Provide a concise summary of the following pull requests as a change log for the
 as a markdown bulleted list. Make sure to include the GitHub ids of all the authors. Do not include any code
 blocks and timing outputs. Do not include any dependabot and pre-commit PRs.
 """
-
-
-@task
-def publish(ctx: Context) -> None:
-    """
-    Upload release to Pypi using twine.
-
-    Args:
-        ctx (Context): The context.
-    """
-    ctx.run("rm dist/*.*", warn=True)
-    ctx.run("python setup.py sdist bdist_wheel")
-    ctx.run("twine upload dist/*")
-
-
-@task
-def set_ver(ctx: Context, version: str):
-    """
-    Set version in pyproject.toml file.
-
-    Args:
-        ctx (Context): The context.
-        version (str): An input version.
-    """
-    with open("pyproject.toml", encoding="utf-8") as file:
-        lines = [re.sub(r"^version = \"([^,]+)\"", f'version = "{version}"', line.rstrip()) for line in file]
-
-    with open("pyproject.toml", "w", encoding="utf-8") as file:
-        file.write("\n".join(lines) + "\n")
-
-    ctx.run("ruff check --fix src")
-    ctx.run("ruff format pyproject.toml")
 
 
 @task
@@ -80,7 +47,6 @@ def release_github(ctx: Context, version: str) -> None:
     desc = "\n".join(tokens[1:]).strip()
     payload = {
         "tag_name": f"v{version}",
-        "target_commitish": "main",
         "name": f"v{version}",
         "body": desc,
         "draft": False,
@@ -92,6 +58,7 @@ def release_github(ctx: Context, version: str) -> None:
         headers={"Authorization": f"token {os.environ['GITHUB_RELEASES_TOKEN']}"},
         timeout=60,
     )
+    response.raise_for_status()
     print(response.text)
 
 
@@ -107,8 +74,9 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
             updating the actual change log file. Defaults to False.
     """
     version = version or f"{datetime.now(tz=UTC):%Y.%-m.%-d}"
-    print(f"Getting all commits since {__version__}")
-    output = subprocess.check_output(["git", "log", "--pretty=format:%s", f"v{__version__}..HEAD"])
+    last_tag = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"], text=True).strip()
+    print(f"Getting all commits since {last_tag}")
+    output = subprocess.check_output(["git", "log", "--pretty=format:%s", f"{last_tag}..HEAD"])
     lines = []
     ignored_commits = []
     for line in output.decode("utf-8").strip().split("\n"):
@@ -184,14 +152,23 @@ def release(ctx: Context, version: str | None = None) -> None:
         version (str, optional): The version to release.
     """
     version = version or f"{datetime.now(tz=UTC):%Y.%-m.%-d}"
-    ctx.run("rm -r dist build pymatgen.egg-info", warn=True)
-    set_ver(ctx, version)
-    release_github(ctx, version)
+    if not re.fullmatch(r"\d{4}\.\d{1,2}\.\d{1,2}", version):
+        raise ValueError("Version must use the YYYY.M.D calendar format")
 
-    ctx.run("rm -f dist/*.*", warn=True)
-    ctx.run("uv pip install -e .", warn=True)
-    ctx.run("uv build", warn=True)
-    ctx.run("uv publish", warn=True)
+    tag = f"v{version}"
+    if subprocess.run(["git", "status", "--porcelain"], check=True, capture_output=True, text=True).stdout:
+        raise RuntimeError("Commit or stash all changes before creating a release tag")
+    if (
+        subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"], check=False, capture_output=True
+        ).returncode
+        == 0
+    ):
+        raise RuntimeError(f"Tag {tag} already exists")
+
+    ctx.run(f"git tag {tag}")
+    ctx.run(f"git push origin {tag}")
+    release_github(ctx, version)
 
 
 @task
