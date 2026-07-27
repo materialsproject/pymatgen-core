@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
 
 ## Repository scope
 
@@ -81,4 +81,10 @@ Conventions enforced across the codebase:
 
 ## Versioning & release
 
-Version lives in `pyproject.toml` as a calver string (`YYYY.M.D`), kept in sync with the latest tag (`v<version>`). The `invoke set-ver`, `invoke update-changelog`, and `invoke release` tasks automate the bump → changelog → tag → PyPI flow. See `ADMIN.md` for the maintainer playbook.
+The package version is generated from an exact, clean `vYYYY.M.D` Git tag; do not set it in
+`pyproject.toml`. Tag the release commit, push the tag, then publish its GitHub Release to
+build and upload the sdist and wheels. `uv build` tests this locally without publishing.
+
+Unreleased or dirty builds get a development version based on the latest tag. Do not use the
+legacy `invoke set-ver` or `invoke release` tasks until they are migrated. See `ADMIN.md` for
+the maintainer playbook.
