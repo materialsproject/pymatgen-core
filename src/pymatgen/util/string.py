@@ -248,7 +248,7 @@ def latexify_spacegroup(spacegroup_symbol: str) -> str:
     Returns:
         str: A latex formatted spacegroup with proper subscripts and overlines.
     """
-    sym = re.sub(r"_(\d+)", r"$_{\1}$", spacegroup_symbol)
+    sym = re.sub(r"_(\d)", r"$_{\1}$", spacegroup_symbol)
     return re.sub(r"-(\d)", r"$\\overline{\1}$", sym)
 
 
