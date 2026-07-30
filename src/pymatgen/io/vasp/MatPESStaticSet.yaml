@@ -5,7 +5,6 @@ PARENT: PBE64Base
 INCAR:
   ALGO: Normal # Normal for PBE, ALL for R2SCAN, included to have some reasonable default
   EDIFF: 1.e-05
-  ENAUG: 1360
   ENCUT: 680
   GGA: PE # change R2SCAN to PBE as default
   ISMEAR: 0 # change from 2 to 0, included to have some reasonable default
