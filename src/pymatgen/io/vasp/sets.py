@@ -2470,7 +2470,6 @@ class MVLSlabSet(VaspInputSet):
         updates = {
             "EDIFF": 1e-5,
             "EDIFFG": -0.05,
-            "ENAUG": 4000,
             "IBRION": 1,
             "POTIM": 1.0,
             "LDAU": ldau,

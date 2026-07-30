@@ -1457,6 +1457,7 @@ class TestMVLSlabSet(MatSciTest):
         assert incar_bulk["ISIF"] == 3
         assert incar_bulk["EDIFF"] == approx(1e-5)
         assert incar_bulk["EDIFFG"] == approx(-0.05)
+        assert "ENAUG" not in incar_bulk
         assert poscar_bulk.structure.formula == self.bulk.formula
 
     def test_slab(self):
