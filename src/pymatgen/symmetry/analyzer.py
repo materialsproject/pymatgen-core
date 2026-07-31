@@ -525,7 +525,7 @@ class SpacegroupAnalyzer:
     @cite_conventional_cell_algo
     def get_conventional_to_primitive_transformation_matrix(
         self,
-        international_monoclinic: bool = True,
+        international_monoclinic: bool | None = None,
     ) -> NDArray:
         """Get the transformation matrix to transform a conventional unit cell to a
         primitive cell according to certain standards. The standards are defined in
@@ -534,8 +534,7 @@ class SpacegroupAnalyzer:
         299-312. doi:10.1016/j.commatsci.2010.05.010.
 
         Args:
-            international_monoclinic (bool): Whether to convert to proper international convention
-                such that beta is the non-right angle. Unused.
+            international_monoclinic (bool): Deprecated.
 
         Returns:
             Transformation matrix to go from conventional to primitive cell.
@@ -543,26 +542,42 @@ class SpacegroupAnalyzer:
         Notes:
             Note that for face-centered space groups (C-/A-centered), standardization to C-centering
             is expected. Therefore, the transformation matrix C->P is returned.
+            All matrices have a positive determinant and therefore have no reflection component.
         """
+        # TODO: Remove deprecated keyword once enough time passed
+        # Unused since 2026.7.16, deprecated after 2026.7.27
+        if international_monoclinic is not None:
+            warnings.warn(
+                "international_monoclinic has no effect, is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         space_group = self.get_space_group_symbol()
 
         if space_group.startswith("P"):
             return np.eye(3, dtype=np.float64)
 
+        # Hexagonal to rhombohedral - for S/C orientation see get_primitive_standard_structure
+        # Matches spglib (transposed for row lattice vectors)
         if space_group.startswith("R"):
-            return np.array([[-1, 1, 1], [2, 1, 1], [-1, -2, 1]], dtype=np.float64) / 3
+            return np.array([[2, 1, 1], [-1, 1, 1], [-1, -2, 1]], dtype=np.float64) / 3
 
+        # Setyawan/Curtarolo A.3/A.5/A.8
         if space_group.startswith("I"):
             return np.array([[-1, 1, 1], [1, -1, 1], [1, 1, -1]], dtype=np.float64) / 2
 
+        # S/C A.2/A.7
         if space_group.startswith("F"):
             return np.array([[0, 1, 1], [1, 0, 1], [1, 1, 0]], dtype=np.float64) / 2
 
         # Convert face-centered cell. Note that this converts a C-centered cell,
         # A-centered cells must be standardized to them beforehand.
         if space_group.startswith(("C", "A")):
+            # S/C A.13
             if self.get_crystal_system() == "monoclinic":
                 return np.array([[1, 1, 0], [-1, 1, 0], [0, 0, 2]], dtype=np.float64) / 2
+            # S/C A.2/A.9
             return np.array([[1, -1, 0], [1, 1, 0], [0, 0, 2]], dtype=np.float64) / 2
 
         raise ValueError(f"Unrecognized space group {space_group}.")
@@ -598,52 +613,49 @@ class SpacegroupAnalyzer:
             keep_site_properties=keep_site_properties,
         )
 
-        if self.get_space_group_symbol().startswith("P"):
+        sg_symbol = self.get_space_group_symbol()
+        if sg_symbol.startswith("P"):
             return conv
 
-        transf = self.get_conventional_to_primitive_transformation_matrix(
-            international_monoclinic=international_monoclinic
-        )
+        transf = self.get_conventional_to_primitive_transformation_matrix()
 
         new_sites: list[PeriodicSite] = []
-        lattice = Lattice(transf @ conv.lattice.matrix)
+        prim_lattice = Lattice(transf @ conv.lattice.matrix)
         for site in conv:
             new_s = PeriodicSite(
                 site.species,
                 site.coords,
-                lattice,
+                prim_lattice,
                 to_unit_cell=True,
                 coords_are_cartesian=True,
                 properties=site.properties,
             )
+            # Remove duplicate sites
             if not any(map(new_s.is_periodic_image, new_sites)):
                 new_sites.append(new_s)
 
-        if self.get_lattice_type() == "rhombohedral":
-            a = lattice.a
-            alpha = math.radians(lattice.alpha)
-            new_matrix = [
-                [a * cos(alpha / 2), -a * sin(alpha / 2), 0],
-                [a * cos(alpha / 2), a * sin(alpha / 2), 0],
-                [
-                    a * cos(alpha) / cos(alpha / 2),
-                    0,
-                    a * math.sqrt(1 - (cos(alpha) ** 2 / (cos(alpha / 2) ** 2))),
-                ],
-            ]
-            rhomb_sites = []
-            lattice = Lattice(new_matrix)
+        # Reorient rhombohedral lattices (keep sites & frac. coordinates)
+        # (to match Setyawan/Curtarolo convention in A.11)
+        if sg_symbol.startswith("R"):
+            a = prim_lattice.a
+            alpha = math.radians(prim_lattice.alpha)
+            cos_alpha = math.cos(alpha)
+            cos_alpha_h = math.cos(alpha / 2)
+            cos_fraction = cos_alpha / cos_alpha_h
+            a_sin_alpha_h = a * math.sin(alpha / 2)
+            new_matrix = (
+                (a * cos_alpha_h, -a_sin_alpha_h, 0.0),
+                (a * cos_alpha_h, a_sin_alpha_h, 0.0),
+                (
+                    a * cos_fraction,
+                    0.0,
+                    a * math.sqrt(1 - cos_fraction * cos_fraction),
+                ),
+            )
+            prim_lattice = Lattice(new_matrix)
+            # Edit the lattice in-place (sites are created above)
             for site in new_sites:
-                new_s = PeriodicSite(
-                    site.species,
-                    site.frac_coords,
-                    lattice,
-                    to_unit_cell=True,
-                    properties=site.properties,
-                )
-                if not any(map(new_s.is_periodic_image, new_sites)):
-                    rhomb_sites.append(new_s)
-            new_sites = rhomb_sites
+                site.lattice = prim_lattice
 
         return Structure.from_sites(new_sites)
 
@@ -663,7 +675,7 @@ class SpacegroupAnalyzer:
 
         Args:
             international_monoclinic (bool): Whether to convert to proper international convention
-                such that beta is the non-right angle.
+                such that beta is the non-right angle. Otherwise it will be alpha.
             keep_site_properties (bool): Whether to keep the input site properties (including
                 magnetic moments) on the sites that are still present after the refinement. Note:
                 This is disabled by default because the magnetic moments are not always directly

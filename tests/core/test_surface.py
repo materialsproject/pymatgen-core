@@ -939,6 +939,68 @@ class TestMillerIndexFinder(MatSciTest):
         # termination for each distinct Miller _index
         assert len(miller_list) == len(all_miller_list)
 
+    def test_computed_scale_factor(self):
+        """Test that the scale factor of a Slab matches the lattice transformation."""
+        # With no reorientation, it should be the exact transformation
+        struct_lattice = Lattice.hexagonal(5, 17)
+        # Approximately calcite (spacegroup R-3c)
+        struct = Structure.from_spacegroup(
+            167, struct_lattice, ("Ca", "C", "O"), ((0, 0, 0), (0, 0, 0.25), (0.25, 0, 0.25))
+        )
+
+        # Basic SlabGenerator
+        slabgen = SlabGenerator(struct, (1, 0, 4), 1, 1, in_unit_planes=True, primitive=False, reorient_lattice=False)
+        # Should work with and without bonds and with all settings
+        for slab in slabgen.get_slabs(bonds={("C", "O"): 3}):
+            # Slab matrix should result from scale_factor and source lattice
+            computed_matrix = slab.scale_factor @ struct_lattice.matrix
+            assert np.allclose(slab.lattice.matrix, computed_matrix)
+            # Also holds for the OUC, as long as primitivization is disabled
+            # Note that the OUC is shorter in c (only slab-part, no vacuum)
+            computed_matrix[2] /= 2
+            assert np.allclose(slab.oriented_unit_cell.lattice.matrix, computed_matrix)
+        # Enable settings that modify the matrices
+        slabgen.primitive = True
+        slabgen.reorient_lattice = True
+        slabgen.lll_reduce = True
+        for slab in slabgen.get_slabs():
+            # slab matrix is rotated - only determinant will be correct
+            assert np.isclose(np.linalg.det(slab.scale_factor), slab.lattice.volume / struct.lattice.volume)
+
+    def test_smaller_than_ouc_slab(self):
+        """Test for potential Slabs smaller than the OUC."""
+        # Approximately calcite (spacegroup R-3c)
+        struct = Structure.from_spacegroup(
+            167, Lattice.hexagonal(5, 17), ("Ca", "C", "O"), ((0, 0, 0), (0, 0, 0.25), (0.25, 0, 0.25))
+        )
+        # Most stable surface is (104) - represented as [42-1] x [010] (or equivalent directions)
+        slabgen = SlabGenerator(struct, (1, 0, 4), 1, 1, in_unit_planes=True, primitive=False)
+
+        # Non-primitive Slab will be [010] x [-401] (essentially integer scale factor)
+        # Note the long b-side and the 67.6° gamma angle
+        # c is [002] because it includes the vacuum
+        np_slab = slabgen.get_slab(0.125)
+        assert np.allclose(np_slab.scale_factor, [[0, 1, 0], [-4, 0, 1], [0, 0, 2]])
+        # Check expected lattice params a/b/gamma as well for safety
+        expected = (5.0, 26.248809496813376, 67.60624150257428)
+        lat = np_slab.lattice
+        assert np.allclose((lat.a, lat.b, lat.gamma), expected)
+
+        # We actually want [010] x [42-1], which have a 90° gamma angle:
+        # Due to the rhombohedral centering, the [42-1] vector can be shortened to a third of the full [42-1]
+        # The primitive slab will diverge in the slab and OUC lattice because .get_primitive_structure struggles
+        # with this primitivization (requires a "good" shift like 0.125, not a "bad" one like 0)
+        # Thus allow_smaller_than_ouc must be enabled
+        slabgen.primitive = True
+        slabgen.allow_smaller_than_ouc = True
+        p_slab = slabgen.get_slab(0.125)
+        # We get [010] x [-4-21]/3 from this configuration (note that c also changes to be nearly orthogonal)
+        assert np.allclose(p_slab.scale_factor, [[0, 1, 0], [-4 / 3, -2 / 3, 1 / 3], [4, 2, 1]])
+        # Check expected lattice params a/b/gamma again
+        expected = (5.0, 8.08977406634106, 90.0)
+        lat = p_slab.lattice
+        assert np.allclose((lat.a, lat.b, lat.gamma), expected)
+
     def test_miller_index_from_sites(self):
         """Test surface miller index convenience function."""
         # test on a cubic system

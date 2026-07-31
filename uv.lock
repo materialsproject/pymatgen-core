@@ -3043,7 +3043,6 @@ wheels = [
 
 [[package]]
 name = "pymatgen-core"
-version = "2026.7.24"
 source = { editable = "." }
 dependencies = [
     { name = "bibtexparser" },

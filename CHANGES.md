@@ -1,6 +1,12 @@
 
 # Changelog
 
+## v2026.7.27
+
+- PR #101 Overhaul `get_symmetrically_distinct_miller_indices`. A new `cell` argument (`input`, `conventional`, `primitive`, `conv_np`, `prim_2conv`) makes the treatment of centered cells explicit instead of implicit; sorting is now fully deterministic (smaller max `|h|,|k|,|l|` first, then smaller sum of `|h|,|k|,|l|`, then larger `h`, `k`, `l`); indices with `gcd > 1` are skipped up front and fewer `SpacegroupAnalyzer` instances are built; a crystal-family helper was added to `SpacegroupAnalyzer` and the return type is now inferred from whether `hkil` or `hkl` is requested. **Behavior change:** trigonal cells are no longer implicitly primitivized (the default `cell="input"` uses the lattice as given), and the representative index chosen for a symmetry-equivalent set may differ. (by @Sanftperlig)
+- PR #103 Remove deprecated functions/classes/methods whose deadlines fell in 2025: `StructureGraph`/`MoleculeGraph` `with_empty_graph`, `with_edges`, `with_local_env_strategy` (use the `from_*` constructors); `BrunnerNN_reciprocal`, `BrunnerNN_relative`, `BrunnerNN_real`; `IStructure.ntypesp` (use `n_elems`); the CP2K aliases `V_Hartree_Cube`, `MO_Cubes`, `E_Density_Cube`, `Xc_Functional`, `Kpoint_Set`, `Band_Structure`; JDFTx `to_dict()` (use `as_dict()`); and `DictSet` (use `VaspInputSet`). `BaderAnalysis`'s `parse_atomic_densities` argument is now a no-op that emits a `DeprecationWarning` and will be removed on 2026-12-31. (by @DanielYang59)
+- PR #100 `Oszicar` ionic-step parsing now goes through `_vasprun_float`, so VASP overflow markers such as `T= ******` yield `nan` with a warning instead of raising `ValueError` (fixes materialsproject/pymatgen#4537). (by @DanielYang59)
+
 ## v2026.7.24
 
 - PR #95 `Outcar` table parsing now detects a truncated table (header present but no matching footer, e.g. an OUTCAR cut off mid-write) and emits a warning while returning the partial data, instead of hanging. (by @DanielYang59)

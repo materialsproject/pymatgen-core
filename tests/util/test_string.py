@@ -67,6 +67,8 @@ class TestFunc:
             unicodeify("Li0.2Na0.8Cl")
         assert unicodeify_species("O2+") == "O²⁺"
         assert unicodeify_spacegroup("F-3m") == "F3̅m"
+        assert unicodeify_spacegroup("P2_12_12_1") == "P2₁2₁2₁"
+        assert unicodeify_spacegroup("P3_221") == "P3₂21"
 
     def test_formula_double_format(self):
         assert formula_double_format(1.00) == ""

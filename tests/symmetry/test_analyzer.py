@@ -528,6 +528,124 @@ class TestSpacegroupAnalyzer(MatSciTest):
         # and a/b are approximately equal
         assert math.isclose(lattice.a, lattice.b)
 
+    def test_primitivization_matrices(self):
+        """Test that `get_conventional_to_primitive_transformation_matrix` returns expected matrices."""
+
+        # Tests all branches for the expected result
+        # Expected matrices have positive determinants and match transposed spglib
+        # (= Setyawan/Curtarolo for non-R)
+
+        cases = (
+            (
+                "P",
+                Structure.from_spacegroup(
+                    "P1",
+                    Lattice.from_parameters(2, 3, 5, 85, 95, 105),
+                    ["H", "He"],
+                    np.array([[0, 0, 0], [0.137, 0.251, 0.389]]),
+                ),
+                np.eye(3),
+            ),
+            (
+                "R",
+                Structure.from_spacegroup(
+                    "R-3c",
+                    Lattice.hexagonal(2, 3),
+                    ["H"],
+                    [[0, 0, 0]],
+                ),
+                np.array(
+                    [
+                        [2, 1, 1],
+                        [-1, 1, 1],
+                        [-1, -2, 1],
+                    ],
+                )
+                / 3,
+            ),
+            (
+                "I",
+                Structure.from_spacegroup(
+                    "Im-3m",
+                    Lattice.cubic(2),
+                    ["H"],
+                    [[0, 0, 0]],
+                ),
+                np.array(
+                    [
+                        [-1, 1, 1],
+                        [1, -1, 1],
+                        [1, 1, -1],
+                    ],
+                )
+                / 2,
+            ),
+            (
+                "F",
+                Structure.from_spacegroup(
+                    "Fm-3m",
+                    Lattice.cubic(3),
+                    ["H"],
+                    [[0, 0, 0]],
+                ),
+                np.array(
+                    [
+                        [0, 1, 1],
+                        [1, 0, 1],
+                        [1, 1, 0],
+                    ],
+                )
+                / 2,
+            ),
+            (
+                "C, monoclinic",
+                Structure.from_spacegroup(
+                    "C2/m",
+                    Lattice.monoclinic(2, 3, 5, 100),
+                    ["H"],
+                    [[0, 0, 0]],
+                ),
+                np.array(
+                    [
+                        [1, 1, 0],
+                        [-1, 1, 0],
+                        [0, 0, 2],
+                    ],
+                )
+                / 2,
+            ),
+            (
+                "C, non-monoclinic",
+                Structure.from_spacegroup(
+                    "Cmmm",
+                    Lattice.orthorhombic(2, 3, 5),
+                    ["H"],
+                    [[0, 0, 0]],
+                ),
+                np.array(
+                    [
+                        [1, -1, 0],
+                        [1, 1, 0],
+                        [0, 0, 2],
+                    ],
+                )
+                / 2,
+            ),
+        )
+
+        for case, structure, expected in cases:
+            sga = SpacegroupAnalyzer(structure)
+            # Check for accidental changes in centering
+            assert sga.get_space_group_symbol()[0] == case[0]
+
+            np.testing.assert_allclose(
+                expected,
+                sga.get_conventional_to_primitive_transformation_matrix(),
+                rtol=0,
+                atol=1e-14,
+                err_msg=f"Incorrect matrix for {case}.",
+            )
+
     def test_bad_structure(self):
         struct = Structure(Lattice.cubic(5), ["H", "H"], [[0.0, 0.0, 0.0], [0.001, 0.0, 0.0]])
 

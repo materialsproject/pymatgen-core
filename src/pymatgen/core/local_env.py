@@ -223,8 +223,7 @@ def _handle_disorder(structure: Structure, on_disorder: on_disorder_options):
     # As a workaround, we create a new structure with majority species on each site.
     structure = structure.copy()  # make a copy so we don't mutate the original structure
     for idx, site in enumerate(structure):
-        max_specie = max(site.species, key=site.species.get)
-        max_val = site.species[max_specie]
+        max_specie, max_val = max(site.species.items(), key=lambda item: item[1])
         if max_val <= 0.5:
             if on_disorder == "take_majority_strict":
                 raise ValueError(

@@ -1011,19 +1011,19 @@ class Lattice(MSONable):
 
         Returns:
             tuple[Lattice, NDArray[np.float_], NDArray[np.float_]]: (aligned_lattice, rotation_matrix, scale_matrix)
-            if a mapping is found. aligned_lattice is a rotated version of other_lattice that
-            has the same lattice parameters, but which is aligned in the
-            coordinate system of this lattice so that translational points
-            match up in 3D. rotation_matrix is the rotation that has to be
-            applied to other_lattice to obtain aligned_lattice, i.e.,
-            aligned_matrix = np.inner(other_lattice, rotation_matrix) and
-            op = SymmOp.from_rotation_and_translation(rotation_matrix)
-            aligned_matrix = op.operate_multi(latt.matrix)
-            Finally, scale_matrix is the integer matrix that expresses
-            aligned_matrix as a linear combination of this
-            lattice, i.e., aligned_matrix = np.dot(scale_matrix, self.matrix)
+                if a mapping is found. aligned_lattice is a rotated version of other_lattice that
+                has the same lattice parameters, but which is aligned in the
+                coordinate system of this lattice so that translational points
+                match up in 3D. rotation_matrix is the rotation that has to be
+                applied to other_lattice to obtain aligned_lattice, i.e.,
+                aligned_matrix = np.inner(other_lattice, rotation_matrix) and
+                op = SymmOp.from_rotation_and_translation(rotation_matrix)
+                aligned_matrix = op.operate_multi(latt.matrix)
+                Finally, scale_matrix is the integer matrix that expresses
+                aligned_matrix as a linear combination of this
+                lattice, i.e., aligned_matrix = np.dot(scale_matrix, self.matrix)
 
-            None is returned if no matches are found.
+                None is returned if no matches are found.
         """
         return next(
             self.find_all_mappings(other_lattice, ltol, atol, skip_rotation_matrix),

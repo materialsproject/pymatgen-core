@@ -19,7 +19,20 @@ import sys
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import TYPE_CHECKING, Literal, cast, get_args, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Generic,
+    Literal,
+    Self,
+    SupportsIndex,
+    TypeAlias,
+    TypeVar,
+    cast,
+    get_args,
+    overload,
+)
 
 import numpy as np
 import orjson
@@ -47,9 +60,13 @@ from pymatgen.core.units import Length, Mass
 from pymatgen.util.coord import all_distances, get_angle, lattice_points_in_supercell
 from pymatgen.util.due import Doi, due
 
+try:
+    from typing import override  # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.11
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
-    from typing import Any, ClassVar, Self, SupportsIndex, TypeAlias
 
     import moyopy
     import pandas as pd
@@ -63,6 +80,8 @@ if TYPE_CHECKING:
 
     from pymatgen.symmetry.maggroups import MagneticSpaceGroup
     from pymatgen.util.typing import CompositionLike, PathLike, SpeciesLike
+
+SiteType = TypeVar("SiteType", bound=Site)
 
 FileFormats: TypeAlias = Literal[
     "cif",
@@ -212,7 +231,7 @@ class PeriodicNeighbor(PeriodicSite):
         return cast("Self", super(Site, cls).from_dict(dct))
 
 
-class SiteCollection(collections.abc.Sequence, ABC):
+class SiteCollection(collections.abc.Sequence[SiteType], ABC, Generic[SiteType]):
     """Basic SiteCollection. Essentially a sequence of Sites or PeriodicSites.
     This serves as a base class for Molecule (a collection of Site, i.e., no
     periodicity) and Structure (a collection of PeriodicSites, i.e.,
@@ -229,12 +248,15 @@ class SiteCollection(collections.abc.Sequence, ABC):
     def __contains__(self, site: object) -> bool:
         return site in self.sites
 
-    def __iter__(self) -> Iterator[PeriodicSite]:
+    def __iter__(self) -> Iterator[SiteType]:
         return iter(self.sites)
 
-    # TODO return type needs fixing (can be Sequence[PeriodicSite] but raises lots of mypy errors)
-    def __getitem__(self, ind: int | slice):
-        return self.sites[ind]  # type: ignore[return-value]
+    @overload
+    def __getitem__(self, ind: int) -> SiteType: ...
+    @overload
+    def __getitem__(self, ind: slice) -> Sequence[SiteType]: ...
+    def __getitem__(self, ind: int | slice) -> SiteType | Sequence[SiteType]:
+        return self.sites[ind]
 
     def __len__(self) -> int:
         return len(self.sites)
@@ -244,16 +266,16 @@ class SiteCollection(collections.abc.Sequence, ABC):
         return hash(self.composition)
 
     @property
-    def sites(self) -> list[PeriodicSite] | tuple[PeriodicSite, ...]:
+    def sites(self) -> Sequence[SiteType]:
         """The sites in the Structure."""
         return self._sites
 
     @sites.setter
-    def sites(self, sites: Sequence[PeriodicSite]) -> None:
+    def sites(self, sites: Sequence[SiteType]) -> None:
         """Set the sites in the Structure."""
         # If self is mutable Structure or Molecule, set _sites as list
         is_mutable = isinstance(self._sites, collections.abc.MutableSequence)
-        self._sites: list[PeriodicSite] | tuple[PeriodicSite, ...] = list(sites) if is_mutable else tuple(sites)
+        self._sites: Sequence[SiteType] = list(sites) if is_mutable else tuple(sites)
 
     @abstractmethod
     def copy(self) -> Self:
@@ -324,7 +346,7 @@ class SiteCollection(collections.abc.Sequence, ABC):
         """Specie -> Species rename, to maintain backwards compatibility."""
         return self.types_of_species
 
-    def group_by_types(self) -> Iterator[Site | PeriodicSite]:
+    def group_by_types(self) -> Iterator[SiteType]:
         """Iterate over species grouped by type."""
         for sp_typ in self.types_of_species:
             for site in self:
@@ -754,11 +776,11 @@ class SiteCollection(collections.abc.Sequence, ABC):
 
         return self
 
-    def extract_cluster(self, target_sites: list[Site], **kwargs) -> list[Site]:
+    def extract_cluster(self, target_sites: Iterable[SiteType], **kwargs) -> list[SiteType]:
         """Extract a cluster of atoms based on bond lengths.
 
         Args:
-            target_sites (list[Site]): Initial sites from which to nucleate cluster.
+            target_sites (Iterable[Site]): Initial sites from which to nucleate cluster.
             **kwargs: kwargs passed through to CovalentBond.is_bonded.
 
         Returns:
@@ -1005,7 +1027,7 @@ class SiteCollection(collections.abc.Sequence, ABC):
         return AseAtomsAdaptor.get_structure(atoms, cls=cls, **kwargs)  # type:ignore[type-var,return-value]
 
 
-class IStructure(SiteCollection, MSONable):
+class IStructure(SiteCollection[PeriodicSite], MSONable):
     """Basic immutable Structure object with periodicity. Essentially a sequence
     of PeriodicSites having a common lattice. IStructure is made to be
     (somewhat) immutable so that they can function as keys in a dict. To make
@@ -1174,7 +1196,7 @@ class IStructure(SiteCollection, MSONable):
                 )
                 new_sites.append(periodic_site)
 
-        new_charge = self._charge * np.linalg.det(scale_matrix) if self._charge else None
+        new_charge = self._charge * np.linalg.det(scale_matrix) if self._charge is not None else None
         return Structure.from_sites(new_sites, charge=new_charge, to_unit_cell=True).relabel_sites(ignore_uniq=True)
 
     def __rmul__(self, scaling_matrix):
@@ -1772,7 +1794,7 @@ class IStructure(SiteCollection, MSONable):
             include_index=True,
             include_image=True,
             sites=sites,
-            numerical_tol=1e-8,
+            numerical_tol=numerical_tol,
         )
         center_indices: list[int] = []
         points_indices: list[int] = []
@@ -3237,7 +3259,7 @@ class IStructure(SiteCollection, MSONable):
         return dictdata
 
 
-class IMolecule(SiteCollection, MSONable):
+class IMolecule(SiteCollection[Site], MSONable):
     """Basic immutable Molecule object without periodicity. Essentially a
     sequence of sites. IMolecule is made to be immutable so that they can
     function as keys in a dict. For a mutable object, use the Molecule class.
@@ -3304,7 +3326,7 @@ class IMolecule(SiteCollection, MSONable):
             label = labels[idx] if labels else None
             sites.append(Site(species[idx], coords[idx], properties=prop, label=label))  # type:ignore[index]
 
-        self._sites = tuple(sites)  # type:ignore[arg-type]
+        self._sites: tuple[Site, ...] = tuple(sites)  # type:ignore[arg-type]
         if validate_proximity and not self.is_valid():
             raise StructureError("Molecule contains sites that are less than 0.01 Angstrom apart!")
 
@@ -3881,7 +3903,7 @@ class IMolecule(SiteCollection, MSONable):
         return new
 
 
-class Structure(IStructure, collections.abc.MutableSequence):
+class Structure(IStructure, collections.abc.MutableSequence[PeriodicSite]):
     """Mutable version of structure."""
 
     __hash__ = None  # type: ignore[assignment]
@@ -3954,6 +3976,22 @@ class Structure(IStructure, collections.abc.MutableSequence):
 
         self._sites: list[PeriodicSite] = list(self._sites)  # type: ignore[assignment]
 
+    @SiteCollection.sites.getter
+    def sites(self) -> list[PeriodicSite]:
+        """The mutable sites in the Structure."""
+        return self._sites
+
+    # Explicit typing: _sites is a list[PeriodicSite], so this return is guaranteed
+    @overload
+    def __getitem__(self, ind: int) -> PeriodicSite: ...
+
+    @overload
+    def __getitem__(self, ind: slice) -> list[PeriodicSite]: ...
+
+    @override
+    def __getitem__(self, ind: int | slice) -> PeriodicSite | list[PeriodicSite]:
+        return self._sites[ind]
+
     def __setitem__(
         self,
         idx: int | slice | Sequence[int] | SpeciesLike,
@@ -4025,6 +4063,28 @@ class Structure(IStructure, collections.abc.MutableSequence):
     def __delitem__(self, idx: SupportsIndex | slice) -> None:
         """Delete a site from the Structure."""
         self._sites.__delitem__(idx)
+
+    @IStructure.frac_coords.setter
+    def frac_coords(self, fractional_coords: ArrayLike) -> None:
+        """Sets the fractional coordinates of the Sites in the Structure."""
+        if len(fractional_coords) != len(self.sites):
+            raise ValueError(
+                "A Structure must have as many coordinates as it has sites, "
+                f"{len(fractional_coords)=} != {len(self.sites)=}."
+            )
+        for i, site in enumerate(self.sites):
+            site.frac_coords = np.asarray(fractional_coords[i], dtype=np.float64)
+
+    @IStructure.cart_coords.setter
+    def cart_coords(self, cartesian_coords: ArrayLike) -> None:
+        """Sets the cartesian coordinates of the Sites in the Structure."""
+        if len(cartesian_coords) != len(self.sites):
+            raise ValueError(
+                "A Structure must have as many coordinates as it has sites, "
+                f"{len(cartesian_coords)=} != {len(self.sites)=}."
+            )
+        for i, site in enumerate(self.sites):
+            site.coords = np.asarray(cartesian_coords[i], dtype=np.float64)
 
     @property
     def lattice(self) -> Lattice:
@@ -4392,7 +4452,7 @@ class Structure(IStructure, collections.abc.MutableSequence):
 
     def translate_sites(
         self,
-        indices: int | Sequence[int],
+        indices: int | Iterable[int],
         vector: ArrayLike,
         frac_coords: bool = True,
         to_unit_cell: bool = True,
@@ -4401,13 +4461,13 @@ class Structure(IStructure, collections.abc.MutableSequence):
         unit cell. Modifies the structure in place.
 
         Args:
-            indices: Integer or List of site indices on which to perform the
+            indices: Integer or iterable of site indices on which to perform the
                 translation.
             vector: Translation vector for sites.
             frac_coords (bool): Whether the vector corresponds to fractional or
                 Cartesian coordinates.
-            to_unit_cell (bool): Whether new sites are transformed to unit
-                cell
+            to_unit_cell (bool): Whether the new coordinates are transformed to the unit
+                cell.
 
         Returns:
             Structure: self with translated sites.
@@ -4810,7 +4870,7 @@ class Structure(IStructure, collections.abc.MutableSequence):
         raise ValueError(f"Unsupported {prototype=}!")
 
 
-class Molecule(IMolecule, collections.abc.MutableSequence):
+class Molecule(IMolecule, collections.abc.MutableSequence[Site]):
     """Mutable Molecule. It has all the methods in IMolecule,
     and allows a user to perform edits on the molecule.
     """
@@ -4836,7 +4896,7 @@ class Molecule(IMolecule, collections.abc.MutableSequence):
                 list of dict of elements/species and occupancies, a List of
                 elements/specie specified as actual Element/Species, Strings
                 ("Fe", "Fe2+") or atomic numbers (1,56).
-            coords (3x1 array): list of Cartesian coordinates of each species.
+            coords (Nx3 array): list of Cartesian coordinates of each species.
             charge (float): Charge for the molecule. Defaults to 0.
             spin_multiplicity (int): Spin multiplicity for molecule.
                 Defaults to None, which means that the spin multiplicity is
@@ -4870,6 +4930,22 @@ class Molecule(IMolecule, collections.abc.MutableSequence):
             properties=properties,
         )
         self._sites: list[Site] = list(self._sites)  # type:ignore[assignment]
+
+    @SiteCollection.sites.getter
+    def sites(self) -> list[Site]:
+        """The mutable sites in this Molecule."""
+        return self._sites
+
+    # Explicit typing: _sites is a list[Site], so this return is guaranteed
+    @overload
+    def __getitem__(self, ind: int) -> Site: ...
+
+    @overload
+    def __getitem__(self, ind: slice) -> list[Site]: ...
+
+    @override
+    def __getitem__(self, ind: int | slice) -> Site | list[Site]:
+        return self._sites[ind]
 
     def __setitem__(
         self,
