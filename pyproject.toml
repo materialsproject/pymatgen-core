@@ -292,7 +292,6 @@ test = [
     "pymongo>=4.10",
     "pytest>=8.3.5",
     "pytest-cov>=6.0.0",
-    "pytest-split>=0.10.0",
     "pytest-xdist>=3.0.0"
 ]
 lint = [
