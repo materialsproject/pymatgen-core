@@ -359,25 +359,38 @@ class Vasprun(MSONable):
             with zopen(filename, mode="rb") as file:
                 # Remove parts of the xml file and parse the string
                 content: bytes = file.read()
-                steps: list[bytes] = content.split(b"<calculation>")
+                if b"<calculation>" in content:
+                    steps: list[bytes] = content.split(b"<calculation>")
 
-                # The text before the first <calculation> is the preamble!
-                preamble: bytes = steps.pop(0)
-                self.nionic_steps: int = len(steps)
-                new_steps = steps[ionic_step_offset :: int(ionic_step_skip or 1)]
+                    # The text before the first <calculation> is the preamble!
+                    preamble: bytes = steps.pop(0)
+                    self.nionic_steps: int = len(steps)
+                    new_steps = steps[ionic_step_offset :: int(ionic_step_skip or 1)]
 
-                # Add the tailing information in the last step from the run
-                to_parse: bytes = b"<calculation>".join(new_steps)
-                if steps[-1] != new_steps[-1]:
-                    to_parse = preamble + b"<calculation>" + to_parse + steps[-1].split(b"</calculation>")[-1]
+                    # Add the tailing information in the last step from the run
+                    to_parse: bytes = b"<calculation>".join(new_steps)
+                    if steps[-1] != new_steps[-1]:
+                        to_parse = preamble + b"<calculation>" + to_parse + steps[-1].split(b"</calculation>")[-1]
+                    else:
+                        to_parse = preamble + b"<calculation>" + to_parse
+                    self._parse(
+                        BytesIO(to_parse),
+                        parse_dos=parse_dos,
+                        parse_eigen=parse_eigen,
+                        parse_projected_eigen=parse_projected_eigen,
+                    )
                 else:
-                    to_parse = preamble + b"<calculation>" + to_parse
-                self._parse(
-                    BytesIO(to_parse),
-                    parse_dos=parse_dos,
-                    parse_eigen=parse_eigen,
-                    parse_projected_eigen=parse_projected_eigen,
-                )
+                    # MLFF MD output stores each step as a sequence of top-level
+                    # structure, force, stress, and energy tags rather than in a
+                    # <calculation> tag. Parse it in full, then subsample md_data.
+                    self._parse(
+                        BytesIO(content),
+                        parse_dos=parse_dos,
+                        parse_eigen=parse_eigen,
+                        parse_projected_eigen=parse_projected_eigen,
+                    )
+                    self.nionic_steps = len(self.md_data)
+                    self.md_data = self.md_data[ionic_step_offset :: int(ionic_step_skip or 1)]
         else:
             with zopen(filename, mode="rb") as file:
                 self._parse(
@@ -386,7 +399,7 @@ class Vasprun(MSONable):
                     parse_eigen=parse_eigen,
                     parse_projected_eigen=parse_projected_eigen,
                 )
-                self.nionic_steps = len(self.ionic_steps)
+                self.nionic_steps = len(self.md_data) if self.md_data else len(self.ionic_steps)
 
             if parse_potcar_file:
                 self.update_potcar_spec(parse_potcar_file)
@@ -710,6 +723,11 @@ class Vasprun(MSONable):
     @property
     def converged_electronic(self) -> bool:
         """Whether electronic step converged in the final ionic step."""
+        # MLFF MD output has no electronic steps because forces and energies
+        # are calculated by the machine-learned force field.
+        if self.incar.get("ML_LMLFF"):
+            return True
+
         final_elec_steps: list[dict[str, Any]] | Literal[0] = (
             self.ionic_steps[-1]["electronic_steps"] if self.incar.get("ALGO", "").lower() != "chi" else 0
         )

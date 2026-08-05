@@ -96,6 +96,20 @@ class TestVasprun(MatSciTest):
         assert vasp_run.md_n_steps == 100
         assert vasp_run.converged_ionic
 
+    def test_vasprun_ml_without_calculation_tags(self):
+        """Test MLFF MD output that stores steps outside ``<calculation>`` tags."""
+        filepath = f"{VASP_OUT_DIR}/vasprun.ml_md_no_calculation.xml.gz"
+        vasp_run = Vasprun(filepath, parse_potcar_file=False)
+        assert len(vasp_run.ionic_steps) == 0
+        assert len(vasp_run.md_data) == vasp_run.nionic_steps == 10
+        assert vasp_run.converged
+
+        vasp_run_skip = Vasprun(filepath, ionic_step_skip=3, ionic_step_offset=1, parse_potcar_file=False)
+        assert vasp_run_skip.nionic_steps == 10
+        assert [step["energy"]["total"] for step in vasp_run_skip.md_data] == approx(
+            [-23.39220561, -23.36690383, -23.34485475]
+        )
+
     def test_vasprun_md(self):
         # Test for simple MD simulation (no ML).
         # Does not generate the `md_data` attribute in Vasprun. Data based on `ionic_steps`
