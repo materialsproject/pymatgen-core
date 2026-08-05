@@ -1783,9 +1783,8 @@ class TestMVLScanRelaxSet(MatSciTest):
         ):
             MVLScanRelaxSet(self.struct, user_potcar_functional="PBE")
 
-    @pytest.mark.xfail(reason="TODO: need someone to fix this")
     @skip_if_no_psp_dir
-    def test_potcar_need_fix(self):
+    def test_potcar_functional_and_settings(self):
         test_potcar_set_1 = self.set(self.struct, user_potcar_functional="PBE_54")
         assert test_potcar_set_1.potcar.functional == "PBE_54"
 
@@ -1810,10 +1809,9 @@ class TestMVLScanRelaxSet(MatSciTest):
                     user_potcar_functional="PBE_54",
                     user_potcar_settings=user_potcar_settings,
                 )
-                expected = {
-                    **({"W": "W_sv"} if "W" in struct.symbol_set else {}),
-                    **(user_potcar_settings or {}),
-                }
+                expected = user_potcar_settings
+                if "W" in struct.symbol_set:
+                    expected = {"W": "W_sv", **(user_potcar_settings or {})}
                 assert relax_set.user_potcar_settings == expected
 
     def test_as_from_dict(self):

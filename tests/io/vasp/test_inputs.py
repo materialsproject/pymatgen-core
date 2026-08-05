@@ -1843,15 +1843,16 @@ class TestPotcar(MatSciTest):
         assert self.potcar.symbols == ["Fe_pv", "O"]
         assert self.potcar[0].nelectrons == 14
 
-    @pytest.mark.xfail(reason="TODO: need someone to fix this")
     def test_default_functional(self):
-        potcar = Potcar(["Fe", "P"])
-        assert potcar[0].functional_class == "GGA"
-        assert potcar[1].functional_class == "GGA"
-        SETTINGS["PMG_DEFAULT_FUNCTIONAL"] = "LDA"
-        potcar = Potcar(["Fe", "P"])
-        assert potcar[0].functional_class == "LDA"
-        assert potcar[1].functional_class == "LDA"
+        with patch.dict(SETTINGS, PMG_DEFAULT_FUNCTIONAL="PBE"):
+            potcar = Potcar(["Fe", "P"])
+            assert potcar[0].functional_class == "GGA"
+            assert potcar[1].functional_class == "GGA"
+
+        with patch.dict(SETTINGS, PMG_DEFAULT_FUNCTIONAL="LDA"):
+            potcar = Potcar(["Fe", "P"])
+            assert potcar[0].functional_class == "LDA"
+            assert potcar[1].functional_class == "LDA"
 
     def test_pickle(self):
         pickle.dumps(self.potcar)
