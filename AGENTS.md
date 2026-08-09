@@ -6,6 +6,12 @@ This file provides guidance to coding agents working in this repository.
 
 This is `pymatgen-core` — the trimmed core of the pymatgen ecosystem (the larger umbrella `pymatgen` package depends on this). It implements the foundational data structures (`Element`, `Site`, `Molecule`, `Structure`, `Lattice`, `Composition`), symmetry/lattice operations, the I/O layer for many DFT/MD codes (VASP, ABINIT, CIF, Gaussian, LAMMPS, CP2K, Q-Chem, …), and analysis modules. Python ≥ 3.11, src layout under `src/pymatgen/`.
 
+## Language
+
+Always communicate in **English**: replies, comments, PR/issue descriptions, code comments, and docstrings. This is an international open-source project — never write in another language, regardless of what language the user or another contributor uses.
+
+**Commit messages must be in English.** This is a hard requirement: non-English commit messages are rejected and must be rewritten before merging, even if the author or reviewer communicated in another language.
+
 ## Setup & common commands
 
 Dependency management is **`uv`-based** (see `[tool.uv]` in `pyproject.toml`; default groups are `dev`, `test`, `lint`). Docs are built downstream in the umbrella `pymatgen` repo and there is no `docs/` folder here.
