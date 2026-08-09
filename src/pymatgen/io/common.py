@@ -130,7 +130,7 @@ class VolumetricData(MSONable):
         self.data_key = data_key or ("total" if "total" in self.data else next(iter(self.data)))
         if self.data_key not in self.data:
             raise ValueError(f"Primary volumetric data key {self.data_key!r} is not present.")
-        self.is_spin_polarized = "spin_down" in self.data or "diff" in self.data
+        self.is_spin_polarized = len(self.data) >= 2
         self.is_soc = {"diff_x", "diff_y", "diff_z"}.issubset(self.data)
         self.dim = self.data[self.data_key].shape
         self.data_aug = data_aug or {}

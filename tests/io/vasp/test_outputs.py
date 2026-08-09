@@ -1761,6 +1761,12 @@ class TestChgcar(MatSciTest):
         assert_allclose(chg_from_file.data_aug["diff_y"][1], self.chgcar_NiO_soc.data_aug["diff_y"][1])
         assert_allclose(chg_from_file.data_aug["diff_z"][1], self.chgcar_NiO_soc.data_aug["diff_z"][1])
 
+        # Hand-constructed SOC data without the scalar "diff" key is still spin-polarized
+        soc_data = {key: np.ones((2, 2, 2)) for key in ("total", "diff_x", "diff_y", "diff_z")}
+        chg = Chgcar(self.chgcar_NiO_soc.structure, soc_data)
+        assert chg.is_spin_polarized
+        assert chg.is_soc
+
     @pytest.mark.skipif(h5py is None, reason="h5py required for HDF5 support.")
     def test_hdf5(self):
         chgcar = Chgcar.from_file(f"{VASP_OUT_DIR}/CHGCAR.NiO_SOC.gz")
