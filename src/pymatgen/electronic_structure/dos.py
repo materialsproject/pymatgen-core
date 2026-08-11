@@ -465,6 +465,12 @@ class FermiDos(Dos, MSONable):
             self.energies[: self.idx_mid_gap] -= (bandgap - (ecbm - evbm)) / 2.0
             self.energies[self.idx_mid_gap :] += (bandgap - (ecbm - evbm)) / 2.0
 
+        # Precompute trapezoid integration weights folded with the DOS, so ``get_e_h_concs`` reduces to a
+        # dot product of these weights with Fermi-Dirac occupation factors (much faster):
+        ih, ie = self.idx_h_integration, self.idx_e_integration
+        self._h_weights = _trapezoid_weights(self.energies[:ih]) * self.tdos[:ih]
+        self._e_weights = _trapezoid_weights(self.energies[ie:]) * self.tdos[ie:]
+
     def get_e_h_concs(self, fermi_level: float, temperature: float) -> tuple[float, float]:
         """
         Get the electron and hole concentrations (in cm^-3) at a given Fermi
@@ -478,21 +484,18 @@ class FermiDos(Dos, MSONable):
             tuple[float, float]: The electron and hole concentrations in cm^-3.
         """
         scale = self.volume * self.A_to_cm**3
+        kbt = _constant("Boltzmann constant in eV/K") * temperature
         ih, ie = self.idx_h_integration, self.idx_e_integration
-        e_conc: float = (
-            trapezoid(  # use trapezoid rule for accurate DOS integration
-                self.tdos[ie:] * f0(self.energies[ie:], fermi_level, temperature),
-                x=self.energies[ie:],
-            )
-            / scale
-        )
-        h_conc: float = (
-            trapezoid(
-                self.tdos[:ih] * f0(-self.energies[:ih], -fermi_level, temperature),
-                x=self.energies[:ih],
-            )
-            / scale
-        )
+
+        # Fermi-Dirac distribution exponentially decays away from band edge / Fermi level, so truncate the
+        # integration at 40 k_BT from these bounds (< ~1e-10 - 1e-14 relative error, ~3-10x speedup)
+        i_max = max(int(np.searchsorted(self.energies, max(fermi_level, self.energies[self.idx_cbm]) + 40 * kbt)), ie)
+        i_min = min(int(np.searchsorted(self.energies, min(fermi_level, self.energies[self.idx_vbm]) - 40 * kbt)), ih)
+
+        # equivalent to trapezoid(tdos * f0, x=energies) over the (truncated) integration ranges,
+        # using precomputed weights ; expit(-x) = f0 = 1/(1+exp(x)):
+        e_conc: float = self._e_weights[: i_max - ie] @ expit(-(self.energies[ie:i_max] - fermi_level) / kbt) / scale
+        h_conc: float = self._h_weights[i_min:] @ expit((self.energies[i_min:ih] - fermi_level) / kbt) / scale
 
         return e_conc, h_conc
 
@@ -1584,6 +1587,20 @@ def f0(E: float | NDArray, fermi: float, T: float) -> float:
     """
     exponent = (E - fermi) / (_constant("Boltzmann constant in eV/K") * T)
     return expit(-exponent)  # scipy logistic sigmoid function; expit(x) = 1/(1+exp(-x))
+
+
+def _trapezoid_weights(x: NDArray) -> NDArray:
+    """
+    Get weights ``w(x)`` such that ``w(x) @ y == trapezoid(y, x=x)``
+    for any ``y`` on the fixed grid ``x``.
+    """
+    weights = np.zeros_like(x)  # same shape as ``x``
+    if len(x) > 1:
+        dx = np.diff(x)
+        weights[0] = dx[0] / 2
+        weights[-1] = dx[-1] / 2
+        weights[1:-1] = (dx[:-1] + dx[1:]) / 2  # trapezoid weights
+    return weights
 
 
 def _get_orb_type_lobster(orb: str) -> OrbitalType | None:
