@@ -93,6 +93,7 @@ class TestStrain(MatSciTest):
     def test_new(self):
         test_strain = Strain([[0, 0.01, 0], [0.01, 0.0002, 0], [0, 0, 0]])
         assert_allclose(test_strain, test_strain.get_deformation_matrix().green_lagrange_strain)
+        assert_allclose(Strain(test_strain.voigt), test_strain)
         with pytest.raises(
             ValueError,
             match="Strain must be initialized with a symmetric array or a Voigt-notation vector",

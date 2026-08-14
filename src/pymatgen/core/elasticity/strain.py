@@ -169,6 +169,9 @@ class Strain(SquareTensor):
             strain_matrix (ArrayLike): 3x3 matrix or length-6 Voigt notation vector
                 representing the Green-Lagrange strain
         """
+        if np.shape(strain_matrix) == (6,):
+            return cls.from_voigt(strain_matrix)
+
         vscale = np.ones((6,))
         vscale[3:] *= 2
         obj = super().__new__(cls, strain_matrix, vscale=vscale)
