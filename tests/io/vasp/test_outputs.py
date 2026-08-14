@@ -1600,6 +1600,19 @@ DAV:   1     0.831012218308E+03    0.83101E+03   -0.25939E+05  4672   0.894E+02
         assert ionic_step["E"] == approx(648_764.04)
         assert ionic_step["F"] == approx(492_203.67)
 
+    def test_missing_exponent_marker(self):
+        oszicar_path = Path(self.tmp_path) / "OSZICAR"
+        oszicar_path.write_text(
+            "1 F= -.16497036E+04 E0= -.16497036E+04 d E =-.302333-128 mag= 13.9998\n",
+            encoding="utf-8",
+        )
+
+        ionic_step = Oszicar(oszicar_path).ionic_steps[0]
+        assert ionic_step["F"] == approx(-1649.7036)
+        assert ionic_step["E0"] == approx(-1649.7036)
+        assert ionic_step["dE"] == float("-.302333E-128")
+        assert ionic_step["mag"] == approx(13.9998)
+
 
 class TestGetBandStructureFromVaspMultipleBranches:
     def test_read_multi_branches(self):
