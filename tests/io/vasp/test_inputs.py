@@ -2018,6 +2018,42 @@ def test_potcar_summary_stats() -> None:
         assert actual == expected, f"{key=}, {expected=}, {actual=}"
 
 
+def test_compare_potcar_stats_relative_tolerance() -> None:
+    """compare_potcar_stats uses a magnitude-relative tolerance.
+
+    Summary-stat values (especially VAR) reach ~1e12 for heavy elements. A value
+    stored in potcar-summary-stats.json and re-parsed can differ from a freshly
+    computed one by 1-2 float64 ULPs -- far larger than the 1e-6 tolerance in
+    absolute terms, but not a real difference. Such pairs must still match, while
+    a genuinely different value must not.
+    """
+    reference = {
+        "keywords": {"header": ["titel", "zval"], "data": ["localpart"]},
+        "stats": {
+            "header": {"MEAN": 32.8, "ABSMEAN": 32.8, "VAR": 1.0e4, "MIN": 0.0, "MAX": 8.1e2},
+            "data": {
+                "MEAN": 172565.99127092774,
+                "ABSMEAN": 172585.5792270369,
+                "VAR": 2551106075405.738,  # ~2.55e12; 1 ULP ~5e-4 in absolute terms
+                "MIN": -239.142614172,
+                "MAX": 23770213.0296,
+            },
+        },
+    }
+
+    # A one-ULP perturbation of the large VAR (what JSON round-tripping introduces)
+    # must still be treated as a match.
+    one_ulp_off = copy.deepcopy(reference)
+    one_ulp_off["stats"]["data"]["VAR"] = np.nextafter(reference["stats"]["data"]["VAR"], np.inf)
+    assert np.nextafter(reference["stats"]["data"]["VAR"], np.inf) != reference["stats"]["data"]["VAR"]
+    assert PotcarSingle.compare_potcar_stats(reference, one_ulp_off)
+
+    # A genuinely different VAR (relative difference well above tolerance) must not.
+    genuinely_different = copy.deepcopy(reference)
+    genuinely_different["stats"]["data"]["VAR"] *= 1.001
+    assert not PotcarSingle.compare_potcar_stats(reference, genuinely_different)
+
+
 def test_gen_potcar_summary_stats() -> None:
     assert set(_SUMM_STATS) == set(PotcarSingle.functional_dir)
 
