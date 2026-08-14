@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.io.common import PMGDir, VolumetricData
 from pymatgen.util.testing import TEST_FILES_DIR
 
@@ -36,6 +37,51 @@ def test_cube_nonzero_origin() -> None:
         [0.16528953, 0.6611559, 0.24615391],
         atol=1e-6,
     )
+
+
+def test_volumetric_data_periodic_interpolation() -> None:
+    """Regression test for gh-3787: volumetric grids use periodic i/n sampling."""
+    shape = (2, 3, 4)
+    grid_indices = np.indices(shape)
+    data = grid_indices[0] + 10 * grid_indices[1] + 100 * grid_indices[2]
+    volumetric_data = VolumetricData(
+        Structure(Lattice.cubic(1), [], []),
+        {"total": data},
+    )
+
+    np.testing.assert_allclose(volumetric_data.xpoints, [0, 0.5])
+    np.testing.assert_allclose(volumetric_data.ypoints, [0, 1 / 3, 2 / 3])
+    np.testing.assert_allclose(volumetric_data.zpoints, [0, 0.25, 0.5, 0.75])
+
+    # Values at grid points should be returned exactly.
+    assert volumetric_data.value_at(0.5, 1 / 3, 0.5) == pytest.approx(211)
+
+    # Interpolation across every periodic boundary should use the samples at index 0.
+    boundary_point = np.array([0.75, 5 / 6, 0.875])
+    assert volumetric_data.value_at(*boundary_point) == pytest.approx(160.5)
+    assert volumetric_data.value_at(*(boundary_point - 1)) == pytest.approx(160.5)
+    assert volumetric_data.value_at(1, 1, 1) == pytest.approx(data[0, 0, 0])
+
+    # Integer lattice translations must not change interpolated values.
+    translations = np.array([[0, 0, 0], [1, -2, 3], [-4, 2, -1]])
+    translated_values = volumetric_data.interpolator(boundary_point + translations)
+    np.testing.assert_allclose(translated_values, 160.5)
+
+    # Interpolation should use the current grid rather than a stale cached copy.
+    volumetric_data.scale(2)
+    assert volumetric_data.value_at(*boundary_point) == pytest.approx(321)
+
+    with pytest.raises(ValueError, match=r"shape \(\.\.\., 3\)"):
+        volumetric_data.interpolator([0, 0])
+
+
+def test_volumetric_data_interpolation_with_singleton_dimensions() -> None:
+    volumetric_data = VolumetricData(
+        Structure(Lattice.cubic(1), [], []),
+        {"total": np.array([[[2]], [[6]]])},
+    )
+
+    assert volumetric_data.value_at(0.75, 0.4, -0.2) == pytest.approx(4)
 
 
 class TestPMGDir:
