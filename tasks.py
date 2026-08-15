@@ -23,6 +23,56 @@ from invoke import task
 if TYPE_CHECKING:
     from invoke import Context
 
+
+def _is_breaking_pr(pr: dict) -> bool:
+    """A PR is breaking if its title starts with the ``[breaking]`` prefix."""
+    return bool(re.match(r"^\[breaking\]\s*", pr.get("title", "").strip(), flags=re.IGNORECASE))
+
+
+def _extract_breaking_notes(pr: dict) -> str:
+    """Extract the ``## Breaking Changes`` section of a PR body, if present.
+
+    The section runs until the next heading at or above its own level, so
+    ``###`` subsections (e.g. ``### Migration``) are kept; leftover HTML
+    comments (e.g. unfilled template placeholders) are stripped.
+    """
+    lines = (pr.get("body") or "").split("\n")
+    start = None
+    level = 2
+    for idx, line in enumerate(lines):
+        if m := re.match(r"^(#{2,4})\s+breaking changes\s*$", line, flags=re.IGNORECASE):
+            start = idx
+            level = len(m.group(1))
+            break
+    if start is None:
+        return ""
+    notes = []
+    for line in lines[start + 1 :]:
+        if re.match(rf"^#{{1,{level}}}\s", line):  # heading at/above the section level ends it
+            break
+        notes.append(line)
+    notes = re.sub(r"<!--.*?-->", "", "\n".join(notes), flags=re.DOTALL)
+    return notes.strip()
+
+
+def _compatibility_section(version: str, breaking_prs: list[dict]) -> str:
+    """Format the ``### v<version>`` section of COMPATIBILITY.md for ``[breaking]``-titled PRs."""
+    if not version:
+        raise ValueError("version must be provided")
+    lines = [f"### v{version}", ""]
+    for pr in breaking_prs:
+        num = pr["number"]
+        title = pr["title"].strip()
+        author = pr["user"]["login"]
+        url = f"https://github.com/materialsproject/pymatgen-core/pull/{num}"
+        lines.append(f"* {title} by @{author} in [#{num}]({url})")
+        if notes := _extract_breaking_notes(pr):
+            lines.append("")
+            lines.extend(f"  {line}" for line in notes.split("\n"))
+        lines.append("")
+    return "\n".join(lines)
+
+
 CHANGELOG_PROMPT = """
 Provide a concise summary of the following pull requests as a change log for the pymatgen package. Format the summary
 as a markdown bulleted list. Make sure to include the GitHub ids of all the authors. Do not include any code
@@ -78,6 +128,7 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
     print(f"Getting all commits since {last_tag}")
     output = subprocess.check_output(["git", "log", "--pretty=format:%s", f"{last_tag}..HEAD"])
     lines = []
+    breaking_prs = []
     ignored_commits = []
     for line in output.decode("utf-8").strip().split("\n"):
         re_match = re.match(r".*\(\#(\d+)\)", line)
@@ -97,6 +148,8 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
             )
             resp = response.json()
             lines += [f"- PR #{pr_number} {resp['title'].strip()} by @{resp['user']['login']}"]
+            if _is_breaking_pr(resp):
+                breaking_prs.append(resp)
             if body := resp["body"]:
                 for ll in map(str.strip, body.split("\n")):
                     if ll in ("", "## Summary"):
@@ -134,7 +187,26 @@ def update_changelog(ctx: Context, version: str | None = None, dry_run: bool = F
     else:
         with open("CHANGES.md", mode="w", encoding="utf-8") as file:
             file.write(tokens[0] + "##".join(tokens[1:]))
-        ctx.run("open docs/CHANGES.md")
+        ctx.run("open CHANGES.md")
+
+    if breaking_prs:
+        compat = _compatibility_section(version, breaking_prs)
+        with open("COMPATIBILITY.md", encoding="utf-8") as file:
+            contents = file.read()
+        marker = "## Recent Breaking Changes"
+        if marker not in contents:
+            raise RuntimeError(f"{marker!r} section not found in COMPATIBILITY.md")
+        idx = contents.index(marker) + len(marker)
+        new_contents = contents[:idx] + "\n\n" + compat + contents[idx:]
+        if dry_run:
+            print(new_contents)
+        else:
+            with open("COMPATIBILITY.md", mode="w", encoding="utf-8") as file:
+                file.write(new_contents)
+        print(f"Logged {len(breaking_prs)} breaking change(s) in COMPATIBILITY.md for v{version}.")
+    else:
+        print("No `[breaking]`-titled PRs since last tag; COMPATIBILITY.md not updated.")
+
     print("The following commit messages were not included...")
     print("\n".join(ignored_commits))
 
