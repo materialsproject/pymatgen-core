@@ -258,8 +258,9 @@ class VolumetricData(MSONable):
         grid_shape = np.array(self.dim)
         grid_coords = frac_coords * grid_shape
         lower = np.floor(grid_coords).astype(int)
-        upper = (lower + 1) % grid_shape
         upper_weights = grid_coords - lower
+        lower %= grid_shape
+        upper = (lower + 1) % grid_shape
 
         grid = self.data[self.data_key]
         values = np.zeros(len(grid_coords), dtype=np.result_type(grid.dtype, float))
@@ -306,10 +307,8 @@ class VolumetricData(MSONable):
         if p1.shape != (3,) or p2.shape != (3,):
             raise ValueError(f"lengths of p1 and p2 should be 3, got {len(p1)} and {len(p2)}")
 
-        x_pts = np.linspace(p1[0], p2[0], num=n)
-        y_pts = np.linspace(p1[1], p2[1], num=n)
-        z_pts = np.linspace(p1[2], p2[2], num=n)
-        return [self.value_at(x_pts[i], y_pts[i], z_pts[i]) for i in range(n)]
+        points = np.linspace(p1, p2, num=n)
+        return self.interpolator(points).tolist()
 
     def get_integrated_diff(self, ind: int, radius: float, nbins: int = 1) -> NDArray:
         """Get integrated difference of atom index ind up to radius. This can be

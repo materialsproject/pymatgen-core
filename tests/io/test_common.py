@@ -61,11 +61,17 @@ def test_volumetric_data_periodic_interpolation() -> None:
     assert volumetric_data.value_at(*boundary_point) == pytest.approx(160.5)
     assert volumetric_data.value_at(*(boundary_point - 1)) == pytest.approx(160.5)
     assert volumetric_data.value_at(1, 1, 1) == pytest.approx(data[0, 0, 0])
+    assert volumetric_data.value_at(-1e-18, 0, 0) == pytest.approx(data[0, 0, 0])
 
     # Integer lattice translations must not change interpolated values.
     translations = np.array([[0, 0, 0], [1, -2, 3], [-4, 2, -1]])
     translated_values = volumetric_data.interpolator(boundary_point + translations)
     np.testing.assert_allclose(translated_values, 160.5)
+
+    slice_end = boundary_point + np.array([1, 0, 0])
+    slice_values = volumetric_data.linear_slice(boundary_point, slice_end, n=5)
+    assert isinstance(slice_values, list)
+    np.testing.assert_allclose(slice_values, volumetric_data.interpolator(np.linspace(boundary_point, slice_end, 5)))
 
     # Interpolation should use the current grid rather than a stale cached copy.
     volumetric_data.scale(2)
