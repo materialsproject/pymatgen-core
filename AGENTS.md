@@ -34,6 +34,22 @@ uv run invoke lint             # ruff + mypy + ruff format
 uv run invoke update-changelog # generate CHANGES.md from PRs (uses OPENAPI_KEY for GPT summarization)
 ```
 
+## Machine-generated files — do not edit by hand
+
+The following files are regenerated at release time by `invoke update-changelog` (see
+`tasks.py`) and must **not** be edited manually — hand-edits are overwritten or duplicated
+by the next release run:
+
+- `CHANGES.md` — release changelog, GPT-summarized from merged PR titles/bodies.
+- `COMPATIBILITY.md` — breaking-change log, assembled from PRs whose title starts with
+  `[breaking]` by copying their `## Breaking Changes` body section verbatim.
+
+To influence their content, edit the PR instead: for `COMPATIBILITY.md`, prefix the PR
+title with `[breaking]` and describe the change (plus migration steps) under
+`## Breaking Changes` in the PR body; describe the change in the PR body to steer the
+`CHANGES.md` summary. The package version is likewise derived from the exact `vYYYY.M.D`
+Git tag, not from any file (see Versioning & release).
+
 ## Cython extensions — important
 
 `setup.py` builds two Cython extensions:
