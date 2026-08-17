@@ -1387,27 +1387,26 @@ class CompleteDos(Dos):
         tdos = Dos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
         pdoss = {}
-        warned_legacy_dx2 = False
         for idx in range(len(dct["pdos"])):
             at = struct[idx]
             orb_dos = {}
+            # TODO(2027-08-17): Remove legacy "dx2" deserialization.
             for orb_str, odos in dct["pdos"][idx].items():
-                if orb_str == "dx2":
-                    if not warned_legacy_dx2:
-                        warnings.warn(
-                            "The 'dx2' orbital name in serialized DOS data is deprecated; use 'dx2_y2' instead.",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
-                        warned_legacy_dx2 = True
-                    orb_str = "dx2_y2"
-                orb = Orbital[orb_str]
+                orb = Orbital["dx2_y2" if orb_str == "dx2" else orb_str]
                 orb_dos[orb] = {Spin(int(k)): v for k, v in odos["densities"].items()}
             pdoss[at] = orb_dos
         return cls(struct, tdos, pdoss)
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-serializable dict representation of CompleteDos."""
+        # TODO(2027-08-17): Serialize canonical "dx2_y2" names and remove this compatibility warning.
+        if any(Orbital.dx2_y2 in site_pdos for site_pdos in self.pdos.values()):
+            warnings.warn(
+                "CompleteDos.as_dict() temporarily serializes 'dx2_y2' as 'dx2' for backward compatibility. "
+                "It will serialize 'dx2_y2' on or after 2027-08-17.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         dct = {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
@@ -1421,7 +1420,8 @@ class CompleteDos(Dos):
             for at in self.structure:
                 dd = {}
                 for orb, pdos in self.pdos[at].items():
-                    dd[str(orb)] = {"densities": {str(int(spin)): list(dens) for spin, dens in pdos.items()}}  # type:ignore[arg-type]
+                    orb_name = "dx2" if orb is Orbital.dx2_y2 else str(orb)
+                    dd[orb_name] = {"densities": {str(int(spin)): list(dens) for spin, dens in pdos.items()}}  # type:ignore[arg-type]
                 dct["pdos"].append(dd)
             dct["atom_dos"] = {str(at): dos.as_dict() for at, dos in self.get_element_dos().items()}
             dct["spd_dos"] = {str(orb): dos.as_dict() for orb, dos in self.get_spd_dos().items()}
