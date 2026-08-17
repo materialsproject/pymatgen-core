@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
@@ -28,7 +29,7 @@ THZ_TO_J = const.value("hertz-joule relationship") * const.tera
 
 
 def _thermo_integrand(
-    freqs: NDArray, dens: NDArray, weight: Callable[[NDArray], NDArray], zero_freq_weight: float
+    freqs: NDArray, dens: NDArray, weight: Callable[[NDArray], NDArray], zero_freq_weight: float | None
 ) -> NDArray:
     """Build the integrand weight(freqs) * dens for a thermodynamic DOS integral.
 
@@ -44,18 +45,38 @@ def _thermo_integrand(
         freqs: non-negative frequencies, ascending.
         dens: densities corresponding to freqs.
         weight: the Bose-Einstein weight, evaluated only where freqs > 0.
-        zero_freq_weight: value used where freqs == 0. For C_v and U this is the exact
-            limit of the weight. For S and F the weight itself diverges logarithmically,
-            but the divergence is integrable and any physical phonon DOS vanishes as
-            omega -> 0 (g(omega) ~ omega^2), so the omega = 0 sample contributes nothing
-            and 0 is used.
+        zero_freq_weight: value used where freqs == 0, or None when the weight has no
+            finite limit there. C_v and U have exact limits (1 and 2kT). The S and F
+            weights instead diverge logarithmically; the divergence is integrable, so
+            dropping the omega = 0 sample converges to the correct integral, and it is
+            exactly zero for the harmonic lattice DOS these functions model, which
+            vanishes as g(omega) ~ omega^2. A DOS with g(0) > 0 -- e.g. a VDOS from the
+            velocity autocorrelation of a diffusive MD trajectory -- is outside that
+            model and would need the first panel resolved (or a two-phase treatment of
+            the diffusive component), so warn instead of quietly under-integrating.
 
     Returns:
         NDArray: the integrand, finite everywhere freqs and dens are finite.
     """
-    weights = np.full_like(freqs, zero_freq_weight, dtype=float)
     positive = freqs > 0
+    weights = np.zeros_like(freqs, dtype=float)
     weights[positive] = weight(freqs[positive])
+
+    if zero_freq_weight is None:
+        zero_freq_dens = dens[~positive]
+        if zero_freq_dens.size and np.any(zero_freq_dens != 0):
+            warnings.warn(
+                f"DOS has non-zero density {np.max(zero_freq_dens)} at omega = 0, where the entropy and "
+                "free-energy weights diverge logarithmically. The omega = 0 sample is dropped, so the result "
+                "is under-integrated by O(delta * log delta) in the frequency spacing. Refine the grid near "
+                "zero, or note that a DOS with g(0) > 0 (a diffusive VDOS, say) is outside the harmonic "
+                "oscillator model these functions assume.",
+                UserWarning,
+                stacklevel=3,
+            )
+    else:
+        weights[~positive] = zero_freq_weight
+
     return weights * dens
 
 
@@ -232,7 +253,7 @@ class PhononDos(MSONable):
             return wd2kt**2 / np.sinh(wd2kt) ** 2
 
         # x**2 / sinh(x)**2 -> 1 as x -> 0
-        cv = np.trapezoid(_thermo_integrand(freqs, dens, cv_weight, 1.0), x=freqs)
+        cv = float(np.trapezoid(_thermo_integrand(freqs, dens, cv_weight, 1.0), x=freqs))
         cv *= const.Boltzmann * const.Avogadro
 
         if structure:
@@ -270,7 +291,7 @@ class PhononDos(MSONable):
             return wd2kt / np.tanh(wd2kt) - np.log(2 * np.sinh(wd2kt))
 
         # x*coth(x) - log(2*sinh(x)) diverges logarithmically as x -> 0, but g(omega) -> 0
-        entropy = np.trapezoid(_thermo_integrand(freqs, dens, entropy_weight, 0.0), x=freqs)
+        entropy = float(np.trapezoid(_thermo_integrand(freqs, dens, entropy_weight, None), x=freqs))
 
         entropy *= const.Boltzmann * const.Avogadro
 
@@ -349,7 +370,7 @@ class PhononDos(MSONable):
             return np.log(2 * np.sinh(wd2kt))
 
         # log(2*sinh(x)) diverges logarithmically as x -> 0, but g(omega) -> 0
-        e_free = np.trapezoid(_thermo_integrand(freqs, dens, free_energy_weight, 0.0), x=freqs)
+        e_free = float(np.trapezoid(_thermo_integrand(freqs, dens, free_energy_weight, None), x=freqs))
 
         e_free *= const.Boltzmann * const.Avogadro * temp
 
