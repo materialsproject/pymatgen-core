@@ -5,7 +5,7 @@ including Spin, Orbital and Magmom.
 from __future__ import annotations
 
 import warnings
-from enum import Enum, EnumMeta, unique
+from enum import Enum, EnumType, unique
 from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
@@ -50,23 +50,23 @@ class OrbitalType(Enum):
         return cast("Literal['s', 'p', 'd', 'f']", str(self.name))
 
 
-class _OrbitalMeta(EnumMeta):
+class _OrbitalMeta(EnumType):
     """Metaclass providing deprecated orbital-name compatibility."""
 
-    def __getattribute__(cls, name: str):
+    def __getattr__(cls, name: str):
         if name == "dx2":
             warnings.warn(
-                "Orbital.dx2 is deprecated; use Orbital.dx2_y2 instead.",
+                "Orbital.dx2 is deprecated; use Orbital.dx2_y2 instead. It will be removed on 2027-08-17.",
                 DeprecationWarning,
                 stacklevel=2,
             )
-            name = "dx2_y2"
-        return super().__getattribute__(name)
+            return cls.dx2_y2
+        raise AttributeError(name)
 
     def __getitem__(cls, name: str):
         if name == "dx2":
             warnings.warn(
-                "The 'dx2' orbital name is deprecated; use 'dx2_y2' instead.",
+                "The 'dx2' orbital name is deprecated; use 'dx2_y2' instead. It will be removed on 2027-08-17.",
                 DeprecationWarning,
                 stacklevel=2,
             )
