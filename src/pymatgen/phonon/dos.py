@@ -18,12 +18,45 @@ if np.lib.NumpyVersion(np.__version__) < "2.0.0":
     np.trapezoid = np.trapz  # type:ignore[assignment]  # noqa: NPY201
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Self
 
     from numpy.typing import ArrayLike, NDArray
 
 BOLTZ_THZ_PER_K = const.value("Boltzmann constant in Hz/K") / const.tera  # Boltzmann constant in THz/K
 THZ_TO_J = const.value("hertz-joule relationship") * const.tera
+
+
+def _thermo_integrand(
+    freqs: NDArray, dens: NDArray, weight: Callable[[NDArray], NDArray], zero_freq_weight: float
+) -> NDArray:
+    """Build the integrand weight(freqs) * dens for a thermodynamic DOS integral.
+
+    NOTE: every Bose-Einstein weight below is singular at omega = 0 (0/0 for C_v and U,
+    log 0 for S and F), so evaluating it on a grid that samples omega = 0 exactly yields
+    nan and silently poisons the whole trapezoid. Frequency grids that start at exactly 0
+    are common: phonopy writes one whenever a DOS range is requested
+    (`phonopy --dos --dos-range="0 <max> <pitch>"`), and hand-built grids such as
+    `np.linspace(0, f_max, n)` do the same. Evaluating the weight only where omega > 0 and
+    substituting the analytic omega -> 0 limit keeps the integration domain intact.
+
+    Args:
+        freqs: non-negative frequencies, ascending.
+        dens: densities corresponding to freqs.
+        weight: the Bose-Einstein weight, evaluated only where freqs > 0.
+        zero_freq_weight: value used where freqs == 0. For C_v and U this is the exact
+            limit of the weight. For S and F the weight itself diverges logarithmically,
+            but the divergence is integrable and any physical phonon DOS vanishes as
+            omega -> 0 (g(omega) ~ omega^2), so the omega = 0 sample contributes nothing
+            and 0 is used.
+
+    Returns:
+        NDArray: the integrand, finite everywhere freqs and dens are finite.
+    """
+    weights = np.full_like(freqs, zero_freq_weight, dtype=float)
+    positive = freqs > 0
+    weights[positive] = weight(freqs[positive])
+    return weights * dens
 
 
 class PhononDos(MSONable):
@@ -194,11 +227,12 @@ class PhononDos(MSONable):
         freqs = self._positive_frequencies
         dens = self._positive_densities
 
-        def csch2(x):
-            return 1.0 / (np.sinh(x) ** 2)
+        def cv_weight(freq: NDArray) -> NDArray:
+            wd2kt = freq / (2 * BOLTZ_THZ_PER_K * temp)
+            return wd2kt**2 / np.sinh(wd2kt) ** 2
 
-        wd2kt = freqs / (2 * BOLTZ_THZ_PER_K * temp)
-        cv = np.trapezoid(wd2kt**2 * csch2(wd2kt) * dens, x=freqs)
+        # x**2 / sinh(x)**2 -> 1 as x -> 0
+        cv = np.trapezoid(_thermo_integrand(freqs, dens, cv_weight, 1.0), x=freqs)
         cv *= const.Boltzmann * const.Avogadro
 
         if structure:
@@ -231,8 +265,12 @@ class PhononDos(MSONable):
         freqs = self._positive_frequencies
         dens = self._positive_densities
 
-        wd2kt = freqs / (2 * BOLTZ_THZ_PER_K * temp)
-        entropy = np.trapezoid((wd2kt * 1 / np.tanh(wd2kt) - np.log(2 * np.sinh(wd2kt))) * dens, x=freqs)
+        def entropy_weight(freq: NDArray) -> NDArray:
+            wd2kt = freq / (2 * BOLTZ_THZ_PER_K * temp)
+            return wd2kt / np.tanh(wd2kt) - np.log(2 * np.sinh(wd2kt))
+
+        # x*coth(x) - log(2*sinh(x)) diverges logarithmically as x -> 0, but g(omega) -> 0
+        entropy = np.trapezoid(_thermo_integrand(freqs, dens, entropy_weight, 0.0), x=freqs)
 
         entropy *= const.Boltzmann * const.Avogadro
 
@@ -266,8 +304,13 @@ class PhononDos(MSONable):
         freqs = self._positive_frequencies
         dens = self._positive_densities
 
-        wd2kt = freqs / (2 * BOLTZ_THZ_PER_K * temp)
-        e_phonon = np.trapezoid(freqs * 1 / np.tanh(wd2kt) * dens, x=freqs) / 2
+        def internal_energy_weight(freq: NDArray) -> NDArray:
+            wd2kt = freq / (2 * BOLTZ_THZ_PER_K * temp)
+            return freq / np.tanh(wd2kt)
+
+        # omega*coth(omega/2kT) -> 2kT as omega -> 0
+        integrand = _thermo_integrand(freqs, dens, internal_energy_weight, 2 * BOLTZ_THZ_PER_K * temp)
+        e_phonon = float(np.trapezoid(integrand, x=freqs)) / 2
 
         e_phonon *= THZ_TO_J * const.Avogadro
 
@@ -301,8 +344,12 @@ class PhononDos(MSONable):
         freqs = self._positive_frequencies
         dens = self._positive_densities
 
-        wd2kt = freqs / (2 * BOLTZ_THZ_PER_K * temp)
-        e_free = np.trapezoid(np.log(2 * np.sinh(wd2kt)) * dens, x=freqs)
+        def free_energy_weight(freq: NDArray) -> NDArray:
+            wd2kt = freq / (2 * BOLTZ_THZ_PER_K * temp)
+            return np.log(2 * np.sinh(wd2kt))
+
+        # log(2*sinh(x)) diverges logarithmically as x -> 0, but g(omega) -> 0
+        e_free = np.trapezoid(_thermo_integrand(freqs, dens, free_energy_weight, 0.0), x=freqs)
 
         e_free *= const.Boltzmann * const.Avogadro * temp
 
