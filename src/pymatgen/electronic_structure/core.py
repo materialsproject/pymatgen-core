@@ -61,7 +61,10 @@ class _OrbitalMeta(EnumType):
                 stacklevel=2,
             )
             return cls.dx2_y2
-        raise AttributeError(name)
+        try:
+            return super().__getattr__(name)  # type: ignore[misc]
+        except AttributeError:
+            raise AttributeError(name) from None
 
     def __getitem__(cls, name: str):
         if name == "dx2":

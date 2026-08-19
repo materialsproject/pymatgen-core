@@ -982,15 +982,13 @@ class TestCompleteCohp(MatSciTest):
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             cohp = CompleteCohp.from_dict(dct)
-        with pytest.warns(DeprecationWarning, match=r"CompleteCohp\.as_dict\(\).*2027-08-17"):
-            cohp_dict = cohp.as_dict()
+        cohp_dict = cohp.as_dict()
         assert all("dx2_y2" not in orb for orb in cohp_dict["orb_res_cohp"]["49"])
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
             round_trip_cohp = CompleteCohp.from_dict(cohp_dict)
-        with pytest.warns(DeprecationWarning, match=r"CompleteCohp\.as_dict\(\).*2027-08-17"):
-            assert round_trip_cohp.as_dict() == cohp_dict
+        assert round_trip_cohp.as_dict() == cohp_dict
 
         legacy_label = next(orb for orb in cohp_dict["orb_res_cohp"]["49"] if "dx2" in orb)
         canonical_label = legacy_label.replace("dx2", "dx2_y2")

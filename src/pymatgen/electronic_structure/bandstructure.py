@@ -693,7 +693,7 @@ class BandStructure:
                                 if not warned_legacy_dx2:
                                     warnings.warn(
                                         "The 'dx2' orbital name in serialized band structures is deprecated; "
-                                        "use 'dx2_y2' instead.",
+                                        "use 'dx2_y2' instead. It will be removed on 2027-08-17.",
                                         DeprecationWarning,
                                         stacklevel=2,
                                     )

@@ -216,8 +216,7 @@ class TestCompleteDos:
         assert_allclose(sum_spd.energies, sum_element.energies, atol=1e-4)
 
     def test_legacy_dx2_orbital_name(self):
-        with pytest.warns(DeprecationWarning, match=r"CompleteDos\.as_dict\(\).*2027-08-17"):
-            dct = self.dos.as_dict()
+        dct = self.dos.as_dict()
         pdos = next(site_pdos for site_pdos in dct["pdos"] if "dx2" in site_pdos)
         assert "dx2_y2" not in pdos
 

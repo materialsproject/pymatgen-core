@@ -345,18 +345,7 @@ class CompleteCohp(Cohp):
             }
 
         if self.orb_res_cohp:
-            # TODO(2027-08-17): Serialize canonical "dx2_y2" names and remove this compatibility warning.
-            if any(
-                "dx2_y2" in orbs or any(orbital is Orbital.dx2_y2 for _, orbital in cohp["orbitals"])
-                for orbital_cohps in self.orb_res_cohp.values()
-                for orbs, cohp in orbital_cohps.items()
-            ):
-                warnings.warn(
-                    "CompleteCohp.as_dict() temporarily serializes 'dx2_y2' as 'dx2' for backward compatibility. "
-                    "It will serialize 'dx2_y2' on or after 2027-08-17.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            # TODO(2027-08-17): Serialize canonical "dx2_y2" names instead of the legacy "dx2" spelling.
             orb_dict: dict[str, Any] = {}
             for label in self.orb_res_cohp:
                 orb_dict[label] = {}

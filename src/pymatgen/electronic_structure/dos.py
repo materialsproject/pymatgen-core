@@ -1399,14 +1399,7 @@ class CompleteDos(Dos):
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-serializable dict representation of CompleteDos."""
-        # TODO(2027-08-17): Serialize canonical "dx2_y2" names and remove this compatibility warning.
-        if any(Orbital.dx2_y2 in site_pdos for site_pdos in self.pdos.values()):
-            warnings.warn(
-                "CompleteDos.as_dict() temporarily serializes 'dx2_y2' as 'dx2' for backward compatibility. "
-                "It will serialize 'dx2_y2' on or after 2027-08-17.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+        # TODO(2027-08-17): Serialize canonical "dx2_y2" names instead of the legacy "dx2" key.
         dct = {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
