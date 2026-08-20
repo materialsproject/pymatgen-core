@@ -1751,6 +1751,31 @@ class TestChgcar(MatSciTest):
         assert "augmentation occupancies   1   3" in contents
         assert "0.1000000000E+01 0.2000000000E+01 0.3000000000E+01" in contents
 
+    def test_write_legacy_aug_lines_keep_their_own_newline(self):
+        # Legacy data_aug stores raw text lines that already end in "\n". Writing
+        # must not append a second one: a blank line inside an augmentation block
+        # makes VASP's RD_RHO_PAW declare the ion corrupt, discard the CHGCAR and
+        # silently fall back to an atomic density (ICHARG=1 degrades to 2).
+        legacy_aug = {
+            "total": [
+                "augmentation occupancies   1   3\n",
+                " 0.1000000000E+01 0.2000000000E+01 0.3000000000E+01 \n",
+            ]
+        }
+        chgcar = Chgcar(self.chgcar_no_spin.structure, self.chgcar_no_spin.data, data_aug=legacy_aug)
+        out_path = f"{self.tmp_path}/CHGCAR_legacy_aug_newlines"
+        chgcar.write_file(out_path)
+        contents = Path(out_path).read_text(encoding="utf-8")
+
+        aug_lines = contents[contents.index("augmentation occupancies") :].splitlines()
+        assert all(line.strip() for line in aug_lines), "blank line inside augmentation block"
+        assert aug_lines[0] == "augmentation occupancies   1   3"
+        assert aug_lines[1].split() == [
+            "0.1000000000E+01",
+            "0.2000000000E+01",
+            "0.3000000000E+01",
+        ]
+
     def test_soc_chgcar(self):
         assert set(self.chgcar_NiO_soc.data) == {
             "total",

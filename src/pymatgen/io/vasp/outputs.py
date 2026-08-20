@@ -4026,8 +4026,10 @@ class VolumetricData(BaseVolumetricData):
             aug_data: Any = self.data_aug.get(data_type, {})
 
             if isinstance(aug_data, (list, tuple)):
+                # Legacy lines already carry their trailing newline; a second one corrupts the block.
                 for line in aug_data:
-                    file.write(f"{line}\n")
+                    text = str(line)
+                    file.write(text if text.endswith("\n") else f"{text}\n")
                 return
 
             if not isinstance(aug_data, dict):
