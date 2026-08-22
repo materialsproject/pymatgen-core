@@ -197,11 +197,8 @@ class SpacegroupAnalyzer:
         Returns:
             Pointgroup: Point group for structure.
         """
-        rotations = self._space_group_data.rotations
-        # passing a 0-length rotations list to spglib can segfault
-        if len(rotations) == 0:
-            return "1"
-        return spglib.get_pointgroup(rotations)[0].strip()  # type:ignore[index]
+        # determined by spglib from the space group type, and so is basis-independent:
+        return self._space_group_data.pointgroup
 
     def get_crystal_system(self) -> CrystalSystem:
         """Get the crystal system for the structure, e.g. (triclinic, orthorhombic,

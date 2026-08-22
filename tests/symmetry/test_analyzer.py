@@ -91,6 +91,19 @@ class TestSpacegroupAnalyzer(MatSciTest):
         assert self.sg.get_point_group_symbol() == "mmm"
         assert self.disordered_sg.get_point_group_symbol() == "4/mmm"
 
+    def test_get_pointgroup_unaligned_supercell(self):
+        # point group determination is basis-independent, consistent with the space group type, including
+        # for supercells whose basis vectors are not aligned with the conventional cell axes
+        # (where some point operations are not expressible as integer matrices in the cell basis) --
+        # previously a failure case, when point-group determination was based on spglib rotations dataset
+        diamond = Structure.from_spacegroup("Fd-3m", Lattice.cubic(3.5597), ["C"], [[0, 0, 0]])
+        for sc_matrix in (3, [[2, 2, -1], [-1, 2, 2], [2, -1, 2]]):  # aligned & rotated 3a0 cubes
+            struct = diamond.copy()
+            struct.make_supercell(sc_matrix)
+            sga = SpacegroupAnalyzer(struct, symprec=0.01)
+            assert sga.get_space_group_symbol() == "Fd-3m"
+            assert sga.get_point_group_symbol() == "m-3m"
+
     def test_get_pearson_symbol(self):
         assert self.sg.get_pearson_symbol() == "oP24"
         assert self.disordered_sg.get_pearson_symbol() == "tP58"
