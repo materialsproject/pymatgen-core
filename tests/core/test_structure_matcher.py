@@ -536,6 +536,20 @@ class TestStructureMatcher(MatSciTest):
         assert sm_coarse.fit(struct1, struct2, symmetric=True) is False
         assert sm_coarse.fit(struct2, struct1, symmetric=True) is False
 
+    def test_group_structures_symmetric(self):
+        """
+        `fit()` is directional and `group_structures` always passes its
+        reference as `struct1`, so by default the grouping depends on the order
+        of `s_list`. `symmetric=True` removes this order-dependence."""
+        sm = StructureMatcher(comparator=ElementComparator(), ltol=0.6, stol=0.6, angle_tol=6)
+        struct1 = Structure.from_file(f"{VASP_IN_DIR}/POSCAR_fit_symm_s1")
+        struct2 = Structure.from_file(f"{VASP_IN_DIR}/POSCAR_fit_symm_s2")
+
+        assert len(sm.group_structures([struct1, struct2])) == 1
+        assert len(sm.group_structures([struct2, struct1])) == 2
+        assert len(sm.group_structures([struct1, struct2], symmetric=True)) == 2
+        assert len(sm.group_structures([struct2, struct1], symmetric=True)) == 2
+
     def test_oxi(self):
         """Test oxidation state removal matching."""
         sm = StructureMatcher()

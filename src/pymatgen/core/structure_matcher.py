@@ -840,7 +840,7 @@ class StructureMatcher(MSONable):
 
         return None
 
-    def group_structures(self, s_list, anonymous=False):
+    def group_structures(self, s_list, anonymous=False, symmetric=False):
         """
         Given a list of structures, use fit to group
         them by structural equality.
@@ -848,6 +848,13 @@ class StructureMatcher(MSONable):
         Args:
             s_list ([Structure]): List of structures to be grouped
             anonymous (bool): Whether to use anonymous mode.
+            symmetric (bool):
+                Whether a pair must match in both directions to be
+                grouped. Defaults to `False`. `fit()` is not symmetric
+                and the reference below is always passed as `struct1`,
+                so by default the grouping depends on the order of
+                `s_list`. Ignored if `anonymous` is `True`, since
+                `fit_anonymous` has no symmetric mode.
 
         Returns:
             A list of lists of matched structures
@@ -890,7 +897,7 @@ class StructureMatcher(MSONable):
                     )
                 else:
                     inds = filter(
-                        lambda i: self.fit(refs, unmatched[i][1], skip_structure_reduction=True),
+                        lambda i: self.fit(refs, unmatched[i][1], symmetric=symmetric, skip_structure_reduction=True),
                         list(range(len(unmatched))),
                     )
                 inds = list(inds)
