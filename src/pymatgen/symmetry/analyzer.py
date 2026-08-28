@@ -1183,8 +1183,8 @@ class PointGroupAnalyzer:
         unique_axis = self.principal_axes[ind]
         self._check_rot_sym(unique_axis)
         logger.debug(f"Rotation symmetries = {self.rot_sym}")
-        if len(self.rot_sym) > 0:
-            self._check_perpendicular_r2_axis(unique_axis)
+        # A perpendicular C2 can exist even when the unique axis carries none; that molecule is C2, not C1.
+        self._check_perpendicular_r2_axis(unique_axis)
 
         if len(self.rot_sym) >= 2:
             self._proc_dihedral()
@@ -1306,7 +1306,8 @@ class PointGroupAnalyzer:
         """
         min_set = self._get_smallest_set_not_on_axis(axis)
         max_sym = len(min_set)
-        for idx in range(max_sym, 0, -1):
+        # Stop at 2: a 360-degree rotation is the identity and is valid about any axis.
+        for idx in range(max_sym, 1, -1):
             if max_sym % idx != 0:
                 continue
             op = SymmOp.from_axis_angle_and_translation(axis, 360 / idx)

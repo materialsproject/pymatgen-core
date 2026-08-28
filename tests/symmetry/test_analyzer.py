@@ -851,6 +851,37 @@ class TestPointGroupAnalyzer(MatSciTest):
         pg_analyzer = PointGroupAnalyzer(mol)
         assert pg_analyzer.sch_symbol == "Ih"
 
+    def test_symmetric_top_without_rotation_about_the_unique_axis(self):
+        """A single C2 perpendicular to the unique axis is C2, not D2."""
+        mol = Molecule(
+            ["N", "C", "C", "N", "C", "C"] + ["H"] * 12,
+            [
+                [0.659378, 0.426967, 0.335225],
+                [1.239101, -0.891619, 0.590775],
+                [1.460417, 1.194080, -0.618856],
+                [-0.737346, 0.421402, -0.090549],
+                [-1.098486, -0.638411, -1.032051],
+                [-1.608821, 0.420712, 1.084581],
+                [0.637371, -1.460287, 1.307856],
+                [2.231617, -0.780150, 1.042295],
+                [1.355172, -1.489249, -0.320334],
+                [1.513941, 0.714989, -1.602943],
+                [1.049973, 2.202327, -0.748199],
+                [2.482813, 1.318290, -0.244521],
+                [-2.116346, -0.474199, -1.404049],
+                [-1.067877, -1.636694, -0.581223],
+                [-0.445143, -0.631385, -1.911122],
+                [-1.533093, -0.506981, 1.662903],
+                [-1.368190, 1.260437, 1.746930],
+                [-2.654480, 0.549769, 0.783280],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol, tolerance=0.1)
+        assert pg_analyzer.sch_symbol == "C2"
+        assert len(pg_analyzer.get_symmetry_operations()) == 2
+        assert len(pg_analyzer.get_pointgroup()) == 2
+        assert all(order > 1 for _axis, order in pg_analyzer.rot_sym)
+
     def test_symmetrize_molecule1(self):
         distortion = np.random.default_rng(0).standard_normal((len(C2H4), 3)) / 10
         dist_mol = Molecule(C2H4.species, C2H4.cart_coords + distortion)
