@@ -1341,6 +1341,8 @@ class PointGroupAnalyzer:
         if len(self.rot_sym) == 0:
             logger.debug("Accidental spherical top!")
             self._proc_sym_top()
+            # It assigns sch_symbol itself, and rot_sym may still be empty afterwards.
+            return
         main_axis, rot = max(self.rot_sym, key=lambda v: v[1])
         if rot < 3:
             logger.debug("Accidental spherical top!")

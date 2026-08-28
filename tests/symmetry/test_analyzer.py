@@ -882,6 +882,23 @@ class TestPointGroupAnalyzer(MatSciTest):
         assert len(pg_analyzer.get_pointgroup()) == 2
         assert all(order > 1 for _axis, order in pg_analyzer.rot_sym)
 
+    def test_accidental_spherical_top_without_rotation_symmetry(self):
+        """An isotropic inertia tensor with no rotational symmetry is C1, not an error."""
+        mol = Molecule(
+            ["H", "C", "N", "O", "F"],
+            [
+                [0.421312, -4.714984, 0.857910],
+                [-0.791788, -0.926881, -0.452260],
+                [-2.060115, -0.316787, -1.286876],
+                [-0.024651, 0.414342, -0.853569],
+                [-0.386488, -0.858129, -2.322082],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol)
+        assert pg_analyzer.eigvals.max() - pg_analyzer.eigvals.min() < 0.01
+        assert pg_analyzer.sch_symbol == "C1"
+        assert pg_analyzer.rot_sym == []
+
     def test_symmetrize_molecule1(self):
         distortion = np.random.default_rng(0).standard_normal((len(C2H4), 3)) / 10
         dist_mol = Molecule(C2H4.species, C2H4.cart_coords + distortion)
