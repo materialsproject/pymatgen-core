@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, overload
 import numpy as np
 from monty.fractions import gcd_float
 from monty.json import MontyDecoder, MSONable
-from uncertainties import UFloat, ufloat
+from uncertainties import UFloat, nominal_value, ufloat
 
 from pymatgen.core.composition import Composition
 from pymatgen.core.entries import ComputedEntry
@@ -484,12 +484,12 @@ class ComputedReaction(Reaction):
 
         for entry in self._reactant_entries + self._product_entries:
             comp, factor = entry.composition.get_reduced_composition_and_factor()
-            energy_ufloat = (
+            energy = (
                 ufloat(entry.energy, entry.correction_uncertainty)
                 if entry.correction_uncertainty and not np.isnan(entry.correction_uncertainty)
                 else entry.energy
-            )
-            calc_energies[comp] = min(calc_energies.get(comp, float("inf")), energy_ufloat / factor)
+            ) / factor  # ufloat energy divided by ``factor``
+            calc_energies[comp] = min(calc_energies.get(comp, energy), energy, key=nominal_value)
 
         ufloat_reaction_energy = self.calculate_energy(calc_energies)
         return ufloat_reaction_energy.std_dev if isinstance(ufloat_reaction_energy, UFloat) else np.nan

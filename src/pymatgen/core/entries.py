@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import orjson
 from monty.json import MontyDecoder, MontyEncoder, MSONable
-from uncertainties import ufloat
 
 from pymatgen.core.structure_matcher import SpeciesComparator, StructureMatcher
 
@@ -511,11 +510,7 @@ class ComputedEntry(Entry):
     @property
     def correction(self) -> float:
         """The total energy correction / adjustment applied to the entry in eV."""
-        # either sum of adjustments or ufloat with nan std_dev, so that no corrections still result in ufloat object:
-        corr = sum(ufloat(ea.value, ea.uncertainty) for ea in self.energy_adjustments if ea.value) or ufloat(
-            0.0, np.nan
-        )
-        return corr.nominal_value
+        return math.fsum(ea.value for ea in self.energy_adjustments)
 
     @correction.setter
     def correction(self, x: float) -> None:
@@ -530,16 +525,13 @@ class ComputedEntry(Entry):
     @property
     def correction_uncertainty(self) -> float:
         """The uncertainty of the energy adjustments applied to the entry in eV."""
-        # either sum of adjustments or ufloat with nan std_dev, so that no corrections still result in ufloat object:
-        unc = sum(
-            (ufloat(ea.value, ea.uncertainty) if not np.isnan(ea.uncertainty) and ea.value else ufloat(ea.value, 0))
-            for ea in self.energy_adjustments
-        ) or ufloat(0.0, np.nan)
-
-        if not math.isclose(unc.nominal_value, 0) and math.isclose(unc.std_dev, 0):
-            return np.nan
-
-        return unc.std_dev
+        # Quadrature sum of the (independent) adjustment uncertainties, skipping unknown (nan) ones and those of
+        # zero-valued adjustments:
+        quad_sum = math.hypot(
+            *(ea.uncertainty for ea in self.energy_adjustments if ea.value and not np.isnan(ea.uncertainty))
+        )
+        # A total of zero means no uncertainty information supplied, so return nan rather than implying exact certainty:
+        return quad_sum or np.nan
 
     @property
     def correction_uncertainty_per_atom(self) -> float:

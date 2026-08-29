@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import warnings
 from collections import defaultdict
 
+import numpy as np
 import pytest
 from pytest import approx
 
@@ -132,6 +134,17 @@ class TestComputedEntry:
         assert entry.correction_per_atom == approx(-4.5 / 15)
         assert entry.correction_uncertainty == approx(0.9)
         assert entry.correction_uncertainty_per_atom == approx(0.9 / 15)
+
+    def test_zero_uncertainty_adjustment_doesnt_warn(self):
+        """Adjustments with uncertainty=0 (e.g. the MP GGA(+U)/r2SCAN mixing adjustment attached to entries
+        from the Materials Project API) must not trigger "Using UFloat objects with std_dev==0" warnings.
+        """
+        entry = ComputedEntry("Fe6O9", 6.9, energy_adjustments=[ConstantEnergyAdjustment(-5, uncertainty=0)])
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message="Using UFloat objects")
+            assert entry.correction == approx(-5)
+            assert entry.energy == approx(1.9)
+            assert np.isnan(entry.correction_uncertainty)  # zero uncertainty still means "unknown"
 
     def test_normalize(self):
         entry = ComputedEntry("Fe6O9", 6.9, correction=1)
