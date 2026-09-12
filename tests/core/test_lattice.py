@@ -330,6 +330,26 @@ class TestLattice(MatSciTest):
         assert len(mapping) == 3
         assert lattice.find_mapping(l2, ltol=0.1) is not None
 
+    def test_find_mapping_prefers_proper_rotation(self):
+        """Regression for materialsproject/pymatgen#4457.
+
+        Site-packages pymatgen 2026.5.4 / pymatgen-core 2026.5.18: this
+        cell's self-map returned det(R)=-1 even though find_all_mappings
+        has 8 proper and 8 improper rotations. Data label
+        pymatgen_2026.5.4_lattice_self_map_det_minus_one. Not a materials
+        discovery.
+        """
+        cell = [
+            [4.643209998612975, 0.0, 0.0],
+            [-1.0215833248797727e-09, 4.643209998612975, 0.0],
+            [-2.3216049982849043, -2.3216049998172785, 5.2567259980108245],
+        ]
+        lattice = Lattice(cell)
+        mapped = lattice.find_mapping(lattice)
+        assert mapped is not None
+        _aligned, rotation, _scale = mapped
+        assert np.linalg.det(rotation) == approx(1.0, abs=1e-8)
+
     def test_as_from_dict(self):
         dct = self.tetragonal.as_dict()
         expected_keys = {"matrix", "@class", "pbc", "@module"}

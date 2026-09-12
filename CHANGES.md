@@ -3,6 +3,12 @@
 
 ## v2026.8.30
 
+- `Lattice.find_mapping` prefers a proper rotation (`det R > 0`) over a
+  reflection when both exist. The first length/angle match was sometimes
+  improper even on a self-map (8 proper + 8 improper maps on the
+  materialsproject/pymatgen#4457 cell). An improper map is still returned
+  when no proper map exists.
+
 - PR #134 **Breaking:** `PointGroupAnalyzer` no longer records the identity (a 360° rotation, valid about any axis) as a rotation axis in `_check_rot_sym`. Previously this phantom entry routed molecules whose only rotational symmetry is a single C2 perpendicular to the unique inertial axis (e.g. tetramethylhydrazine) into the dihedral branch, so `sch_symbol` reported `D2` while `get_symmetry_operations()` returned only 2 operations. Such molecules are now correctly reported as `C2`; the perpendicular-C2 search in `_proc_sym_top` now always runs. `get_symmetry_operations()` and `get_pointgroup()` are unaffected. (by @HiroYokoyama)
 - PR #94 **Breaking (deprecation):** `Orbital.dx2` is renamed to `Orbital.dx2_y2` (enum value `8` unchanged), fixing materialsproject/pymatgen#4588. Two-phase transition: until 2027-08-17, `Orbital.dx2` / `Orbital["dx2"]` still resolve with a `DeprecationWarning`, `CompleteDos.as_dict()` / `CompleteCohp.as_dict()` keep writing the legacy `dx2` key, and readers accept both `dx2` and `dx2_y2`; from 2027-08-17, `dx2_y2` is serialized and the legacy alias/read paths are removed. Existing serialized data needs no conversion. (by @DanielYang59)
 - PR #132 Fix `SpacegroupAnalyzer.get_point_group_symbol()` returning a lower-symmetry subgroup for (super)cells whose basis vectors are not aligned with the conventional axes (e.g. diamond in a rotated 3a₀ cube gave `-3m` instead of `m-3m`). spglib's `dataset.rotations` only contains operations expressible as integer matrices in the input basis; the method now returns spglib's basis-independent `dataset.pointgroup`, consistent with `get_space_group_symbol()`. (by @kavanase)
