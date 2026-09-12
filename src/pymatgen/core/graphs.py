@@ -1254,7 +1254,11 @@ class StructureGraph(MSONable):
                         # normalize direction
                         if new_v < new_u:
                             new_u, new_v = new_v, new_u
-                            new_to_jimage = tuple(np.multiply(-1, data["to_jimage"]).astype(int))
+                            # Flip the remapped supercell image, not the
+                            # pre-supercell to_jimage. Using data["to_jimage"]
+                            # here leftover-copies the original wrap onto the
+                            # interior layer (materialsproject/pymatgen#4293).
+                            new_to_jimage = tuple(np.multiply(-1, new_to_jimage).astype(int))
 
                         new_data["to_jimage"] = new_to_jimage
 

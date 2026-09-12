@@ -953,3 +953,71 @@ class TestMoleculeGraph:
             (2, 5, 0),
             (3, 5, 0),
         ]
+
+
+def test_mul_layer_supercell_no_interior_c_wrap():
+    """In4Se4 layer from materialsproject/pymatgen#4293.
+
+    After * (1, 1, 2) one copy sits inside the new cell. That interior
+    copy must not keep a leftover c-image from the original wrap.
+    Public issue coordinates; MinimumDistanceNN rebuilds the 14-edge graph.
+    Standalone so MatSciTest.setup_method is not required.
+    """
+    lattice = Lattice.from_parameters(12.0301, 4.2055, 9.236, 90, 110.5617, 90)
+    species = ["In", "In", "In", "In", "Se", "Se", "Se", "Se"]
+    frac = [
+        [0.8849, 0.0, 0.01095],
+        [0.6151, 0.5, 0.98905],
+        [0.3849, 0.5, 0.01095],
+        [0.1151, 0.0, 0.98905],
+        [0.8467, 0.5, 0.18095],
+        [0.6533, 0.0, 0.81905],
+        [0.3467, 0.0, 0.18095],
+        [0.1533, 0.5, 0.81905],
+    ]
+    struct = Structure(lattice, species, frac)
+    struct_graph = StructureGraph.from_local_env_strategy(struct, MinimumDistanceNN())
+    assert struct_graph.graph.number_of_edges() == 14
+    doubled = struct_graph * (1, 1, 2)
+    interior = [i for i, site in enumerate(doubled.structure) if 0.2 < (site.frac_coords[2] % 1) < 0.8]
+    assert interior == [1, 3, 5, 7, 8, 10, 12, 14]
+    leftover_c = [
+        (u, v, data["to_jimage"])
+        for u, v, data in doubled.graph.edges(data=True)
+        if u in interior and v in interior and data["to_jimage"][2] != 0
+    ]
+    assert leftover_c == []
+
+
+def test_mul_layer_supercell_no_interior_c_wrap():
+    """In4Se4 layer from materialsproject/pymatgen#4293.
+
+    After * (1, 1, 2) one copy sits inside the new cell. That interior
+    copy must not keep a leftover c-image from the original wrap.
+    Public issue coordinates; MinimumDistanceNN rebuilds the 14-edge graph.
+    Standalone so MatSciTest.setup_method is not required.
+    """
+    lattice = Lattice.from_parameters(12.0301, 4.2055, 9.236, 90, 110.5617, 90)
+    species = ["In", "In", "In", "In", "Se", "Se", "Se", "Se"]
+    frac = [
+        [0.8849, 0.0, 0.01095],
+        [0.6151, 0.5, 0.98905],
+        [0.3849, 0.5, 0.01095],
+        [0.1151, 0.0, 0.98905],
+        [0.8467, 0.5, 0.18095],
+        [0.6533, 0.0, 0.81905],
+        [0.3467, 0.0, 0.18095],
+        [0.1533, 0.5, 0.81905],
+    ]
+    struct = Structure(lattice, species, frac)
+    struct_graph = StructureGraph.from_local_env_strategy(struct, MinimumDistanceNN())
+    assert struct_graph.graph.number_of_edges() == 14
+    doubled = struct_graph * (1, 1, 2)
+    interior = [i for i, site in enumerate(doubled.structure) if 0.2 < (site.frac_coords[2] % 1) < 0.8]
+    assert interior == [1, 3, 5, 7, 8, 10, 12, 14]
+    leftover_c = [
+        (u, v, data["to_jimage"])
+        for u, v, data in doubled.graph.edges(data=True)
+        if u in interior and v in interior and data["to_jimage"][2] != 0
+    ]
+    assert leftover_c == []
