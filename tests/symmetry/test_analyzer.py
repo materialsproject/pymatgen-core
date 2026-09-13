@@ -895,6 +895,22 @@ class TestPointGroupAnalyzer(MatSciTest):
         assert len(pg_analyzer.get_pointgroup()) == 2
         assert all(order > 1 for _axis, order in pg_analyzer.rot_sym)
 
+    def test_c2v_when_c2_is_not_the_unique_inertia_axis(self):
+        """Planar C2v whose C2 is a principal axis but not the unique inertia axis.
+
+        After the identity-rotation floor (PR #134) this molecule is still Cs:
+        the unique inertia axis is y, the smallest off-axis shell is a singleton,
+        and `_check_perpendicular_r2_axis` therefore never tests the wing pair
+        that generates C2(z). Falling back to `_check_R2_axes_asym` only when
+        `rot_sym` is still empty finds that principal-axis C2.
+        See materialsproject/pymatgen#4596 (author-corrected 4-atom example).
+        """
+        mol = Molecule(["H"] * 4, [[0, 0, 1], [0, 0, 3], [3, 0, -2], [-3, 0, -2]])
+        for tol in (0.01, 0.1, 0.3):
+            pga = PointGroupAnalyzer(mol, tolerance=tol)
+            assert pga.sch_symbol == "C2v", tol
+            assert len(pga.get_pointgroup()) == 4
+
     def test_accidental_spherical_top_without_rotation_symmetry(self):
         """An isotropic inertia tensor with no rotational symmetry is C1, not an error."""
         mol = Molecule(
