@@ -30,7 +30,7 @@ except ImportError:
 
     class Atoms:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
-            pass
+            raise NO_ASE_ERR
 
 
 if TYPE_CHECKING:
@@ -137,6 +137,8 @@ class AseAtomsAdaptor:
         Returns:
             Atoms: ASE Atoms object
         """
+        if NO_ASE_ERR is not None:
+            raise NO_ASE_ERR
         if not structure.is_ordered:
             raise ValueError("ASE Atoms only supports ordered structures")
 

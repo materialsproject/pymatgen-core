@@ -4,6 +4,7 @@ import copy
 import re
 import warnings
 from glob import glob
+from pathlib import Path
 from shutil import which
 
 import networkx as nx
@@ -587,6 +588,21 @@ class TestMoleculeGraph:
             [6, 9],
             [6, 10],
         )
+
+    def test_bond_dissociation_reference_files_exist(self):
+        """The reference JSONs read by test_construction must exist.
+
+        test_construction is importorskip-gated on openbabel, which no CI
+        leg installs, so when these files were dropped in the repo split
+        (#141) nothing failed. This guard runs independently of openbabel
+        so the same class of split-artifact regression cannot recur
+        silently.
+        """
+        for name in ("pc_frag1_mg.json", "pc_mg.json"):
+            assert (Path(TEST_FILES_DIR) / "analysis/bond_dissociation" / name).is_file(), (
+                f"missing test reference file: analysis/bond_dissociation/{name} "
+                f"(needed by test_construction, which CI cannot run without openbabel)"
+            )
 
     def test_construction(self):
         pytest.importorskip("openbabel")

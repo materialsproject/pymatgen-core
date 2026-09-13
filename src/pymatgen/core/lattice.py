@@ -1024,11 +1024,23 @@ class Lattice(MSONable):
                 lattice, i.e., aligned_matrix = np.dot(scale_matrix, self.matrix)
 
                 None is returned if no matches are found.
+
+            When several maps exist, a proper rotation (``det R > 0``, or
+            ``det(scale) > 0`` if the rotation is skipped) is preferred over
+            a reflection. An improper map is returned only when no proper map
+            exists. See materialsproject/pymatgen#4457.
         """
-        return next(
-            self.find_all_mappings(other_lattice, ltol, atol, skip_rotation_matrix),
-            None,
-        )
+        first = None
+        for mapped in self.find_all_mappings(other_lattice, ltol, atol, skip_rotation_matrix):
+            if first is None:
+                first = mapped
+            _aligned, rotation_m, scale_m = mapped
+            if skip_rotation_matrix:
+                if np.linalg.det(scale_m) > 0:
+                    return mapped
+            elif rotation_m is not None and np.linalg.det(rotation_m) > 0:
+                return mapped
+        return first
 
     def get_lll_reduced_lattice(self, delta: float = 0.75) -> Self:
         """Lenstra-Lenstra-Lovasz lattice basis reduction.
