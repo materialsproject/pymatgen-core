@@ -3241,13 +3241,13 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
 
         dictdata = {k: getattr(dataset, k) for k in ("hall_number", "number", "site_symmetry_symbols", "wyckoffs")}
 
+        from pymatgen.symmetry.groups import SpaceGroup
+
         if backend == "spglib":
-            dictdata["international"] = dataset.international
+            dictdata["international"] = SpaceGroup.from_int_number(dataset.number).symbol
             dictdata["orbits"] = dataset.crystallographic_orbits
             dictdata["std_origin_shift"] = dataset.origin_shift
         else:
-            from pymatgen.symmetry.groups import SpaceGroup
-
             dictdata["international"] = SpaceGroup.from_int_number(dataset.number).symbol
             dictdata["orbits"] = dataset.orbits
             dictdata["std_origin_shift"] = dataset.std_origin_shift

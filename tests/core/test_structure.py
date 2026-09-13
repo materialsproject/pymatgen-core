@@ -1053,12 +1053,11 @@ Direct
         exercised for both backends, which requires moyopy to be installed
         and therefore only runs on CI legs that install the 'optional' extra.
 
-        Two fields are intentionally NOT compared here because the backends
-        use different conventions (see issue #139): "international" (short HM
-        symbol from spglib vs full HM symbol via SpaceGroup.from_int_number
-        on the moyopy path), "std_origin_shift" and "hall_number" (each
-        backend's own origin-choice convention for the standardized cell,
-        which also selects a different hall setting for 24 groups).
+        The public ``international`` field is canonicalized through
+        ``SpaceGroup`` for both backends. ``std_origin_shift`` and
+        ``hall_number`` remain intentionally backend-specific: each carries
+        the standardized-cell origin and setting rather than a shared
+        coordinate invariant.
         """
         if sg in (1, 2):
             lattice = Lattice([[3.02330573, 1, 0], [0, 7.98503578, 1], [0, 1.2, 8.11367622]])
@@ -1082,6 +1081,7 @@ Direct
         d_spg = struct.get_symmetry_dataset(backend="spglib")
 
         assert d_moyo["number"] == d_spg["number"] == sg
+        assert d_moyo["international"] == d_spg["international"]
         assert list(d_moyo["wyckoffs"]) == list(d_spg["wyckoffs"])
         assert list(d_moyo["site_symmetry_symbols"]) == list(d_spg["site_symmetry_symbols"])
         np.testing.assert_array_equal(d_moyo["orbits"], d_spg["orbits"])
