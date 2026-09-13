@@ -507,3 +507,27 @@ class TestComputedReaction:
             if coeff > 0:
                 assert entry.reduced_formula == "Li2O2"
                 assert entry.energy == approx(-959.64693323)
+
+    def test_normalize_to_refuses_numerical_leftover(self):
+        """H2O leftover ~1e-15 must not scale the reaction to 1e15.
+
+        Data label: pymatgen_current_ComputedReaction_normalize_to_H2O_LiCuS.
+        Reproduces materialsproject/pymatgen#3983 on pymatgen 2026.5.4:
+        ``12 LiCuS -> Cu + Cu7S4 + 4 Li3CuS2`` then
+        ``normalize_to(H2O)`` became ``1.8e15 LiCuS + ...`` with
+        energy ~4.57e11 eV. Software coefficient blow-up, not a
+        materials discovery.
+        """
+        entry_h2o = ComputedEntry(Composition("H2O"), -3.440)
+        entry_h2s = ComputedEntry(Composition("H2S"), -1.049)
+        entry_licus = ComputedEntry(Composition("LiCuS"), -2.592)
+        entry_cu = ComputedEntry(Composition("Cu"), 0.0)
+        entry_cu7s4 = ComputedEntry(Composition("Cu7S4"), -2.541)
+        entry_li3cus2 = ComputedEntry(Composition("Li3CuS2"), -7.14)
+        rxn = ComputedReaction([entry_h2o, entry_licus], [entry_h2s, entry_cu, entry_cu7s4, entry_li3cus2])
+        assert "LiCuS" in str(rxn)
+        with pytest.raises(ValueError, match="numerical leftover"):
+            rxn.normalize_to(entry_h2o.composition, 1.0)
+        # Balanced participants still normalize.
+        rxn.normalize_to(Composition("LiCuS"), 1.0)
+        assert max(abs(c) for c in rxn.coeffs) < 10

@@ -128,8 +128,27 @@ class BalancedReaction(MSONable):
         Args:
             comp (Composition): Composition to normalize to
             factor (float): Factor to normalize to. Defaults to 1.
+
+        Raises:
+            ValueError: If ``comp`` is absent from the balanced reaction
+                or its coefficient is below :attr:`TOLERANCE`. The
+                underdetermined balancer can leave a ~1e-15 leftover
+                (materialsproject/pymatgen#3983); dividing by that
+                leftover produced 1e15-scale coefficients.
         """
-        scale_factor = abs(1 / self._coeffs[self._all_comp.index(comp)] * factor)
+        try:
+            idx = self._all_comp.index(comp)
+        except ValueError as exc:
+            raise ValueError(f"{comp.reduced_formula} is not in the balanced reaction") from exc
+        coeff = self._coeffs[idx]
+        if abs(coeff) < self.TOLERANCE:
+            raise ValueError(
+                f"Cannot normalize to {comp.reduced_formula}: coefficient "
+                f"{coeff} is below tolerance {self.TOLERANCE}. The species "
+                "is a numerical leftover, not a participant. See "
+                "materialsproject/pymatgen#3983."
+            )
+        scale_factor = abs(factor / coeff)
         self._coeffs = [c * scale_factor for c in self._coeffs]
 
     def normalize_to_element(self, element: Species | Element, factor: float = 1) -> None:
