@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+
 import numpy as np
 import pytest
 from monty.json import MontyDecoder, jsanitize
@@ -411,3 +413,16 @@ def test_msonable_atoms():
     assert not hasattr(atoms, "as_dict")
     assert not hasattr(atoms, "from_dict")
     assert isinstance(atoms, ase.Atoms)
+
+
+def test_no_ase_err(monkeypatch):
+    """get_atoms must fail fast with an informative error when ASE is unavailable.
+
+    Uses monkeypatch on the module-level sentinel rather than reloading the module
+    with ase blocked, which previously leaked a stubbed pymatgen.io.ase into other tests.
+    """
+    import pymatgen.io.ase as pmg_ase
+
+    monkeypatch.setattr(pmg_ase, "NO_ASE_ERR", PackageNotFoundError("AseAtomsAdaptor requires the ASE package."))
+    with pytest.raises(PackageNotFoundError, match="AseAtomsAdaptor requires the ASE package"):
+        AseAtomsAdaptor.get_atoms(STRUCTURE)

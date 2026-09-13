@@ -7,6 +7,7 @@ import os
 import re
 import warnings
 from fractions import Fraction
+from importlib.util import find_spec
 from pathlib import Path
 from shutil import which
 from unittest import mock
@@ -48,6 +49,13 @@ except ImportError:
 
 ENUM_CMD = which("enum.x") or which("multienum.x")
 MCSQS_CMD = which("mcsqs")
+
+# moyopy is an optional dependency: decide once at collection time so the legs
+# without it skip the whole sweep rather than re-checking the import 230 times
+_HAS_MOYOPY = find_spec("moyopy") is not None
+_skip_no_moyopy = pytest.mark.skipif(
+    not _HAS_MOYOPY, reason="moyopy not installed (install with pip install pymatgen[symmetry])"
+)
 
 
 class TestNeighbor:
@@ -1034,6 +1042,49 @@ Direct
         # Test invalid backend
         with pytest.raises(ValueError, match="Invalid backend='42'"):
             self.struct.get_symmetry_dataset(backend="42")
+
+    @_skip_no_moyopy
+    @pytest.mark.parametrize("sg", range(1, 231))
+    def test_symmetry_dataset_backends_agree_on_semantics(self, sg):
+        """The moyopy and spglib backends must agree on symmetry semantics.
+
+        Sweeps every spacegroup so the dict-conversion path of
+        get_symmetry_dataset (the default, return_raw_dataset=False) is
+        exercised for both backends, which requires moyopy to be installed
+        and therefore only runs on CI legs that install the 'optional' extra.
+
+        Two fields are intentionally NOT compared here because the backends
+        use different conventions (see issue #139): "international" (short HM
+        symbol from spglib vs full HM symbol via SpaceGroup.from_int_number
+        on the moyopy path), "std_origin_shift" and "hall_number" (each
+        backend's own origin-choice convention for the standardized cell,
+        which also selects a different hall setting for 24 groups).
+        """
+        if sg in (1, 2):
+            lattice = Lattice([[3.02330573, 1, 0], [0, 7.98503578, 1], [0, 1.2, 8.11367622]])
+        elif sg < 16:
+            lattice = Lattice.monoclinic(2, 9, 1, 99)
+        elif sg < 75:
+            lattice = Lattice.orthorhombic(2, 9, 1)
+        elif sg < 143:
+            lattice = Lattice.tetragonal(2, 9)
+        elif sg < 168:
+            lattice = Lattice.hexagonal(2, 95)
+        elif sg < 195:
+            lattice = Lattice.hexagonal(2, 9)
+        else:
+            lattice = Lattice.cubic(2)
+
+        struct = Structure.from_spacegroup(
+            sg, lattice, ["K", "La", "Ti"], [[0.345, 5, 0.77298], [0.1345, 5.1, 0.77298], [0.7, 0.8, 0.9]]
+        )
+        d_moyo = struct.get_symmetry_dataset(backend="moyopy")
+        d_spg = struct.get_symmetry_dataset(backend="spglib")
+
+        assert d_moyo["number"] == d_spg["number"] == sg
+        assert list(d_moyo["wyckoffs"]) == list(d_spg["wyckoffs"])
+        assert list(d_moyo["site_symmetry_symbols"]) == list(d_spg["site_symmetry_symbols"])
+        np.testing.assert_array_equal(d_moyo["orbits"], d_spg["orbits"])
 
     def test_siteless_structure(self):
         """Test that a Structure without sites returns 2D coordinates."""
