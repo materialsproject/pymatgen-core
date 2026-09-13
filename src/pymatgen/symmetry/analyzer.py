@@ -1182,6 +1182,8 @@ class PointGroupAnalyzer:
         logger.debug(f"Rotation symmetries = {self.rot_sym}")
         # A perpendicular C2 can exist even when the unique axis carries none; that molecule is C2, not C1.
         self._check_perpendicular_r2_axis(unique_axis)
+        if not self.rot_sym:
+            self._check_R2_axes_asym()
 
         if len(self.rot_sym) >= 2:
             self._proc_dihedral()
