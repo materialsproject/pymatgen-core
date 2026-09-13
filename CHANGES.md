@@ -3,6 +3,12 @@
 
 ## v2026.8.30
 
+- `PointGroupAnalyzer._proc_sym_top` falls back to the existing principal-axis
+  R2 search when `rot_sym` is still empty after the unique-axis and
+  perpendicular-C2 checks. A planar C2v molecule whose C2 is not the unique
+  inertia axis (and whose smallest off-axis shell is a singleton) was reported
+  as Cs at every tolerance. Fixes materialsproject/pymatgen#4596.
+
 - `Lattice.find_mapping` prefers a proper rotation (`det R > 0`) over a
   reflection when both exist. The first length/angle match was sometimes
   improper even on a self-map (8 proper + 8 improper maps on the
