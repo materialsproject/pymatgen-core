@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import sys
-
 import pytest
 from pytest import approx
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.symmetry.kpath import KPathSeek
-from pymatgen.util.testing import MatSciTest
+from pymatgen.util.testing import MatSciTest, seekpath_unusable_reason
 
 seekpath = pytest.importorskip("seekpath", reason="seekpath not installed")
-if sys.platform.startswith("win") or not (sys.version_info <= (3, 13)):
-    pytest.skip("seekpath not supported on Windows or Python 3.13+", allow_module_level=True)
+
+_SEEKPATH_REASON = seekpath_unusable_reason()
+
+if _SEEKPATH_REASON:
+    pytest.skip(_SEEKPATH_REASON, allow_module_level=True)
 
 
 class TestKPathSeek(MatSciTest):

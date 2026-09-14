@@ -136,17 +136,27 @@ class TestHighSymmetryPoint(MatSciTest):
 
 def test_err_msg_on_seekpath_not_installed():
     """Simulate and test error message when seekpath is not installed."""
+    # monty's @requires captures `get_path is not None` as a bool at decoration time, so
+    # patching get_path afterwards cannot reproduce the RuntimeError — re-executing the
+    # module (with seekpath shadowed) is required. Capture get_path first: on legs without
+    # the optional extra it is already None, and the restore assert must allow that.
+    get_path_before = pymatgen.symmetry.kpath.get_path
+    try:
+        with patch.dict("sys.modules", {"seekpath": None}):
+            # Reload order matters: kpath's ImportError fallback runs during reload.
+            importlib.reload(pymatgen.symmetry.kpath)
+            importlib.reload(pymatgen.io.pwmat.inputs)
 
-    with patch.dict("sys.modules", {"seekpath": None}):
-        # As the import error is raised during init of KPathSeek,
-        # have to import it as well (order matters)
+            from pymatgen.io.pwmat.inputs import GenKpt
+
+            with pytest.raises(
+                RuntimeError,
+                match="SeeK-path needs to be installed to use the convention of Hinuma et al",
+            ):
+                GenKpt.from_structure(Structure.from_file(f"{TEST_DIR}/atom.config"), dim=2, density=0.01)
+    finally:
+        # Undo the poisoned module namespace left by the shadowed reload.
         importlib.reload(pymatgen.symmetry.kpath)
         importlib.reload(pymatgen.io.pwmat.inputs)
 
-        from pymatgen.io.pwmat.inputs import GenKpt
-
-        with pytest.raises(
-            RuntimeError,
-            match="SeeK-path needs to be installed to use the convention of Hinuma et al",
-        ):
-            GenKpt.from_structure(Structure.from_file(f"{TEST_DIR}/atom.config"), dim=2, density=0.01)
+    assert pymatgen.symmetry.kpath.get_path is get_path_before, "kpath.get_path was not restored"
