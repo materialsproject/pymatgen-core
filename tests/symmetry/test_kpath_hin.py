@@ -6,14 +6,11 @@ from pytest import approx
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.symmetry.kpath import KPathSeek
-from pymatgen.util.testing import MatSciTest, seekpath_unusable_reason
+from pymatgen.util.testing import MatSciTest
 
 seekpath = pytest.importorskip("seekpath", reason="seekpath not installed")
 
-_SEEKPATH_REASON = seekpath_unusable_reason()
-
-if _SEEKPATH_REASON:
-    pytest.skip(_SEEKPATH_REASON, allow_module_level=True)
+pytestmark = pytest.mark.usefixtures("seekpath_usable")
 
 
 class TestKPathSeek(MatSciTest):

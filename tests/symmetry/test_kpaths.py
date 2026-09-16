@@ -7,10 +7,7 @@ from monty.serialization import loadfn
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.symmetry.bandstructure import HighSymmKpath
-from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest, seekpath_unusable_reason
-
-_SEEKPATH_REASON = seekpath_unusable_reason()
-_skip_no_seekpath = pytest.mark.skipif(bool(_SEEKPATH_REASON), reason=_SEEKPATH_REASON or "")
+from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/electronic_structure/bandstructure"
 
@@ -49,7 +46,7 @@ class TestHighSymmKpath(MatSciTest):
         assert isinstance(kpath.conventional, Structure)
         assert isinstance(kpath.prim_rec, Lattice)
 
-    @_skip_no_seekpath
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_hinuma(self):
         struct = self.get_structure("Si")
         with pytest.warns(UserWarning, match="K-path from the Hinuma"):
@@ -57,7 +54,7 @@ class TestHighSymmKpath(MatSciTest):
         assert kpath.path_type == "hinuma"
         assert "kpoints" in kpath.kpath
 
-    @_skip_no_seekpath
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_all_combines_three(self):
         """`path_type='all'` populates label_index, equiv_labels, and path_lengths."""
         struct = self.get_structure("Si")
@@ -69,13 +66,13 @@ class TestHighSymmKpath(MatSciTest):
         # length list has one entry per convention
         assert len(kpath.path_lengths) == 3
 
-    @_skip_no_seekpath
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_all_rejects_magmoms(self):
         struct = self.get_structure("Si")
         with pytest.raises(ValueError, match="Cannot select 'all' with non-zero magmoms"):
             HighSymmKpath(struct, path_type="all", has_magmoms=True)
 
-    @_skip_no_seekpath
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_generation_across_lattices(self):
         triclinic = [1, 2]
         monoclinic = list(range(3, 16))

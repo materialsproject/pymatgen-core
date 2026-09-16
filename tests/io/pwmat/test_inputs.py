@@ -160,3 +160,9 @@ def test_err_msg_on_seekpath_not_installed():
         importlib.reload(pymatgen.io.pwmat.inputs)
 
     assert pymatgen.symmetry.kpath.get_path is get_path_before, "kpath.get_path was not restored"
+    # The inputs reload must have re-run after the kpath restore, rebinding its
+    # KPathSeek to the restored module's class — otherwise it stays bound to the
+    # class object created by the poisoned reload above.
+    assert pymatgen.io.pwmat.inputs.KPathSeek is pymatgen.symmetry.kpath.KPathSeek, (
+        "pwmat.inputs.KPathSeek was not restored"
+    )
