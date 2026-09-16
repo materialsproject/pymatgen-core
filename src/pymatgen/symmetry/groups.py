@@ -500,8 +500,11 @@ class SpaceGroup(SymmetryGroup):
         for o in self.symmetry_ops:
             pp = o.operate(p)
             pp = np.mod(np.round(pp, decimals=10), 1)
-            if not in_array_list(orbit, pp, tol=tol):
-                orbit.append(pp)
+            if orbit:
+                d = np.abs(np.asarray(orbit) - pp)
+                if np.any(np.sum(np.minimum(d, 1.0 - d), axis=-1) < tol):
+                    continue
+            orbit.append(pp)
         return orbit
 
     def get_orbit_and_generators(self, p: ArrayLike, tol: float = 1e-5) -> tuple[list[np.ndarray], list[SymmOp]]:
@@ -524,9 +527,12 @@ class SpaceGroup(SymmetryGroup):
         for o in self.symmetry_ops:
             pp = o.operate(p)
             pp = np.mod(np.round(pp, decimals=10), 1)
-            if not in_array_list(orbit, pp, tol=tol):
-                orbit.append(pp)
-                generators.append(o)
+            if orbit:
+                d = np.abs(np.asarray(orbit) - pp)
+                if np.any(np.sum(np.minimum(d, 1.0 - d), axis=-1) < tol):
+                    continue
+            orbit.append(pp)
+            generators.append(o)
         return orbit, generators
 
     def is_compatible(self, lattice: Lattice, tol: float = 1e-5, angle_tol: float = 5) -> bool:
