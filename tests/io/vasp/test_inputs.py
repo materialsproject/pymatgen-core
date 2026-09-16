@@ -1757,6 +1757,19 @@ class TestPotcarSingle:
         )
         assert repr(self.psingle_Mn_pv) == expected_repr
 
+    def test_parse_crlf_data(self):
+        """POTCAR text with CRLF line endings (e.g. read in binary mode on
+        Windows, or unpacked from an archive without newline normalization)
+        should parse to the same keywords and summary stats as the LF version.
+        Regression test: the body split used to hardcode a "\\n" delimiter and
+        raised IndexError on such data.
+        """
+        crlf_data = self.psingle_Mn_pv.data.replace("\n", "\r\n")
+        psingle_crlf = PotcarSingle(crlf_data)
+        assert psingle_crlf.is_valid
+        assert psingle_crlf.keywords == self.psingle_Mn_pv.keywords
+        assert psingle_crlf._summary_stats == self.psingle_Mn_pv._summary_stats
+
     def test_eq(self):
         assert self.psingle_Mn_pv == self.psingle_Mn_pv
         assert self.psingle_Fe == self.psingle_Fe

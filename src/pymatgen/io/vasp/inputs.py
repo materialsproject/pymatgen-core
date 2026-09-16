@@ -2326,7 +2326,10 @@ class PotcarSingle:
                 return input_str
 
         psp_keys, psp_vals = [], []
-        potcar_body = self.data.split("END of PSCTR-controll parameters\n")[1]
+        # Tolerate CRLF line endings: a hardcoded "\n" delimiter raises IndexError
+        # for POTCAR text that still carries \r\n, e.g. when the file was read in
+        # binary mode or its bytes were otherwise passed through unchanged.
+        potcar_body = re.split(r"END of PSCTR-controll parameters\r?\n", self.data)[1]
         for row in re.split(r"\n+|;", potcar_body):  # FORTRAN allows ; to delimit multiple lines merged into 1 line
             tmp_str = ""
             for raw_val in row.split():

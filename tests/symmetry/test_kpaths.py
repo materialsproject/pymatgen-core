@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-
 import numpy as np
 import pytest
 from monty.serialization import loadfn
@@ -9,30 +7,7 @@ from monty.serialization import loadfn
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.symmetry.bandstructure import HighSymmKpath
-from pymatgen.symmetry.kpath import KPathSeek
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
-
-
-def _seekpath_works() -> bool:
-    """Whether seekpath-based kpath generation is usable in this environment.
-
-    Skip on Windows and Python ≥ 3.13: seekpath imports but `get_path`
-    intermittently resolves to `None` at call time on those matrices
-    (`'NoneType' object is not callable`), matching the gate already in
-    `test_kpath_hin.py`. Otherwise probe end-to-end, since merely importing
-    seekpath is not sufficient.
-    """
-    if sys.platform.startswith("win") or not (sys.version_info <= (3, 13)):
-        return False
-    try:
-        struct = Structure(Lattice.cubic(3.0), ["Si", "Si"], [[0, 0, 0], [0.5, 0.5, 0.5]])
-        KPathSeek(struct)
-    except Exception:
-        return False
-    return True
-
-
-_HAS_SEEKPATH = _seekpath_works()
 
 TEST_DIR = f"{TEST_FILES_DIR}/electronic_structure/bandstructure"
 
@@ -71,7 +46,7 @@ class TestHighSymmKpath(MatSciTest):
         assert isinstance(kpath.conventional, Structure)
         assert isinstance(kpath.prim_rec, Lattice)
 
-    @pytest.mark.skipif(not _HAS_SEEKPATH, reason="seekpath not usable on this platform/Python")
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_hinuma(self):
         struct = self.get_structure("Si")
         with pytest.warns(UserWarning, match="K-path from the Hinuma"):
@@ -79,7 +54,7 @@ class TestHighSymmKpath(MatSciTest):
         assert kpath.path_type == "hinuma"
         assert "kpoints" in kpath.kpath
 
-    @pytest.mark.skipif(not _HAS_SEEKPATH, reason="seekpath not usable on this platform/Python")
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_all_combines_three(self):
         """`path_type='all'` populates label_index, equiv_labels, and path_lengths."""
         struct = self.get_structure("Si")
@@ -91,13 +66,13 @@ class TestHighSymmKpath(MatSciTest):
         # length list has one entry per convention
         assert len(kpath.path_lengths) == 3
 
-    @pytest.mark.skipif(not _HAS_SEEKPATH, reason="seekpath not usable on this platform/Python")
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_all_rejects_magmoms(self):
         struct = self.get_structure("Si")
         with pytest.raises(ValueError, match="Cannot select 'all' with non-zero magmoms"):
             HighSymmKpath(struct, path_type="all", has_magmoms=True)
 
-    @pytest.mark.skipif(not _HAS_SEEKPATH, reason="seekpath not usable on this platform/Python")
+    @pytest.mark.usefixtures("seekpath_usable")
     def test_kpath_generation_across_lattices(self):
         triclinic = [1, 2]
         monoclinic = list(range(3, 16))

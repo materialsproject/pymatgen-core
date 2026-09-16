@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-
 import pytest
 from pytest import approx
 
@@ -11,8 +9,8 @@ from pymatgen.symmetry.kpath import KPathSeek
 from pymatgen.util.testing import MatSciTest
 
 seekpath = pytest.importorskip("seekpath", reason="seekpath not installed")
-if sys.platform.startswith("win") or not (sys.version_info <= (3, 13)):
-    pytest.skip("seekpath not supported on Windows or Python 3.13+", allow_module_level=True)
+
+pytestmark = pytest.mark.usefixtures("seekpath_usable")
 
 
 class TestKPathSeek(MatSciTest):
