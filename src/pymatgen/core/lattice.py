@@ -1167,8 +1167,9 @@ class Lattice(MSONable):
         matrix = self.lll_matrix
         e = tol * self.volume ** (1 / 3)
 
-        # Define metric tensor
-        G = np.dot(matrix, matrix.T)
+        # Define metric tensor. The explicit annotation stops pyright from hanging
+        # on loop type inference against numpy>=2.5 stubs.
+        G: np.ndarray = np.dot(matrix, matrix.T)
 
         # This sets an upper limit on the number of iterations.
         for _ in range(100):
