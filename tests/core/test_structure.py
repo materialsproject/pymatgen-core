@@ -903,6 +903,27 @@ Direct
             )
             assert norm < 1e-3
 
+    def test_get_all_neighbors_at_cutoff(self):
+        # Neighbors lying exactly at r (to within float rounding) must be found
+        # consistently by all implementations. See pymatgen#4708.
+        lattice_param = 3.905
+        struct = Structure(
+            Lattice.cubic(lattice_param),
+            ["Sr", "Ti", "O", "O", "O"],
+            [[0, 0, 0], [0.5, 0.5, 0.5], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+        )
+        with pytest.warns(FutureWarning, match="get_all_neighbors_old is deprecated"):
+            nn_old = struct.get_all_neighbors_old(lattice_param, include_index=True, include_image=True)
+        nn_py = struct.get_all_neighbors_py(lattice_param)
+        nn_cy = struct.get_all_neighbors(lattice_param)
+        expected = [26, 20, 20, 20, 20]
+        assert [len(nns) for nns in nn_old] == expected
+        assert [len(nns) for nns in nn_py] == expected
+        assert [len(nns) for nns in nn_cy] == expected
+        ti_images = [nn for nn in nn_cy[1] if nn.index == 1]
+        assert len(ti_images) == 6
+        assert all(nn.nn_distance == pytest.approx(lattice_param) for nn in ti_images)
+
     def test_get_dist_matrix(self):
         assert_allclose(self.struct.distance_matrix, [[0.0, 2.3516318], [2.3516318, 0.0]])
 
