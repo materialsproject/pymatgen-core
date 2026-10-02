@@ -340,7 +340,7 @@ class GrainBoundaryGenerator:
                 For fcc and bcc, using conventional cell can lead to a non-primitive
                 grain boundary structure.
                 This code supplies Cubic, Tetragonal, Orthorhombic, Rhombohedral, and
-                Hexagonal systems.
+                Hexagonal systems; triclinic and monoclinic structures raise a ValueError.
             symprec (float): Tolerance for symmetry finding. Defaults to 0.1 (the value used
                 in Materials Project), which is for structures with slight deviations
                 from their proper atomic positions (e.g., structures relaxed with
@@ -351,7 +351,15 @@ class GrainBoundaryGenerator:
             angle_tolerance (float): Angle tolerance for symmetry finding.
         """
         analyzer = SpacegroupAnalyzer(initial_structure, symprec, angle_tolerance)
-        self.lat_type = analyzer.get_lattice_type()[0]
+        lattice_type = analyzer.get_lattice_type()
+        # Map explicitly rather than taking the first letter, which would read "triclinic" as tetragonal ("t").
+        lat_types = {"cubic": "c", "tetragonal": "t", "orthorhombic": "o", "hexagonal": "h", "rhombohedral": "r"}
+        if lattice_type not in lat_types:
+            raise ValueError(
+                f"GrainBoundaryGenerator supports cubic, tetragonal, orthorhombic, hexagonal and rhombohedral "
+                f"lattices, but the structure is {lattice_type}."
+            )
+        self.lat_type = lat_types[lattice_type]
 
         # Use the conventional cell for tetragonal
         if self.lat_type == "t":
@@ -1260,7 +1268,12 @@ class GrainBoundaryGenerator:
             r_matrix = (np.array(r_list) / com_fac / sigma).reshape(3, 3)
 
         if sigma > 1000:
-            raise RuntimeError("Sigma >1000 too large. Are you sure what you are doing, Please check the GB if exist")
+            raise RuntimeError(
+                f"Sigma {round(sigma)} > 1000 for a rotation of {angle} degrees about {list(r_axis)}. If this is not "
+                "the intended grain boundary, the rotation angle is probably not precise enough: a rounded angle "
+                "gives a spurious, very large sigma. Use the exact angle from get_rotation_angle_from_sigma or the "
+                "enum_sigma_* methods."
+            )
         # Transform surface, r_axis, r_matrix in terms of primitive lattice
         surface = np.matmul(surface, np.transpose(trans_cry))
         if surface is None:
@@ -2072,8 +2085,8 @@ class GrainBoundaryGenerator:
         else:
             sigmas.sort()
             warnings.warn(
-                "This is not the possible sigma value according to the rotation axis!"
-                "The nearest neighbor sigma and its corresponding angle are returned",
+                f"Sigma {sigma} is not possible for rotation axis {list(r_axis)}. Returning the rotation angles of "
+                f"sigma {sigmas[-1]}, the largest possible sigma below it (possible values: {sigmas}).",
                 stacklevel=2,
             )
             rotation_angles = sigma_dict[sigmas[-1]]

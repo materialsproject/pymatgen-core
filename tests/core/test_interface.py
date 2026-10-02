@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 
 from pymatgen.core.interface import GrainBoundary, GrainBoundaryGenerator, Interface
+from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.core.surface import SlabGenerator
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -328,8 +329,27 @@ class TestGrainBoundaryGenerator(MatSciTest):
         angle = GrainBoundaryGenerator.get_rotation_angle_from_sigma(41, [1, 0, 0], lat_type="o", ratio=[270, 30, 29])
         assert_allclose(true_angle, angle)
         close_angle = [36.86989764584403, 143.13010235415598]
-        angle = GrainBoundaryGenerator.get_rotation_angle_from_sigma(6, [1, 0, 0], lat_type="o", ratio=[270, 30, 29])
+        with pytest.warns(UserWarning, match=r"Sigma 6 is not possible .* Returning the rotation angles of sigma 5"):
+            angle = GrainBoundaryGenerator.get_rotation_angle_from_sigma(
+                6, [1, 0, 0], lat_type="o", ratio=[270, 30, 29]
+            )
         assert_allclose(close_angle, angle)
+
+    @pytest.mark.parametrize(
+        ("angles", "lattice_type"),
+        [((81, 86, 97), "triclinic"), ((90, 101, 90), "monoclinic")],
+    )
+    def test_init_rejects_unsupported_lattices(self, angles, lattice_type):
+        # The lattice type used to be the first letter of get_lattice_type(), so triclinic was treated as tetragonal.
+        structure = Structure(Lattice.from_parameters(3.1, 4.3, 5.2, *angles), ["Si"], [[0, 0, 0]])
+        with pytest.raises(ValueError, match=f"but the structure is {lattice_type}"):
+            GrainBoundaryGenerator(structure)
+
+    def test_imprecise_rotation_angle_error(self):
+        exact = GrainBoundaryGenerator.get_rotation_angle_from_sigma(3, [1, 1, 0])[1]
+        assert self.GB_Cu_prim.gb_from_parameters([1, 1, 0], exact, plane=[1, 1, 2]).sigma == 3
+        with pytest.raises(RuntimeError, match="rotation angle is probably not precise enough"):
+            self.GB_Cu_prim.gb_from_parameters([1, 1, 0], round(exact, 2), plane=[1, 1, 2])
 
     def test_vec_to_surface_negative_components(self):
         assert GrainBoundaryGenerator.vec_to_surface([-100, 3, 2]) == (-100, 3, 2)
