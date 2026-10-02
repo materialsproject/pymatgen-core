@@ -481,6 +481,22 @@ class TestGaussianOutput:
         assert len(transitions) == 4
         assert transitions[0] == approx((3.9281, 315.64, 0.0054))
 
+    def test_td_numeric(self, tmp_path):
+        with open(f"{TEST_DIR}/so2_td.log", encoding="utf-8") as file:
+            content = file.read()
+
+        # Change label to a numeric one.
+        content = content.replace('Singlet-A"', "2.316-A", 1)
+
+        log_path = tmp_path / "so2_td_numeric.log"
+        log_path.write_text(content, encoding="utf-8")
+
+        gau = GaussianOutput(str(log_path))
+        transitions = gau.read_excitation_energies()
+
+        assert len(transitions) == 4
+        assert transitions[0] == approx((3.9281, 315.64, 0.0054))
+
     def test_multiple_parameters(self):
         """Check that input files with multi-parameter keywords
         and route cards with multiple lines can be parsed accurately.
