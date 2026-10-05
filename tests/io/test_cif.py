@@ -1018,6 +1018,21 @@ Si1 Si 0 0 0 1 0.0
         assert "Fe  Fe0  1  0.21872822  0.75000000  0.47486711  1  1.0" in cif_str
         assert "O  O23  1  0.95662769  0.25000000  0.29286233  1  -1.0" in cif_str
 
+    def test_cif_thirds(self):
+        """Test cif sanitization idealizing sites at 1/3 and 2/3 with PBC."""
+        # Initialize 21 hydrogen sites at [0, 1/3, 2/3] + PBC
+        thirds = np.linspace(-10, 10 + 2 / 3, 63, dtype=np.float64).reshape((21, 3))
+        elements = [Composition({Element("H"): 1 / 21})] * 21
+
+        thirds_struct = Structure(Lattice.cubic(1), elements, thirds)
+
+        # Generate a cif with all sites
+        file = CifWriter(thirds_struct, significant_figures=4, refine_struct=False).cif_file
+
+        # Read the cif: Correct: All sites merge via PBC. Incorrect: Two sites (one at 0.333, one at 1/3).
+        parsed = CifParser.from_str(str(file), frac_tolerance=0.0001, occupancy_tolerance=1 + 1e-10).parse_structures()
+        assert np.allclose(parsed[0].frac_coords, np.array([[0, 1 / 3, 2 / 3]]))
+
 
 class TestMagCif(MatSciTest):
     def setup_method(self):

@@ -601,22 +601,24 @@ class CifParser:
             for final_key, interim_key in changes_to_make.items():
                 data.data[final_key] = data.data[interim_key]
 
-        # Check for finite precision coordinates (e.g. 0.6667 instead of 0.6666666...),
+        # Check for finite precision coordinates close to fractional thirds (e. g. 0.667),
         # which can cause issues when applying symmetry operations.
-        important_fracs = (1 / 3, 2 / 3)
-        fracs_to_change = {}
+        fracs_to_change: dict[tuple[str, int], str] = {}
         for label in ("_atom_site_fract_x", "_atom_site_fract_y", "_atom_site_fract_z"):
-            if label in data.data:
-                for idx, frac in enumerate(data.data[label]):
-                    try:
-                        frac = str2float(frac)
-                    except Exception:
-                        # Coordinate might not be defined, e.g. '?'
-                        continue
+            if label not in data.data:
+                continue
+            for idx, value in enumerate(data.data[label]):
+                try:
+                    frac = str2float(value)
+                except ValueError:
+                    # Coordinate might not be defined, e.g. '?'
+                    continue
 
-                    for comparison_frac in important_fracs:
-                        if math.isclose(frac / comparison_frac, 1, abs_tol=self._frac_tolerance, rel_tol=0):
-                            fracs_to_change[label, idx] = str(comparison_frac)
+                thirds_index = round(3 * frac)
+                if thirds_index % 3:
+                    closest_third = thirds_index / 3
+                    if math.isclose(frac, closest_third, abs_tol=self._frac_tolerance, rel_tol=0):
+                        fracs_to_change[label, idx] = str(closest_third)
 
         if fracs_to_change:
             self.warnings.append(
@@ -1545,20 +1547,23 @@ class CifParser:
         return failure_reason
 
 
-def str2float(text: str) -> float:
+def str2float(text: str | list[str]) -> float:
     """Remove uncertainty brackets from strings and return the float."""
     try:
         # Note that the ending ) is sometimes missing. That is why the code has
         # been modified to treat it as optional. Same logic applies to lists.
-        return float(re.sub(r"\(.+\)*", "", text))
+        return float(re.sub(r"\(.+\)*", "", cast("str", text)))
 
     except TypeError:
         if isinstance(text, list) and len(text) == 1:
-            return float(re.sub(r"\(.+\)*", "", text[0]))
+            try:
+                return float(re.sub(r"\(.+\)*", "", text[0]))
+            except TypeError:
+                pass
 
     except ValueError:
         if text.strip() == ".":
-            return 0
+            return 0.0
         raise
     raise ValueError(f"{text!s} cannot be converted to float")
 
