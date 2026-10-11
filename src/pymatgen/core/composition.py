@@ -310,7 +310,9 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             return NotImplemented
 
         new_el_map: dict[SpeciesLike, float] = defaultdict(float)
-        new_el_map.update(self)
+        # update from items(), not the mapping: self[key] sums every key that shares
+        # an element symbol (e.g. H and D, or Fe and Fe3+)
+        new_el_map.update(self.items())
         for key, val in other.items():
             new_el_map[get_el_sp(key)] += val
         return type(self)(new_el_map, allow_negative=self.allow_negative)
@@ -328,7 +330,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             return NotImplemented
 
         new_el_map: dict[SpeciesLike, float] = defaultdict(float)
-        new_el_map.update(self)
+        new_el_map.update(self.items())
         for key, val in other.items():
             new_el_map[get_el_sp(key)] -= val
         return type(self)(new_el_map, allow_negative=self.allow_negative)
@@ -339,14 +341,14 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """
         if not isinstance(other, int | float):
             return NotImplemented
-        return type(self)({el: self[el] * other for el in self}, allow_negative=self.allow_negative)
+        return type(self)({el: amt * other for el, amt in self.items()}, allow_negative=self.allow_negative)
 
     __rmul__ = __mul__
 
     def __truediv__(self, other: object) -> Self:
         if not isinstance(other, int | float):
             return NotImplemented
-        return type(self)({el: self[el] / other for el in self}, allow_negative=self.allow_negative)
+        return type(self)({el: amt / other for el, amt in self.items()}, allow_negative=self.allow_negative)
 
     __div__ = __truediv__
 
@@ -615,8 +617,17 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         Returns:
             float: Weight fraction for element el in Composition.
         """
-        el_mass = get_el_sp(el).atomic_mass
-        return float(el_mass * abs(self[el]) / self.weight)
+        sp = get_el_sp(el)
+        if isinstance(sp, Species):
+            return float(sp.atomic_mass * abs(self._data.get(sp, 0)) / self.weight)
+        # an Element matches every key with the same symbol (as in __getitem__), so weigh
+        # each key by its own mass: D and H share a symbol but not a mass
+        symbol = getattr(sp, "symbol", sp)
+        el_weight = 0.0
+        for key, amt in self.items():
+            if getattr(key, "symbol", key) == symbol:
+                el_weight += float(key.atomic_mass * abs(amt))
+        return float(el_weight / self.weight)
 
     def contains_element_type(self, category: str) -> bool:
         """Check if Composition contains any elements matching a given category.
@@ -796,7 +807,11 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
 
     def as_weight_dict(self) -> dict[str, float]:
         """Get a dict of element symbols mapped to weight fractions, e.g. {"Ti": 0.90, "V": 0.06, "Al": 0.04}."""
-        return {str(el): self.get_wt_fraction(el) for el in self.elements}
+        weight = self.weight
+        dct: dict[str, float] = defaultdict(float)
+        for el, amt in self.items():
+            dct[str(el)] += float(el.atomic_mass * abs(amt) / weight)
+        return dict(dct)
 
     @property
     @deprecated(as_weight_dict, deadline=(2026, 4, 4))
