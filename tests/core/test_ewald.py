@@ -5,6 +5,7 @@ import pytest
 from pytest import approx
 
 from pymatgen.core.ewald import EwaldMinimizer, EwaldSummation
+from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.util.testing import VASP_IN_DIR
 
@@ -76,6 +77,18 @@ class TestEwaldSummation:
         assert dct["real_space_cut"] == ham._rmax
         assert dct["recip_space_cut"] == ham._gmax
         assert ham.as_dict() == EwaldSummation.from_dict(dct).as_dict()
+
+    def test_non_3d_periodic_lattice(self):
+        # The Ewald sum is 3D periodic: pbc flags must not truncate the real-space sum,
+        # otherwise the total energy depends on eta (materialsproject/pymatgen#4718)
+        species, coords = ["Na+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]]
+        ref = EwaldSummation(Structure(Lattice.cubic(4), species, coords)).total_energy
+        for pbc in [(True, True, False), (False, False, False)]:
+            struct = Structure(Lattice.cubic(4, pbc=pbc), species, coords)
+            for eta in (None, 0.05, 1.0):
+                with pytest.warns(UserWarning, match="EwaldSummation assumes 3D periodicity"):
+                    ewald = EwaldSummation(struct, eta=eta)
+                assert ewald.total_energy == approx(ref, abs=1e-4)
 
 
 class TestEwaldMinimizer:

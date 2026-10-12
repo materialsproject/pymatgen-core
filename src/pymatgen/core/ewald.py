@@ -14,6 +14,7 @@ from monty.json import MSONable
 from scipy.special import comb, erfc
 
 from pymatgen.core import constants
+from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.util.due import Doi, due
 
@@ -73,7 +74,9 @@ class EwaldSummation(MSONable):
         Args:
             structure (Structure): Input structure that must have proper
                 Species on all sites, i.e. Element with oxidation state. Use
-                Structure.add_oxidation_state... for example.
+                Structure.add_oxidation_state... for example. The Ewald sum
+                is 3D periodic: lattice pbc flags are ignored (with a warning)
+                and the structure is always treated as fully periodic.
             real_space_cut (float): Real space cutoff radius dictating how
                 many terms are used in the real space sum. Defaults to None,
                 which means determine automatically using the formula given
@@ -95,6 +98,12 @@ class EwaldSummation(MSONable):
             compute_forces (bool): Whether to compute forces. False by
                 default since it is usually not needed.
         """
+        if not structure.lattice.is_3d_periodic:
+            warnings.warn(
+                f"EwaldSummation assumes 3D periodicity; lattice pbc={structure.lattice.pbc} is ignored "
+                "and the structure is treated as fully periodic.",
+                stacklevel=2,
+            )
         self._struct = structure
         self._charged = abs(structure.charge) > 1e-8
         self._vol = structure.volume
@@ -352,7 +361,10 @@ class EwaldSummation(MSONable):
         Determine the self energy -(eta/pi)**(1/2) * sum_{i=1}^{N} q_i**2.
         Vectorized real + point space computation.
         """
-        lat = self._struct.lattice
+        # The reciprocal-space sum is always 3D periodic, so the real-space sum must include
+        # images along every axis as well, whatever the lattice pbc flags say. Otherwise the
+        # two halves describe different systems and the total depends on eta.
+        lat = Lattice(self._struct.lattice.matrix)
         frac_coords = self._struct.frac_coords
         coords = self._coords
 
