@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from pytest import approx
 
+from pymatgen.core import Lattice, Species
 from pymatgen.core.ewald import EwaldMinimizer, EwaldSummation
-from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.util.testing import VASP_IN_DIR
 
@@ -84,6 +84,21 @@ class TestEwaldSummation:
         struct = Structure(Lattice.cubic(4, pbc=pbc), ["Na+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]])
         with pytest.raises(ValueError, match="EwaldSummation requires a 3D periodic lattice"):
             EwaldSummation(struct)
+
+    def test_charged_cell_with_site_charges(self):
+        # materialsproject/pymatgen#4719: the neutralizing-background correction must also apply
+        # when charges are given via the "charge" site property rather than oxidation states.
+        lattice = Lattice.cubic(4)
+        coords = [[0, 0, 0], [0.5, 0.5, 0.5]]
+        site_charged = Structure(lattice, ["Na", "Cl"], coords, site_properties={"charge": [1.0, 0.0]})
+        oxi_charged = Structure(lattice, [Species("Na", 1), Species("Cl", 0)], coords)
+        # Simple-cubic point-charge lattice in a neutralizing background (Madelung const. 2.837297)
+        expected = -2.837297 / 2 * EwaldSummation.CONV_FACT / 4
+        for eta in (0.22, 1.0, 2.2):
+            e_site = EwaldSummation(site_charged, eta=eta).total_energy
+            e_oxi = EwaldSummation(oxi_charged, eta=eta).total_energy
+            assert e_site == approx(e_oxi, abs=1e-4)
+            assert e_site == approx(expected, abs=1e-3)
 
 
 class TestEwaldMinimizer:
