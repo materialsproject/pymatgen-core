@@ -48,7 +48,9 @@ class TestEwaldSummation:
                 charges.append(-2)
 
         self.original_struct.add_site_property("charge", charges)
-        ham2 = EwaldSummation(self.original_struct)
+        # Structure.charge does not count the "charge" site property, so it disagrees with the site charges
+        with pytest.warns(UserWarning, match="inconsistent with structure.charge"):
+            ham2 = EwaldSummation(self.original_struct)
         assert ham2.real_space_energy == approx(-502.23549897772602, abs=1e-4)
 
     def test_from_dict(self):
@@ -95,10 +97,24 @@ class TestEwaldSummation:
         # Simple-cubic point-charge lattice in a neutralizing background (Madelung const. 2.837297)
         expected = -2.837297 / 2 * EwaldSummation.CONV_FACT / 4
         for eta in (0.22, 1.0, 2.2):
-            e_site = EwaldSummation(site_charged, eta=eta).total_energy
+            # Structure.charge ignores the "charge" site property, so it reports 0 here
+            with pytest.warns(UserWarning, match="inconsistent with structure.charge"):
+                e_site = EwaldSummation(site_charged, eta=eta).total_energy
             e_oxi = EwaldSummation(oxi_charged, eta=eta).total_energy
             assert e_site == approx(e_oxi, abs=1e-4)
             assert e_site == approx(expected, abs=1e-3)
+
+    def test_charge_mismatch_warning(self):
+        coords = [[0, 0, 0], [0.5, 0.5, 0.5]]
+        struct = Structure(Lattice.cubic(4), [Species("Na", 1), Species("Cl", -1)], coords, charge=1)
+        neutral = Structure(Lattice.cubic(4), [Species("Na", 1), Species("Cl", -1)], coords)
+        with (
+            pytest.warns(UserWarning, match="Structure charge"),
+            pytest.warns(UserWarning, match="inconsistent with structure.charge"),
+        ):
+            ewald = EwaldSummation(struct)
+        # The site charges sum to zero, so no charged-cell correction is applied
+        assert ewald.total_energy == approx(EwaldSummation(neutral).total_energy)
 
 
 class TestEwaldMinimizer:

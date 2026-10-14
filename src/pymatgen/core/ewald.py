@@ -121,10 +121,18 @@ class EwaldSummation(MSONable):
         # Ewald summation is rather expensive, and these shortcuts are
         # necessary to obtain several factors of improvement in speedup.
         self._oxi_states = [compute_average_oxidation_state(site) for site in structure]
-        # Net cell charge from the same per-site charges used in the sums. Structure.charge only
-        # counts oxidation states, so it misses charges supplied via the "charge" site property.
+        # Net cell charge from the same per-site charges used in the sums. The neutralizing background
+        # must cancel these, so they take precedence over Structure.charge, which only counts oxidation
+        # states (or an explicitly set charge) and misses charges supplied via the "charge" site property.
         self._total_charge = float(sum(self._oxi_states))
         self._charged = abs(self._total_charge) > 1e-8
+        struct_charge = structure.charge
+        if abs(self._total_charge - struct_charge) > 1e-8:
+            warnings.warn(
+                f"Sum of site charges ({self._total_charge}) is inconsistent with structure.charge "
+                f"({struct_charge}). The charged-cell correction uses the sum of site charges.",
+                stacklevel=2,
+            )
 
         self._coords = np.array(self._struct.cart_coords)
 
