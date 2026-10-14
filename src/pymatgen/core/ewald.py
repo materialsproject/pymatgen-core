@@ -126,7 +126,12 @@ class EwaldSummation(MSONable):
         # states (or an explicitly set charge) and misses charges supplied via the "charge" site property.
         self._total_charge = float(sum(self._oxi_states))
         self._charged = abs(self._total_charge) > 1e-8
-        struct_charge = structure.charge
+        # Only check consistency when the structure itself defines a charge, i.e. an explicitly set
+        # charge or oxidation states. Charges supplied purely via the "charge" site property are not
+        # counted by Structure.charge, so a mismatch there is expected and not worth a warning.
+        has_explicit_charge = getattr(structure, "_charge", None) is not None
+        has_oxi_states = any(getattr(sp, "oxi_state", None) is not None for sp in structure.types_of_species)
+        struct_charge = structure.charge if has_explicit_charge or has_oxi_states else self._total_charge
         if abs(self._total_charge - struct_charge) > 1e-8:
             warnings.warn(
                 f"Sum of site charges ({self._total_charge}) is inconsistent with structure.charge "

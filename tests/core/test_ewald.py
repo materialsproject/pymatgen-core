@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 from pytest import approx
@@ -48,9 +50,7 @@ class TestEwaldSummation:
                 charges.append(-2)
 
         self.original_struct.add_site_property("charge", charges)
-        # Structure.charge does not count the "charge" site property, so it disagrees with the site charges
-        with pytest.warns(UserWarning, match="inconsistent with structure.charge"):
-            ham2 = EwaldSummation(self.original_struct)
+        ham2 = EwaldSummation(self.original_struct)
         assert ham2.real_space_energy == approx(-502.23549897772602, abs=1e-4)
 
     def test_from_dict(self):
@@ -97,8 +97,9 @@ class TestEwaldSummation:
         # Simple-cubic point-charge lattice in a neutralizing background (Madelung const. 2.837297)
         expected = -2.837297 / 2 * EwaldSummation.CONV_FACT / 4
         for eta in (0.22, 1.0, 2.2):
-            # Structure.charge ignores the "charge" site property, so it reports 0 here
-            with pytest.warns(UserWarning, match="inconsistent with structure.charge"):
+            # Charges given only via the "charge" site property are not checked against Structure.charge
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
                 e_site = EwaldSummation(site_charged, eta=eta).total_energy
             e_oxi = EwaldSummation(oxi_charged, eta=eta).total_energy
             assert e_site == approx(e_oxi, abs=1e-4)
