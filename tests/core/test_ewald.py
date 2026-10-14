@@ -78,17 +78,12 @@ class TestEwaldSummation:
         assert dct["recip_space_cut"] == ham._gmax
         assert ham.as_dict() == EwaldSummation.from_dict(dct).as_dict()
 
-    def test_non_3d_periodic_lattice(self):
-        # The Ewald sum is 3D periodic: pbc flags must not truncate the real-space sum,
-        # otherwise the total energy depends on eta (materialsproject/pymatgen#4718)
-        species, coords = ["Na+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]]
-        ref = EwaldSummation(Structure(Lattice.cubic(4), species, coords)).total_energy
-        for pbc in [(True, True, False), (False, False, False)]:
-            struct = Structure(Lattice.cubic(4, pbc=pbc), species, coords)
-            for eta in (None, 0.05, 1.0):
-                with pytest.warns(UserWarning, match="EwaldSummation assumes 3D periodicity"):
-                    ewald = EwaldSummation(struct, eta=eta)
-                assert ewald.total_energy == approx(ref, abs=1e-4)
+    @pytest.mark.parametrize("pbc", [(True, True, False), (False, False, False)])
+    def test_non_3d_periodic_lattice(self, pbc):
+        # The Ewald sum is only defined for 3D periodic systems (materialsproject/pymatgen#4718)
+        struct = Structure(Lattice.cubic(4, pbc=pbc), ["Na+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        with pytest.raises(ValueError, match="EwaldSummation requires a 3D periodic lattice"):
+            EwaldSummation(struct)
 
 
 class TestEwaldMinimizer:
