@@ -883,6 +883,25 @@ class TestComposition(MatSciTest):
         assert comp.get_wt_fraction(Species("Fe", 3)) == approx(weights["Fe3+"])
         assert comp.get_wt_fraction("Fe") + comp.get_wt_fraction("O") == approx(1)
 
+        # "D" parses to Element("D"), whose symbol is "H", so like hdo["D"] it covers
+        # every key with that symbol: the combined H + D fraction
+        assert hdo.get_wt_fraction("D") == approx((h_mass + d_mass) / hdo.weight)
+        assert hdo.get_wt_fraction("D") == hdo.get_wt_fraction("H")
+
+    def test_comparisons_with_keys_sharing_a_symbol(self):
+        hd = Composition({Element("H"): 1, Element("D"): 1})
+        h2 = Composition({Element("H"): 2})
+        assert not hd.almost_equals(h2)
+        assert not h2.almost_equals(hd)
+        assert hd.almost_equals(Composition({Element("H"): 1, Element("D"): 1}))
+
+        comp = Composition({Element("Fe"): 1, Species("Fe", 3): 2, Species("O", -2): 4})
+        assert comp.almost_equals(comp.copy())
+        assert not comp.almost_equals(Composition({Element("Fe"): 3, Species("O", -2): 4}))
+
+        # __ge__ reads each key's own amount, so H D and H2 no longer tie (both ways >=)
+        assert (h2 >= hd) != (hd >= h2)
+
     def test_isotopes(self):
         composition = Composition({"D": 2, "O": 1})
         assert "Deuterium" in [elem.long_name for elem in composition.elements]

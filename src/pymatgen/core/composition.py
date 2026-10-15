@@ -295,10 +295,12 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         if not isinstance(other, type(self)):
             return NotImplemented
 
+        # read each key's own amount: self[el] sums every key sharing a symbol
         for el in sorted(set(self.elements + other.elements)):
-            if other[el] - self[el] >= type(self).amount_tolerance:
+            self_amt, other_amt = self._data.get(el, 0), other._data.get(el, 0)
+            if other_amt - self_amt >= type(self).amount_tolerance:
                 return False
-            if self[el] - other[el] >= type(self).amount_tolerance:
+            if self_amt - other_amt >= type(self).amount_tolerance:
                 return True
         return True
 
@@ -330,7 +332,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             return NotImplemented
 
         new_el_map: dict[SpeciesLike, float] = defaultdict(float)
-        new_el_map.update(self.items())
+        new_el_map.update(self.items())  # items(), not the mapping: see __add__
         for key, val in other.items():
             new_el_map[get_el_sp(key)] -= val
         return type(self)(new_el_map, allow_negative=self.allow_negative)
@@ -391,10 +393,12 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             rtol (float): Relative tolerance
             atol (float): Absolute tolerance
         """
+        # compare key by key: self[sp] sums every key sharing a symbol, which would
+        # make H + D look like H2
         sps = set(self.elements + other.elements)
         for sp in sps:
-            a = self[sp]
-            b = other[sp]
+            a = self._data.get(sp, 0)
+            b = other._data.get(sp, 0)
             tol = atol + rtol * (abs(a) + abs(b)) / 2
             if abs(b - a) > tol:
                 return False
@@ -626,7 +630,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         el_weight = 0.0
         for key, amt in self.items():
             if getattr(key, "symbol", key) == symbol:
-                el_weight += float(key.atomic_mass * abs(amt))
+                el_weight += key.atomic_mass * abs(amt)
         return float(el_weight / self.weight)
 
     def contains_element_type(self, category: str) -> bool:
@@ -806,7 +810,13 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         return self.as_reduced_dict()
 
     def as_weight_dict(self) -> dict[str, float]:
-        """Get a dict of element symbols mapped to weight fractions, e.g. {"Ti": 0.90, "V": 0.06, "Al": 0.04}."""
+        """Get a dict of element symbols mapped to weight fractions, e.g. {"Ti": 0.90, "V": 0.06, "Al": 0.04}.
+
+        Keys are str(el), so keys sharing an element symbol collapse onto one entry: for
+        an isotope such as D (whose symbol is "H") the "H" entry holds the combined H + D
+        fraction. As a result,
+        Composition.from_weight_dict() does not round-trip such compositions.
+        """
         weight = self.weight
         dct: dict[str, float] = defaultdict(float)
         for el, amt in self.items():
