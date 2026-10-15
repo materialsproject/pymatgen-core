@@ -1194,6 +1194,8 @@ class GaussianOutput:
         """
         transitions = []
 
+        transition_pattern = re.compile(r"(\S+)\s+eV\s+(\S+)\s+nm\s+f\s*=\s*(\S+)")
+
         # read in file
         with zopen(self.filename, mode="rt", encoding="utf-8") as file:
             line = file.readline()
@@ -1203,8 +1205,10 @@ class GaussianOutput:
                     td = True
 
                 if td and re.search(r"^\sExcited State\s*\d", line):
-                    val = [float(v) for v in float_patt.findall(line)]
-                    transitions.append(tuple(val[:3]))
+                    match = transition_pattern.search(line)
+                    if match is None:
+                        raise ValueError(f"Could not parse line: {line.strip()}")
+                    transitions.append(tuple(float(value) for value in match.groups()))
                 line = file.readline()
         return transitions
 
