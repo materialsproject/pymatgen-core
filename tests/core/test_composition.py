@@ -700,6 +700,87 @@ class TestComposition(MatSciTest):
         with pytest.raises(ValueError, match="Composition V2 O3 cannot accommodate max_sites setting"):
             Composition("V2O3").oxi_state_guesses(max_sites=1)
 
+    def test_oxi_state_guesses_target_charge_survives_max_sites_reduction(self):
+        # https://github.com/materialsproject/pymatgen-core/issues/153
+        # Oxidation states are per site, so reducing the composition for speed must not change the
+        # charge the guess balances: target_charge totals the composition that was asked about.
+        for formula, target_charge, override, positive_max_sites, expected in (
+            ("Fe2O4", -2, None, 3, {"Fe": 3, "O": -2}),
+            ("V2O6", -2, {"V": [2, 3, 4, 5]}, 4, {"V": 5, "O": -2}),
+        ):
+            comp = Composition(formula)
+            unreduced = comp.oxi_state_guesses(target_charge=target_charge, oxi_states_override=override)
+            assert unreduced[0] == expected
+
+            # -1 reduces fully; the positive value reduces because the composition is larger than it
+            for max_sites in (-1, positive_max_sites):
+                guesses = comp.oxi_state_guesses(
+                    max_sites=max_sites,
+                    target_charge=target_charge,
+                    oxi_states_override=override,
+                )
+                assert guesses == unreduced
+                assert sum(comp[element] * state for element, state in guesses[0].items()) == target_charge
+
+        # Fe36O48 (84 atoms) with target_charge=-4: Fe3O4 would need charge -1/3 and Fe12O16
+        # would need -4/3, but Fe9O12 (21 atoms) has charge exactly -1, so use that.
+        fe36o48 = Composition("Fe36O48")
+        fe9o12_guesses = Composition("Fe9O12").oxi_state_guesses(target_charge=-1)
+        assert fe9o12_guesses != ()
+        for max_sites in (-1, -21, 21, 28):
+            assert fe36o48.oxi_state_guesses(max_sites=max_sites, target_charge=-4) == fe9o12_guesses
+
+        # With 70 sites, the largest formula that fits is Fe27O36 (63 atoms), charge -3
+        fe27o36_guesses = Composition("Fe27O36").oxi_state_guesses(target_charge=-3)
+        assert fe36o48.oxi_state_guesses(max_sites=70, target_charge=-4) == fe27o36_guesses
+
+        # Problem 2: Fe9O12 does not fit in 20 sites, so raise instead of searching all 84 atoms
+        for max_sites in (20, -20):
+            with pytest.raises(ValueError, match="The smallest composition that works is Fe9 O12"):
+                fe36o48.oxi_state_guesses(max_sites=max_sites, target_charge=-4)
+
+        # Problem 1: Fe2O4 with target_charge=-1 cannot shrink at all (FeO2 would need -1/2),
+        # so a 3-site limit must raise, and max_sites=-1 searches Fe2O4 itself.
+        fe2o4 = Composition("Fe2O4")
+        override = {"Fe": [2, 3, 4], "O": [-2]}
+        guesses = fe2o4.oxi_state_guesses(max_sites=-1, target_charge=-1, oxi_states_override=override)
+        assert guesses[0]["Fe"] == 3.5
+        for max_sites in (3, -3):
+            with pytest.raises(ValueError, match="The smallest composition that works is Fe2 O4"):
+                fe2o4.oxi_state_guesses(max_sites=max_sites, target_charge=-1, oxi_states_override=override)
+
+    def test_oxi_state_guesses_target_charge_exact_under_inexact_reduction_ratio(self):
+        # A positive max_sites searches `reduced_comp * max(1, int(max_sites / reduced_atoms))`,
+        # so the scaling ratio is reduced_factor / k and is generally not a power of two.
+        # Dividing by it in floating point can leave an integer-valued target a few ULP off,
+        # and the balance comparison is an exact `==`, which silently dropped valid solutions.
+        # Fe27O36 reduces by 9 to Fe3O4; max_sites=49 searches Fe21O28, a 63/49 = 9/7 ratio,
+        # so target_charge=-9 scales to exactly -7. Only this one k failed: 7 * -7/9 == -9.
+        comp = Composition("Fe27O36")
+        unreduced = comp.oxi_state_guesses(target_charge=-9)
+        assert unreduced != ()
+
+        for max_sites in (7, 14, 21, 28, 35, 42, 49, 56, 63):
+            assert comp.oxi_state_guesses(max_sites=max_sites, target_charge=-9) == unreduced
+
+        # and the answer really does balance the composition that was asked about
+        assert sum(comp[el] * state for el, state in unreduced[0].items()) == pytest.approx(-9)
+
+    def test_oxi_state_guesses_float_override_and_float_target(self):
+        # Float entries in oxi_states_override produce float oxid_sums; equality against
+        # scaled_target_charge must still find the intended balance when exact.
+        guesses = Composition("Fe2O3").oxi_state_guesses(
+            oxi_states_override={"Fe": [2.5, 3.0], "O": [-2.0]},
+        )
+        # Two Fe can only sum to 6.0 (3.0 + 3.0) to balance three O at -2.0.
+        assert guesses[0] == {"Fe": 3.0, "O": -2.0}
+        # With target_charge=-1 the Fe sum must be 5.0 (2.5 + 2.5).
+        charged = Composition("Fe2O3").oxi_state_guesses(
+            oxi_states_override={"Fe": [2.5, 3.0], "O": [-2.0]},
+            target_charge=-1,
+        )
+        assert charged[0] == {"Fe": 2.5, "O": -2.0}
+
     def test_oxi_state_decoration(self):
         # Basic test: Get compositions where each element is in a single charge state
         decorated = Composition("H2O").add_charges_from_oxi_state_guesses()

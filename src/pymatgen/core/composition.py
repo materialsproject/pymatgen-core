@@ -902,7 +902,11 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 will be raised. Set to -1 to just reduce fully. If set to a
                 number less than -1, the formula will be fully reduced but a
                 ValueError will be thrown if the number of atoms in the reduced
-                formula is greater than abs(max_sites).
+                formula is greater than abs(max_sites). With a nonzero
+                target_charge, the formula is only shrunk while its charge stays
+                a whole number (Fe36O48 with target_charge=-4 shrinks to Fe9O12
+                with charge -1, not Fe3O4 with charge -1/3). The limits above
+                still apply.
 
         Returns:
             list[dict]: each dict reports an element symbol and average
@@ -997,7 +1001,11 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 will be raised. Set to -1 to just reduce fully. If set to a
                 number less than -1, the formula will be fully reduced but a
                 ValueError will be thrown if the number of atoms in the reduced
-                formula is greater than abs(max_sites).
+                formula is greater than abs(max_sites). With a nonzero
+                target_charge, the formula is only shrunk while its charge stays
+                a whole number (Fe36O48 with target_charge=-4 shrinks to Fe9O12
+                with charge -1, not Fe3O4 with charge -1/3). The limits above
+                still apply.
 
         Returns:
             Composition, where the elements are assigned oxidation states based
@@ -1058,7 +1066,11 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 will be raised. Set to -1 to just reduce fully. If set to a
                 number less than -1, the formula will be fully reduced but a
                 ValueError will be thrown if the number of atoms in the reduced
-                formula is greater than abs(max_sites).
+                formula is greater than abs(max_sites). With a nonzero
+                target_charge, the formula is only shrunk while its charge stays
+                a whole number (Fe36O48 with target_charge=-4 shrinks to Fe9O12
+                with charge -1, not Fe3O4 with charge -1/3). The limits above
+                still apply.
 
         Returns:
             list[dict]: Each dict maps the element symbol to a list of
@@ -1081,6 +1093,28 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 comp = reduced_comp  # as close to max_sites as possible
             if comp.num_atoms > max_sites:
                 raise ValueError(f"Composition {comp} cannot accommodate max_sites setting!")
+
+        # target_charge refers to self, so restate it on the composition searched. Multiplying
+        # first keeps an integer result exact for the == check below.
+        scaled_target_charge = target_charge * comp.num_atoms / self.num_atoms
+        if max_sites and comp != self and scaled_target_charge != round(scaled_target_charge):
+            # Only shrink as far as the charge stays a whole number. k copies of the reduced
+            # formula carry a whole-number charge when k is a multiple of step.
+            reduced_comp, factor = self.get_reduced_composition_and_factor()
+            if float(target_charge).is_integer() and float(factor).is_integer():
+                step = int(factor) // math.gcd(int(factor), int(target_charge))
+                k = step
+                if max_sites > 0:  # as many copies as fit in max_sites
+                    k = max(1, int(max_sites / (step * reduced_comp.num_atoms))) * step
+                comp = reduced_comp * k
+            else:
+                comp = self.copy()
+            if max_sites != -1 and comp.num_atoms > abs(max_sites):
+                raise ValueError(
+                    f"Composition {self} cannot be reduced to {abs(max_sites)} sites or fewer with "
+                    f"target_charge={target_charge}. The smallest composition that works is {comp}."
+                )
+            scaled_target_charge = target_charge * comp.num_atoms / self.num_atoms
 
         # Load prior probabilities of oxidation states, used to rank solutions
         if type(self).oxi_prob is None:
@@ -1133,7 +1167,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         all_scores = []  # will contain a score for each solution
         for x in product(*el_sums):
             # Each x is a trial of one possible oxidation sum for each element
-            if sum(x) == target_charge:  # charge balance condition
+            if sum(x) == scaled_target_charge:  # charge balance condition
                 el_sum_sol = dict(zip(elements, x, strict=True))  # element->oxid_sum
                 # Normalize oxid_sum by amount to get avg oxid state
                 sol = {el: v / el_amt[el] for el, v in el_sum_sol.items()}

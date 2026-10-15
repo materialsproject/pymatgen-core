@@ -1505,6 +1505,28 @@ class TestStructure(MatSciTest):
         for site in struct:
             assert site.specie in expected
 
+    def test_add_oxidation_state_by_guess_respects_target_charge_under_max_sites(self):
+        # Structure.add_oxidation_state_by_guess forwards kwargs to Composition.oxi_state_guesses.
+        # A non-integral scaled target must fall back to the unreduced composition rather
+        # than decorate from an empty guess.
+        lattice = Lattice.cubic(5)
+        species = ["Fe", "Fe", "O", "O", "O", "O"]
+        coords = [
+            [0, 0, 0],
+            [0.5, 0.5, 0.5],
+            [0.25, 0.25, 0.25],
+            [0.75, 0.75, 0.25],
+            [0.25, 0.75, 0.75],
+            [0.75, 0.25, 0.75],
+        ]
+        struct = Structure(lattice, species, coords)
+        override = {"Fe": [2, 3, 4], "O": [-2]}
+        unreduced = struct.composition.oxi_state_guesses(target_charge=-1, oxi_states_override=override)
+        assert unreduced != ()
+        struct.add_oxidation_state_by_guess(max_sites=-1, target_charge=-1, oxi_states_override=override)
+        total = sum(float(site.specie.oxi_state) for site in struct)
+        assert total == pytest.approx(-1)
+
     def test_add_remove_spin_states(self):
         lattice = Lattice.cubic(4.17)
         species = ["Ni", "O"]
