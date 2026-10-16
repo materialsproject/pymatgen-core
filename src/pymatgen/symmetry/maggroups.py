@@ -14,7 +14,7 @@ from monty.design_patterns import cached_class
 
 from pymatgen.core.operations import MagSymmOp
 from pymatgen.electronic_structure.core import Magmom
-from pymatgen.symmetry.groups import SymmetryGroup, in_array_list
+from pymatgen.symmetry.groups import SymmetryGroup, in_fractional_array_list
 from pymatgen.symmetry.settings import JonesFaithfulTransformation
 from pymatgen.util.string import transformation_to_string
 
@@ -377,11 +377,14 @@ class MagneticSpaceGroup(SymmetryGroup):
         orbit: list[np.ndarray] = []
         orbit_magmoms = []
         magmom = Magmom(magmom)
-        for sym_op in self.symmetry_ops:
+        symm_ops = self.symmetry_ops
+        found = np.empty((len(symm_ops), 3))
+        for sym_op in symm_ops:
             pp = sym_op.operate(p)
             pp = np.mod(np.round(pp, decimals=10), 1)
             mm = sym_op.operate_magmom(magmom)
-            if not in_array_list(orbit, pp, tol=tol):
+            if not in_fractional_array_list(found[: len(orbit)], pp, tol=tol):
+                found[len(orbit)] = pp
                 orbit.append(pp)
                 orbit_magmoms.append(mm)
         return orbit, orbit_magmoms

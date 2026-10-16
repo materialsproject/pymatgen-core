@@ -9,7 +9,8 @@ from pytest import approx
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.operations import SymmOp
-from pymatgen.symmetry.groups import SYMM_DATA, PointGroup, SpaceGroup
+from pymatgen.core.structure import Structure
+from pymatgen.symmetry.groups import SYMM_DATA, PointGroup, SpaceGroup, in_fractional_array_list
 
 __author__ = "Shyue Ping Ong"
 __copyright__ = "Copyright 2012, The Materialyze Lab"
@@ -164,6 +165,43 @@ class TestSpaceGroup:
         assert rand_percent[0] == approx(pp[0])
         assert rand_percent[1] == approx(pp[1])
         assert rand_percent[2] == approx(pp[2])
+
+    def test_get_orbit_identifies_lattice_images(self):
+        # Regression test: wrapped coordinates at z ~ 0 and z ~ 1 are the
+        # same fractional-torus point and must not both enter the orbit.
+        sg = SpaceGroup("Fm-3m")
+        point = [0.0, 0.5, 0.999999]
+        for orbit in (sg.get_orbit(point), sg.get_orbit_and_generators(point)[0]):
+            images = [q for q in orbit if abs(q[0]) < 1e-8 and abs(q[1] - 0.5) < 1e-8]
+            assert len(images) == 1
+
+    def test_get_orbit_exact_match(self):
+        # tol=0 keeps meaning exact matching: duplicates are still removed.
+        sg = SpaceGroup("Fm-3m")
+        assert len(sg.get_orbit([0, 0, 0], tol=0)) == 4
+        assert len(sg.get_orbit([0.1, 0.2, 0.3], tol=0)) == 96
+
+    def test_in_fractional_array_list(self):
+        points = np.array([[0.0, 0.0, 0.0], [0.5, 0.25, 0.75]])
+        assert in_fractional_array_list(points, np.array([0.999999, 0.0, 0.0]))
+        assert in_fractional_array_list(points, np.array([1.0, 1.0, 1.0]))  # not wrapped
+        assert in_fractional_array_list(points, np.array([0.5, 0.25, 0.75]), tol=0)
+        assert not in_fractional_array_list(points, np.array([0.999999, 0.0, 0.0]), tol=0)
+        assert not in_fractional_array_list(points, np.array([0.4, 0.0, 0.0]))
+        assert not in_fractional_array_list(points[:0], np.array([0.0, 0.0, 0.0]))
+
+    def test_from_spacegroup_collapses_opposite_cell_faces(self):
+        # materialsproject/pymatgen#3721: the Ge pair at opposite ends of
+        # the cell must collapse to three atoms at tol=0.01.
+        lattice = Lattice.from_parameters(4.98502, 4.98502, 5.648, 90.0, 90.0, 120.0)
+        species = ("Ge", "O")
+        coords = ((0.4513, 0.0, 0.6667), (0.3969, 0.3021, 0.12))
+        struct = Structure.from_spacegroup(154, lattice, species, coords, tol=0.01)
+        assert len([site for site in struct if site.specie.symbol == "Ge"]) == 3
+        assert len(struct) == 9
+        # The default tolerance keeps the finer split: 6 Ge sites.
+        default_tol = Structure.from_spacegroup(154, lattice, species, coords)
+        assert len([site for site in default_tol if site.specie.symbol == "Ge"]) == 6
 
     def test_is_compatible(self):
         cubic = Lattice.cubic(1)

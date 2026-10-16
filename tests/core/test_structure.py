@@ -1994,7 +1994,9 @@ class TestStructure(MatSciTest):
             [0.666667, 0.333333, 0.535243],
         ]
         struct_tas2 = Structure.from_spacegroup(160, lattice, species, coords)
-        assert len(struct_tas2) == 13
+        # 9, not 13: the extra 4 sites were lattice images at z ~= 0/1 that
+        # the orbit search counted twice before minimum-image comparison.
+        assert len(struct_tas2) == 9
         struct_tas2.merge_sites(mode="delete")
         assert len(struct_tas2) == 9
 
@@ -2007,7 +2009,8 @@ class TestStructure(MatSciTest):
             [0.666667, 0.333333, 0.597273],
         ]
         struct_navs2 = Structure.from_spacegroup(160, lattice, species, coords)
-        assert len(struct_navs2) == 18
+        # Same lattice-image correction as above: 12 directly, no merge needed.
+        assert len(struct_navs2) == 12
         struct_navs2.merge_sites(mode="delete")
         assert len(struct_navs2) == 12
 
