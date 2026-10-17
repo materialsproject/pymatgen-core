@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import re
+from io import StringIO
 from itertools import combinations
 from numbers import Number
 from unittest.mock import patch
@@ -10,11 +11,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import pytest
+from matplotlib.colors import Normalize, same_color
 from monty.json import MontyDecoder
 from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.analysis import phase_diagram
 from pymatgen.analysis.phase_diagram import (
     CompoundPhaseDiagram,
     GrandPotentialPhaseDiagram,
@@ -25,12 +28,16 @@ from pymatgen.analysis.phase_diagram import (
     PhaseDiagram,
     ReactionDiagram,
     TransformedPDEntry,
+    TransformedPDEntryError,
+    order_phase_diagram,
     tet_coord,
     triangular_coord,
     uniquelines,
 )
 from pymatgen.core import Composition, DummySpecies, Element
-from pymatgen.core.entries import ComputedEntry, EntrySet
+from pymatgen.core.entries import ComputedEntry, ConstantEnergyAdjustment, EntrySet
+from pymatgen.util.coord import Simplex
+from pymatgen.util.string import htmlify
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/analysis"
@@ -1400,3 +1407,488 @@ class TestUtilityFunction:
         coord = [0.5, 0.5, 0.5]
         coord = tet_coord(coord)
         assert_allclose(coord, [1.0, 0.57735027, 0.40824829])
+
+    @pytest.mark.parametrize(
+        "ordering",
+        [
+            ["O", "Li", "Fe"],
+            ["O", "Fe", "Li"],
+            ["Li", "Fe", "O"],
+            ["Li", "O", "Fe"],
+            ["Fe", "O", "Li"],
+            ["Fe", "Li", "O"],
+        ],
+    )
+    def test_order_phase_diagram(self, ordering):
+        entries = EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv")
+        lines, stable, unstable = PDPlotter(PhaseDiagram(entries), backend="matplotlib").pd_plot_data
+        new_lines, new_stable, new_unstable = order_phase_diagram(lines, stable, unstable, ordering)
+        assert len(new_lines) == len(lines)
+        assert len(new_stable) == len(stable)
+        assert set(new_unstable) == set(unstable)
+        # The requested Up/Left/Right element now sits on the corresponding triangle vertex
+        targets = {ordering[0]: (0.5, np.sqrt(3) / 2), ordering[1]: (0, 0), ordering[2]: (1, 0)}
+        for coord, entry in new_stable.items():
+            if entry.name in targets:
+                assert_allclose(coord, targets[entry.name], atol=1e-8)
+        # Rotations and reflections are isometries; pairwise distances are preserved
+        stable_entries = list(stable.values())
+        old_coords = {entry: np.array(c) for c, entry in stable.items()}
+        new_coords = {entry: np.array(c) for c, entry in new_stable.items()}
+        for e1, e2 in combinations(stable_entries[:5], 2):
+            assert np.linalg.norm(new_coords[e1] - new_coords[e2]) == approx(
+                np.linalg.norm(old_coords[e1] - old_coords[e2])
+            )
+
+    def test_order_phase_diagram_invalid(self):
+        entries = EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv")
+        lines, stable, unstable = PDPlotter(PhaseDiagram(entries), backend="matplotlib").pd_plot_data
+        with pytest.raises(ValueError, match="should be in ordering"):
+            order_phase_diagram(lines, stable, unstable, ["Up", "Left", "Right"])
+
+
+class TestPhaseDiagramEdgeCases:
+    def setup_method(self):
+        self.entries = EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv")
+        self.pd = PhaseDiagram(self.entries)
+
+    def test_computed_data_type_error(self):
+        with pytest.raises(TypeError, match="computed_data should be dict, got list"):
+            PhaseDiagram(self.entries, computed_data=[1, 2])
+
+    def test_extra_terminal_elements(self):
+        with pytest.raises(ValueError, match=r"more terminal elements than dimensions: \['Fe'\]"):
+            PhaseDiagram(self.entries, elements=[Element("Li"), Element("O")])
+
+    def test_from_dict_old_top_level_all_entries(self):
+        dct = {
+            "elements": [el.symbol for el in self.pd.elements],
+            "all_entries": [entry.as_dict() for entry in self.pd.all_entries],
+        }
+        pd = PhaseDiagram.from_dict(dct)
+        assert {e.composition.reduced_formula for e in pd.stable_entries} == {
+            e.composition.reduced_formula for e in self.pd.stable_entries
+        }
+
+    def test_from_dict_legacy_fallback(self):
+        dct = self.pd.as_dict()
+        # Legacy format: elements as MSON dicts and el_refs as (Element dict, Entry dict) pairs
+        dct["elements"] = [el.as_dict() for el in self.pd.elements]
+        dct["computed_data"]["el_refs"] = [(el.as_dict(), entry.as_dict()) for el, entry in self.pd.el_refs.items()]
+        with pytest.warns(FutureWarning, match="Deprecated on 2025-02-03"):
+            pd = PhaseDiagram.from_dict(dct)
+        assert len(pd.stable_entries) == len(self.pd.stable_entries)
+        for el, ref in self.pd.el_refs.items():
+            assert pd.el_refs[el].energy_per_atom == approx(ref.energy_per_atom)
+        li2o = Composition("Li2O")
+        assert pd.get_hull_energy_per_atom(li2o) == approx(self.pd.get_hull_energy_per_atom(li2o))
+
+    def test_get_reference_energy_per_atom(self):
+        comp = Composition("Li2O")
+        el_refs = self.pd.el_refs
+        expected = (2 * el_refs[Element("Li")].energy_per_atom + el_refs[Element("O")].energy_per_atom) / 3
+        assert self.pd.get_reference_energy_per_atom(comp) == approx(expected)
+        assert self.pd.get_reference_energy_per_atom(comp) == approx(-2.694769293888889)
+
+    def test_no_facet_found(self):
+        # Simulate a composition that lies in no simplex (e.g. due to numerical issues)
+        comp = Composition("Li2O")
+        assert len(self.pd._get_all_facets_and_simplexes(comp)) >= 1
+        with patch.object(Simplex, "in_simplex", return_value=False):
+            with pytest.raises(RuntimeError, match="No facet found for comp"):
+                self.pd._get_facet_and_simplex(comp)
+            with pytest.raises(RuntimeError, match="No facets found for comp"):
+                self.pd._get_all_facets_and_simplexes(comp)
+
+    def test_get_decomp_and_e_above_hull_warn_on_missing_element(self):
+        with pytest.warns(UserWarning, match="Unable to get decomposition for PDEntry : U1"):
+            assert self.pd.get_decomp_and_e_above_hull(PDEntry("U", 0), on_error="warn") == (None, None)
+
+    def test_get_equilibrium_reaction_energy_unstable_raises(self):
+        unstable = next(e for e in self.pd.unstable_entries if not e.is_element)
+        with pytest.raises(ValueError, match="is unstable, the equilibrium reaction energy is available only"):
+            self.pd.get_equilibrium_reaction_energy(unstable)
+
+    def test_phase_separation_slsqp_fallback(self):
+        entry = next(e for e in self.pd.stable_entries if not e.is_element)
+        expected = self.pd.get_phase_separation_energy(entry, space_limit=10_000)
+
+        real = phase_diagram._get_slsqp_decomp
+        calls = []
+
+        def flaky(comp, competing, tols, maxiter):
+            calls.append(len(competing))
+            if len(calls) == 1:
+                raise ValueError("infeasible reduced system")
+            return real(comp, competing, tols, maxiter)
+
+        with (
+            patch.object(phase_diagram, "_get_slsqp_decomp", side_effect=flaky),
+            pytest.warns(UserWarning, match="Calculating inner hull"),
+        ):
+            result = self.pd.get_phase_separation_energy(entry, space_limit=1)
+        assert len(calls) == 2
+        # The retry uses the full (larger) set of competing entries
+        assert calls[1] >= calls[0]
+        assert result == approx(expected, abs=1e-5)
+
+        # Without inner hull reduction, the ValueError propagates
+        with (
+            patch.object(phase_diagram, "_get_slsqp_decomp", side_effect=ValueError("boom")),
+            pytest.raises(ValueError, match="boom"),
+        ):
+            self.pd.get_phase_separation_energy(entry, space_limit=10_000)
+
+    def test_get_slsqp_decomp_no_valid_decomp(self):
+        # Competing entries contain no Li or O, so the molar constraint cannot be satisfied.
+        competing = [PDEntry("Fe", -1), PDEntry("Fe2", -3)]
+        with pytest.raises(ValueError, match="No valid decomp found for"):
+            phase_diagram._get_slsqp_decomp(Composition("Li2O"), competing)
+
+    def test_chempot_methods_invalid_element(self):
+        with pytest.raises(ValueError, match="get_transition_chempots can only be called with elements"):
+            self.pd.get_transition_chempots(Element("U"))
+        with pytest.raises(ValueError, match="get_transition_chempots can only be called with elements"):
+            self.pd.get_element_profile(Element("U"), Composition("Li2O"))
+
+    def test_get_chempot_range_map_unreferenced(self):
+        elems = [Element("Li"), Element("O")]
+        ref = self.pd.get_chempot_range_map(elems)
+        unref = self.pd.get_chempot_range_map(elems, referenced=False)
+        assert {e.name for e in ref} == {e.name for e in unref}
+        offset = np.array([self.pd.el_refs[el].energy_per_atom for el in elems])
+        for entry, simplices in ref.items():
+            for s_ref, s_unref in zip(simplices, unref[entry], strict=True):
+                assert_allclose(s_unref.coords, s_ref.coords + offset, atol=1e-8)
+
+    def test_getmu_vertices_and_range_missing_element(self):
+        # Li2O has no Fe, which exercises the zero-amount padding branch
+        li2o = Composition("Li2O")
+        li, o = Element("Li"), Element("O")
+        vertices = self.pd.getmu_vertices_stability_phase(li2o, o)
+        assert len(vertices) >= 2
+        li2o_entry = next(e for e in self.pd.stable_entries if e.reduced_formula == "Li2O")
+        e_li2o = li2o_entry.energy / li2o_entry.composition.get_reduced_composition_and_factor()[1]
+        for vertex in vertices:
+            # Absolute chemical potentials consistent with Li2O energy: 2 mu_Li + mu_O = E(Li2O)
+            assert 2 * vertex[li] + vertex[o] == approx(e_li2o, abs=1e-6)
+            assert vertex[li] <= self.pd.el_refs[li].energy_per_atom + 1e-8
+            assert vertex[o] <= self.pd.el_refs[o].energy_per_atom + 1e-8
+
+        mu_range = self.pd.get_chempot_range_stability_phase(li2o, o)
+        o_min, o_max = mu_range[o]
+        assert o_min <= o_max
+        assert o_max == approx(max(v[o] for v in vertices))
+        assert o_min == approx(min(v[o] for v in vertices))
+
+        # A composition that is not stable returns None
+        assert self.pd.getmu_vertices_stability_phase(Composition("FeO3"), o) is None
+
+
+class TestGrandPotentialEdgeCases:
+    def setup_method(self):
+        self.entries = EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv")
+        self.gppd = GrandPotentialPhaseDiagram(self.entries, {Element("O"): -5})
+
+    def test_grand_pot_entry_repr(self):
+        entry = next(e for e in self.gppd.stable_entries if e.original_entry.reduced_formula == "Li2O2")
+        rep = repr(entry)
+        assert rep.startswith(f"GrandPotPDEntry with original composition {entry.original_entry.composition}")
+        assert f"energy = {entry.original_entry.energy:.4f}" in rep
+        assert rep.endswith("chempots = mu_O = -5.0000")
+
+    def test_as_from_dict(self):
+        dct = self.gppd.as_dict()
+        assert dct["@class"] == "GrandPotentialPhaseDiagram"
+        assert dct["chempots"] == {Element("O"): -5}
+        gppd = GrandPotentialPhaseDiagram.from_dict(dct)
+        assert gppd.chempots == self.gppd.chempots
+        assert gppd.elements == self.gppd.elements
+        expected = {e.original_entry.reduced_formula: self.gppd.get_form_energy(e) for e in self.gppd.stable_entries}
+        actual = {e.original_entry.reduced_formula: gppd.get_form_energy(e) for e in gppd.stable_entries}
+        assert actual == approx(expected)
+
+
+class TestCompoundPhaseDiagramEdgeCases:
+    def setup_method(self):
+        self.entries = EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv")
+        self.terminals = [Composition("Li2O"), Composition("Fe2O3")]
+        self.cpd = CompoundPhaseDiagram(self.entries, self.terminals)
+
+    def test_as_dict(self):
+        dct = self.cpd.as_dict()
+        assert dct["@class"] == "CompoundPhaseDiagram"
+        assert dct["normalize_terminal_compositions"] is True
+        assert len(dct["original_entries"]) == len(self.entries)
+        assert [Composition(c) for c in dct["terminal_compositions"]] == self.terminals
+
+    def test_from_dict_round_trip(self):
+        cpd = CompoundPhaseDiagram.from_dict(self.cpd.as_dict())
+        assert sorted(e.name for e in cpd.stable_entries) == sorted(e.name for e in self.cpd.stable_entries)
+
+    def test_transform_entries_skips_negative_reactants(self):
+        entries = [PDEntry("Li", -2), PDEntry("O2", -8), PDEntry("Li2O2", -20), PDEntry("LiO8", -40)]
+        cpd = CompoundPhaseDiagram(entries, [Composition("Li"), Composition("Li2O2")])
+        # O2 and LiO8 lie outside the Li-Li2O2 segment (they need a negative amount of Li)
+        assert sorted(e.original_entry.reduced_formula for e in cpd.all_entries) == ["Li", "Li2O2"]
+
+    def test_transformed_entry_negative_reactant_raises(self):
+        sp_mapping = {Composition("Li"): DummySpecies("Xf"), Composition("Li2O2"): DummySpecies("Xg")}
+        with pytest.raises(TransformedPDEntryError, match="Only reactions with positive amounts"):
+            TransformedPDEntry(PDEntry("LiO8", -40), sp_mapping)
+
+
+class TestPatchedPhaseDiagramEdgeCases:
+    def setup_method(self):
+        self.entries = EntrySet.from_csv(f"{TEST_DIR}/reaction_entries_test.csv")
+        self.entries.add(PDEntry("He", -1.23))
+        self.ppd = PatchedPhaseDiagram(entries=self.entries)
+
+    def test_more_terminal_elements_than_dims(self):
+        entries = [PDEntry("Li", -1), PDEntry("O", -2), PDEntry("Fe", -3), PDEntry("Li2O", -10)]
+        with pytest.raises(ValueError, match="more terminal elements than dimensions"):
+            PatchedPhaseDiagram(entries, elements=[Element("Li"), Element("O")])
+
+    def test_update_uncovered_space(self):
+        he = Element("He")
+        other = next(el for el in self.ppd.elements if el != he)
+        assert not any(he in space and other in space for space in self.ppd.spaces)
+        new_entry = PDEntry(Composition({he: 1, other: 1}), -1000)
+        ppd_new, info = self.ppd.update([new_entry], return_info=True)
+        new_space = frozenset([he, other])
+        assert new_space in info["new_spaces"]
+        assert new_space in ppd_new.spaces
+        assert new_entry in ppd_new.stable_entries
+        ppd_full = PatchedPhaseDiagram(entries=[*self.entries, new_entry])
+        assert ppd_new.stable_entries == ppd_full.stable_entries
+
+
+class TestPDPlotterExtra:
+    def setup_method(self):
+        self.entries = list(EntrySet.from_csv(f"{TEST_DIR}/pd_entries_test.csv"))
+        self.pd_ternary = PhaseDiagram(self.entries)
+        self.pd_binary = PhaseDiagram([e for e in self.entries if "Fe" not in e.composition])
+        self.pd_unary = PhaseDiagram([e for e in self.entries if e.elements == [Element("Li")]])
+        self.pd_quaternary = PhaseDiagram([*self.entries, PDEntry("C", 0)])
+
+    def test_too_many_components(self):
+        pd = PhaseDiagram([*self.entries, PDEntry("C", 0), PDEntry("N", 0)])
+        with pytest.raises(ValueError, match="Only 1-4 components supported"):
+            PDPlotter(pd)
+
+    def test_get_plot_dim_guard_and_unknown_backend(self):
+        plotter = PDPlotter(self.pd_binary, backend="plotly")
+        plotter._dim = 5
+        with pytest.raises(ValueError, match="Plotting is only supported for unary/binary/ternary/quaternary"):
+            plotter.get_plot()
+        assert PDPlotter(self.pd_binary, backend="bokeh").get_plot() is None
+
+    @pytest.mark.parametrize(
+        ("pd_attr", "ternary_style", "trace_type"),
+        [
+            ("pd_unary", "2d", go.Scatter),
+            ("pd_binary", "2d", go.Scatter),
+            ("pd_ternary", "2d", go.Scatterternary),
+            ("pd_ternary", "3d", go.Scatter3d),
+            ("pd_quaternary", "2d", go.Scatter3d),
+        ],
+    )
+    def test_plotly_highlight_entries(self, pd_attr, ternary_style, trace_type):
+        pd = getattr(self, pd_attr)
+        stable = next(e for e in pd.stable_entries if e.is_element)
+        plotter = PDPlotter(pd, backend="plotly", ternary_style=ternary_style)
+        fig = plotter.get_plot(highlight_entries=[stable])
+        assert isinstance(fig, go.Figure)
+        highlighted = [trace for trace in fig.data if trace.name == "Highlighted"]
+        assert len(highlighted) == 1
+        assert isinstance(highlighted[0], trace_type)
+        assert len(highlighted[0].hovertext) == 1
+        assert highlighted[0].hovertext[0].startswith(str(stable.elements[0]))
+        assert "(Stable)" in highlighted[0].hovertext[0]
+        # Highlighted entries are removed from the stable trace
+        stable_trace = next(trace for trace in fig.data if trace.name == "Stable")
+        assert len(stable_trace.hovertext) == len(plotter.pd_plot_data[1]) - 1
+
+    @staticmethod
+    def _small_binary():
+        # LiO sits 0.1 eV/atom above the Li2O-O2 tie line
+        entries = [PDEntry("Li", -2), PDEntry("O2", -10), PDEntry("Li2O", -20), PDEntry("LiO", -12.3)]
+        pd = PhaseDiagram(entries)
+        stable = next(e for e in pd.stable_entries if e.reduced_formula == "Li2O")
+        unstable = next(e for e in pd.unstable_entries if e.composition == Composition("LiO"))
+        assert pd.get_e_above_hull(unstable) == approx(0.1)
+        return pd, stable, unstable
+
+    def test_plotly_highlight_unstable_entry(self):
+        pd, stable, unstable = self._small_binary()
+        fig = PDPlotter(pd, backend="plotly").get_plot(highlight_entries=[stable, unstable])
+        highlighted = next(trace for trace in fig.data if trace.name == "Highlighted")
+        assert highlighted.x == approx((1 / 3, 0.5))
+        # Formation energies per atom: Li2O on the hull, LiO 0.1 eV/atom above the Li2O-O2 tie line
+        assert highlighted.y == approx((-11 / 3, -2.75 + 0.1))
+        # NOTE LiO is reported with the peroxide reduced formula Li2O2
+        assert highlighted.hovertext[0].startswith("Li<sub>2</sub>O (")
+        assert highlighted.hovertext[1].startswith("Li<sub>2</sub>O<sub>2</sub> (")
+        assert "Energy Above Hull: (+0.1 eV/atom)" in highlighted.hovertext[1]
+        # LiO is no longer drawn in the "Above Hull" trace
+        above_hull = next(trace for trace in fig.data if trace.name == "Above Hull")
+        assert len(above_hull.x) == 0
+
+    def test_plotly_highlight_order_independent(self):
+        pd, stable, unstable = self._small_binary()
+        fig = PDPlotter(pd, backend="plotly").get_plot(highlight_entries=[unstable, stable])
+        highlighted = next(trace for trace in fig.data if trace.name == "Highlighted")
+        assert len(highlighted.hovertext) == 2
+        for x_coord, text in zip(highlighted.x, highlighted.hovertext, strict=True):
+            expected = "Li<sub>2</sub>O<sub>2</sub> (" if x_coord == approx(0.5) else "Li<sub>2</sub>O ("
+            assert text.startswith(expected)
+
+    def test_plotly_binary_uncertainties(self):
+        adjust = ConstantEnergyAdjustment(-0.5, uncertainty=0.1)
+        entries = [
+            ComputedEntry("Li", -1.9),
+            ComputedEntry("O2", -9.8),
+            ComputedEntry("Li2O", -14.3, energy_adjustments=[adjust]),
+            ComputedEntry("Li2O2", -19.0, energy_adjustments=[adjust]),
+        ]
+        pd = PhaseDiagram(entries)
+        fig = PDPlotter(pd, backend="plotly").get_plot(label_uncertainties=True)
+        names = [trace.name for trace in fig.data]
+        assert "Uncertainty (window)" in names
+        stable_trace = next(trace for trace in fig.data if trace.name == "Stable")
+        uncertainties = dict(zip(stable_trace.x, stable_trace.error_y["array"], strict=True))
+        for entry in pd.stable_entries:
+            if not entry.is_element:
+                assert entry.correction_uncertainty_per_atom == approx(0.1 / entry.composition.num_atoms)
+        assert any(unc > 0 for unc in uncertainties.values())
+        assert all("Error: +/-" in text for text in stable_trace.hovertext)
+        by_formula = {
+            text.split(" (")[0]: unc
+            for text, unc in zip(stable_trace.hovertext, stable_trace.error_y["array"], strict=True)
+        }
+        assert by_formula["Li<sub>2</sub>O"] == approx(round(0.1 / 3, 4))
+        window = next(trace for trace in fig.data if trace.name == "Uncertainty (window)")
+        assert window.fill == "toself"
+        # Outline goes out along upper bound and back along lower bound (excluding last terminal)
+        assert len(window.x) == 2 * len(stable_trace.x) - 1
+
+    @pytest.mark.parametrize("ternary_style", ["2d", "3d"])
+    def test_plotly_grand_potential_ternary(self, ternary_style):
+        gppd = GrandPotentialPhaseDiagram(self.pd_quaternary.all_entries, {Element("C"): -1})
+        assert len(gppd.elements) == 3
+        fig = PDPlotter(gppd, backend="plotly", ternary_style=ternary_style).get_plot()
+        assert isinstance(fig, go.Figure)
+        stable_trace = next(trace for trace in fig.data if trace.name == "Stable")
+        # Hover text uses the original (non-projected) compositions
+        formulas = {htmlify(e.original_entry.composition.reduced_formula) for e in gppd.stable_entries}
+        assert {text.split(" (")[0] for text in stable_trace.hovertext} == formulas
+        assert "O<sub>2</sub>" in formulas
+        if ternary_style == "2d":
+            # Axis titles use the htmlified formula of the original (unprojected) terminal entries
+            titles = [fig.layout.ternary[f"{ax}axis"].title.text for ax in "abc"]
+            assert sorted(titles) == ["Fe", "Li", "O<sub>2</sub>"]
+
+    def test_plotly_grand_potential_binary_uncertainties(self):
+        gppd = GrandPotentialPhaseDiagram(self.entries, {Element("O"): -5})
+        fig = PDPlotter(gppd, backend="plotly").get_plot(label_uncertainties=True)
+        window = next(trace for trace in fig.data if trace.name == "Uncertainty (window)")
+        stable_trace = next(trace for trace in fig.data if trace.name == "Stable")
+        # For transformed PDs the lower bound includes the terminal compounds
+        assert len(window.x) == 2 * len(stable_trace.x)
+
+    def test_matplotlib_ordering_attributes_and_colormap(self):
+        entries = [PDEntry(e.composition, e.energy) for e in self.entries]
+        for entry in entries:
+            entry.attribute = "new" if entry.reduced_formula == "Li5FeO4" else "existing"
+        pd = PhaseDiagram(entries)
+        plotter = PDPlotter(pd, backend="matplotlib")
+
+        ax = plotter.get_plot(ordering=["Li", "Fe", "O2"], process_attributes=True)
+        assert isinstance(ax, plt.Axes)
+        texts = [t.get_text() for t in ax.texts]
+        # The stable "new" entry is annotated in green; unstable entries in blue
+        green_labels = [t.get_text() for t in ax.texts if same_color(t.get_color(), "g")]
+        assert green_labels == ["Li$_{5}$FeO$_{4}$"]
+        assert "Li$_{2}$O" in texts
+        # "new" entries are drawn as stars, existing ones as circles
+        markers = {line.get_marker() for line in ax.get_lines()}
+        assert {"*", "o"} <= markers
+        # With ordering ["Li", "Fe", "O2"], Li is at the top vertex of the triangle
+        li_label = next(t for t in ax.texts if t.get_text() == "Li")
+        assert li_label.xy == approx((0.5, np.sqrt(3) / 2))
+        plt.close("all")
+
+    @pytest.mark.parametrize(
+        ("energy_colormap", "process_attributes"),
+        [("default", False), ("default", True), ("viridis", False)],
+    )
+    def test_matplotlib_energy_colormap(self, energy_colormap, process_attributes):
+        entries = [PDEntry(e.composition, e.energy) for e in self.entries]
+        for entry in entries:
+            entry.attribute = "new" if entry.reduced_formula == "Li5FeO4" else "existing"
+        plotter = PDPlotter(PhaseDiagram(entries), backend="matplotlib")
+        ax = plotter.get_plot(energy_colormap=energy_colormap, process_attributes=process_attributes)
+        assert isinstance(ax, plt.Axes)
+        # colorbar adds an additional axes to the figure
+        assert len(ax.figure.axes) == 2
+        assert "above hull" in ax.figure.axes[1].get_ylabel()
+        plt.close("all")
+
+    def test_matplotlib_energy_colormap_unstable_colors(self):
+        # Only unstable entries with e_above_hull < show_unstable are drawn. Each square must be colored by
+        # its own e_above_hull, not by that of the n-th unstable entry overall.
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib", show_unstable=0.05)
+        ax = plotter.get_plot(energy_colormap="viridis")
+        unstable = plotter.pd_plot_data[2]
+        assert any(self.pd_ternary.get_e_above_hull(entry) >= 0.05 for entry in unstable)  # some entries are skipped
+        # Squares are drawn in the order of the shown unstable entries (polymorphs share coordinates)
+        shown = [entry for entry in unstable if self.pd_ternary.get_e_above_hull(entry) < 0.05]
+        squares = [line for line in ax.get_lines() if line.get_marker() == "s"]
+        assert len(squares) == len(shown) > 0
+        norm = Normalize(vmin=-0.06, vmax=0.06)
+        for line, entry in zip(squares, shown, strict=True):
+            assert_allclose(line.get_xydata()[0], unstable[entry])
+            expected = plt.get_cmap("viridis")(norm(self.pd_ternary.get_e_above_hull(entry)))
+            assert_allclose(line.get_markerfacecolor(), expected)
+        plt.close("all")
+
+    def test_write_image(self):
+        plotter = PDPlotter(self.pd_binary, backend="matplotlib")
+        stream = StringIO()
+        plotter.write_image(stream, image_format="svg")
+        assert stream.getvalue().lstrip().startswith("<?xml")
+        assert "<svg" in stream.getvalue()
+        plt.close("all")
+
+        plotter = PDPlotter(self.pd_binary, backend="plotly")
+        with patch.object(go.Figure, "write_image") as mock_write:
+            plotter.write_image("pd.png", image_format="png")
+        mock_write.assert_called_once_with("pd.png", format="png")
+
+    def test_plot_element_profile_labels(self):
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib")
+        evolution = self.pd_ternary.get_element_profile(Element("O"), Composition("Li2O"))
+        ax = plotter.plot_element_profile(Element("O"), Composition("Li2O"), show_label_index=[0, 1])
+        assert isinstance(ax, plt.Axes)
+        assert ax.get_ylabel() == "Uptake per atom"
+        assert ax.get_xlim() == (0, 5)
+        # Labelled steps are drawn in red, with one annotation each
+        assert len(evolution) == 3
+        red_lines = [line for line in ax.get_lines() if same_color(line.get_color(), "r")]
+        assert len(red_lines) == 2
+        assert len(ax.texts) == 2
+        assert all(same_color(text.get_color(), "r") for text in ax.texts)
+        plt.close("all")
+
+    def test_chempot_range_map_plot(self):
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib")
+        for elements in ([Element("Li"), Element("O")], [Element("O"), Element("Li")]):
+            ax = plotter.get_chempot_range_map_plot(elements)
+            assert isinstance(ax, plt.Axes)
+            labels = {t.get_text() for t in ax.texts}
+            assert "Li$_{2}$O" in labels
+            plt.close("all")
+        with patch.object(plt.Axes, "show", create=True) as mock_show:
+            assert plotter.plot_chempot_range_map([Element("Li"), Element("O")]) is None
+        mock_show.assert_called_once()
+        plt.close("all")

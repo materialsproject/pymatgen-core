@@ -8,7 +8,7 @@ import math
 import warnings
 from functools import wraps
 from string import ascii_letters
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -617,7 +617,7 @@ def van_arkel_triangle(list_of_materials: Sequence, annotate: bool = True):
 def get_ax_fig(ax: Axes = None, **kwargs) -> tuple[Axes, Figure]:
     """Helper function used in plot functions supporting an optional Axes argument.
     If ax is None, we build the `matplotlib` figure and create the Axes else
-    we return the current active figure.
+    we return the figure that contains ax.
 
     Args:
         ax (Axes, optional): Axes object. Defaults to None.
@@ -630,7 +630,7 @@ def get_ax_fig(ax: Axes = None, **kwargs) -> tuple[Axes, Figure]:
         fig = plt.figure(**kwargs)
         ax = fig.gca()
     else:
-        fig = plt.gcf()
+        fig = cast("Figure", ax.figure)
 
     return ax, fig
 
@@ -638,7 +638,7 @@ def get_ax_fig(ax: Axes = None, **kwargs) -> tuple[Axes, Figure]:
 def get_ax3d_fig(ax: Axes = None, **kwargs) -> tuple[Axes3D, Figure]:
     """Helper function used in plot functions supporting an optional Axes3D
     argument. If ax is None, we build the `matplotlib` figure and create the
-    Axes3D else we return the current active figure.
+    Axes3D else we return the figure that contains ax.
 
     Args:
         ax (Axes3D, optional): Axes3D object. Defaults to None.
@@ -651,7 +651,7 @@ def get_ax3d_fig(ax: Axes = None, **kwargs) -> tuple[Axes3D, Figure]:
         fig = plt.figure(**kwargs)
         ax = fig.add_subplot(projection="3d")
     else:
-        fig = plt.gcf()
+        fig = cast("Figure", ax.figure)
 
     return ax, fig
 
