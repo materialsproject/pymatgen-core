@@ -7282,7 +7282,7 @@ class Vaspout(Vasprun):
             lattice=Lattice(positions["scale"] * np.array(positions["lattice_vectors"])),
             species=species,
             coords=positions["position_ions"],
-            coords_are_cartesian=(positions["direct_coordinates"] == 1),
+            coords_are_cartesian=(positions["direct_coordinates"] != 1),
         )
 
     @staticmethod

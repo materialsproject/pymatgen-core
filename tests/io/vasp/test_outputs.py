@@ -4211,10 +4211,6 @@ class TestVaspoutStaticParsers:
         assert [site.species_string for site in struct] == ["Ga", "Sb"]
         assert_allclose(struct.lattice.abc, [8.0, 8.0, 8.0])
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Vaspout._parse_structure inverts the direct_coordinates flag (direct read as Cartesian and vice versa)",
-    )
     @pytest.mark.parametrize(
         ("direct_coordinates", "attr"),
         [(1, "frac_coords"), (0, "cart_coords")],
