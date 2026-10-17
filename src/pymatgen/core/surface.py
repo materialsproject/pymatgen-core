@@ -758,8 +758,8 @@ class Slab(Structure):
 
         # Check if found any equivalent sites
         if len(equi_sites) == len(indices):
-            self.remove_sites(indices)
-            self.remove_sites(equi_sites)
+            # Remove in one call: removing in two calls would shift the indices in between
+            self.remove_sites([*indices, *equi_sites])
 
         else:
             warnings.warn("Equivalent sites could not be found for some indices. Surface unchanged.", stacklevel=2)

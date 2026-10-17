@@ -443,17 +443,13 @@ class TestSlab(MatSciTest):
         assert_allclose(sorted(slab.frac_coords[:, 2]), sorted(z_coords)[1:-1])
         assert slab.is_symmetric()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="symmetrically_remove_atoms removes `indices` before `equi_sites` without re-indexing, "
-        "so the equivalent site is skipped when its index is larger than a removed index",
-    )
     def test_symmetrically_remove_atoms_bottom_site(self):
         slab = self._ag_100_slab()
         z_coords = slab.frac_coords[:, 2]
         bottom_idx = int(np.argmin(z_coords))
         slab.symmetrically_remove_atoms([bottom_idx])
         assert len(slab) == 4
+        assert slab.is_symmetric()
 
     def test_symmetrically_remove_atoms_no_equivalent(self):
         mgo = Structure(
@@ -494,10 +490,6 @@ class TestSlab(MatSciTest):
         assert_allclose(sorted(centered.frac_coords[:, 2]), z_coords, atol=1e-8)
         assert np.mean(centered.frac_coords[:, 2]) == approx(0.5)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="center_slab does not detect a slab wrapped across the periodic boundary along c",
-    )
     def test_center_slab_wrapped_across_boundary(self):
         slab = self._ag_100_slab()
         z_coords = sorted(slab.frac_coords[:, 2])
