@@ -4027,10 +4027,6 @@ class TestProcarEdgeCases:
         with pytest.raises(ValueError, match="Number of lines starting with 'tot'"):
             Procar(corrupted)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Procar.read pads differing nbands using array.shape[2] (nions) instead of shape[1] (nbands)",
-    )
     def test_multiple_procars_different_nbands(self):
         fewer_bands = self._write("PROCAR.8bands", self._drop_bands(self._procar_text(), 8))
         procar = Procar([f"{VASP_OUT_DIR}/PROCAR.simple", fewer_bands])

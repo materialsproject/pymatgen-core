@@ -4336,7 +4336,7 @@ class Procar(MSONable):
             phase_factors_list.append(phase_factors)
 
         # Combine arrays along the kpoints axis:
-        # nbands (axis = 2) could differ between arrays, so set missing values to zero:
+        # nbands (axis = 1) could differ between arrays, so set missing values to zero:
         max_nbands = max(eig_dict[Spin.up].shape[1] for eig_dict in eigenvalues_list)
         for dict_array in itertools.chain(
             occupancies_list,
@@ -4351,7 +4351,7 @@ class Procar(MSONable):
                         if len(array.shape) == 2:  # occupancies, eigenvalues
                             dict_array[key] = np.pad(
                                 array,
-                                ((0, 0), (0, max_nbands - array.shape[2])),
+                                ((0, 0), (0, max_nbands - array.shape[1])),
                                 mode="constant",
                             )
                         elif len(array.shape) == 4:  # data, phase_factors
@@ -4359,7 +4359,7 @@ class Procar(MSONable):
                                 array,
                                 (
                                     (0, 0),
-                                    (0, max_nbands - array.shape[2]),
+                                    (0, max_nbands - array.shape[1]),
                                     (0, 0),
                                     (0, 0),
                                 ),
@@ -4370,7 +4370,7 @@ class Procar(MSONable):
                                 array,
                                 (
                                     (0, 0),
-                                    (0, max_nbands - array.shape[2]),
+                                    (0, max_nbands - array.shape[1]),
                                     (0, 0),
                                     (0, 0),
                                     (0, 0),
