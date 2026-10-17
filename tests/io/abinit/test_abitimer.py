@@ -456,10 +456,6 @@ class TestAbinitTimerMethods:
         assert ax.patches[30].get_height() == pytest.approx(2.212)
         plt.close("all")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="cpuwall_histogram draws with plt.bar on the current axes instead of the given ax",
-    )
     def test_cpuwall_histogram_with_ax(self, mgb2_timer):
         _, ax = plt.subplots()
         plt.figure()  # make another figure current
@@ -467,6 +463,17 @@ class TestAbinitTimerMethods:
             fig = mgb2_timer.cpuwall_histogram(ax=ax, show=False)
             assert fig is ax.figure
             assert len(ax.patches) == 2 * 30
+        finally:
+            plt.close("all")
+
+    def test_scatter_hist_with_ax(self, mgb2_timer):
+        _, ax = plt.subplots()
+        plt.figure()  # make another figure current
+        try:
+            fig = mgb2_timer.scatter_hist(ax=ax, show=False)
+            assert fig is ax.figure
+            assert len(ax.collections) == 1
+            assert ax.collections[0].get_offsets().shape == (30, 2)
         finally:
             plt.close("all")
 

@@ -823,10 +823,10 @@ class AbinitTimer:
         width = 0.35  # the width of the bars
 
         cpu_times = self.get_values("cpu_time")
-        rects1 = plt.bar(ind, cpu_times, width, color="r")
+        rects1 = ax.bar(ind, cpu_times, width, color="r")
 
         wall_times = self.get_values("wall_time")
-        rects2 = plt.bar(ind + width, wall_times, width, color="y")
+        rects2 = ax.bar(ind + width, wall_times, width, color="y")
 
         # Add ylable and title
         ax.set_ylabel("Time (s)")
@@ -879,7 +879,7 @@ class AbinitTimer:
         y = np.asarray(self.get_values("wall_time"))
 
         # the scatter plot:
-        axScatter = plt.subplot(1, 1, 1)
+        axScatter = ax
         axScatter.scatter(x, y)
         axScatter.set_aspect("auto")
 
