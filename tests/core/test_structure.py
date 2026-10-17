@@ -5,6 +5,8 @@ import json
 import math
 import os
 import re
+import sys
+import types
 import warnings
 from fractions import Fraction
 from importlib.util import find_spec
@@ -20,7 +22,7 @@ from monty.json import MontyDecoder, MontyEncoder
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
-from pymatgen.core import Composition, Element, Lattice, Species
+from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Species
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import (
     IMolecule,
@@ -75,6 +77,38 @@ class TestNeighbor:
 
             p_neighbor = PeriodicNeighbor(comp, (0, 0, 0), (10, 10, 10), label=label)
             assert p_neighbor.label == label if label is not None else "C"
+
+    def test_tuple_like(self):
+        neighbor = Neighbor(Composition("C"), np.zeros(3), nn_distance=1.5, index=3)
+        assert len(neighbor) == 3
+        assert neighbor[0] is neighbor
+        assert neighbor[1] == approx(1.5)
+        assert neighbor[2] == 3
+        assert neighbor[-1] == 3
+
+    def test_as_dict(self):
+        neighbor = Neighbor(Composition("C"), np.zeros(3), nn_distance=1.5, index=3, label="C1")
+        dct = neighbor.as_dict()
+        assert dct["@class"] == "Neighbor"
+        assert dct["nn_distance"] == approx(1.5)
+        assert dct["index"] == 3
+        assert dct["label"] == "C1"
+
+    def test_from_dict_round_trip(self):
+        neighbor = Neighbor(Composition({Species("Fe", 2): 1}), np.array([1.0, 2.0, 3.0]), nn_distance=1.5, index=3)
+        restored = Neighbor.from_dict(json.loads(json.dumps(neighbor.as_dict(), cls=MontyEncoder)))
+        assert restored.species == Composition({Species("Fe", 2): 1})
+        assert_allclose(restored.coords, [1.0, 2.0, 3.0])
+        assert restored.nn_distance == approx(1.5)
+        assert restored.index == 3
+
+
+def _fake_module(name: str, **attrs) -> types.ModuleType:
+    """Build a stand-in module for an optional dependency."""
+    module = types.ModuleType(name)
+    for key, val in attrs.items():
+        setattr(module, key, val)
+    return module
 
 
 class TestIStructure(MatSciTest):
@@ -1119,6 +1153,198 @@ Direct
         coords = [[0, 0, 0], [0.5, 0.5], [1, 1, 1]]
         with pytest.raises(ValueError, match="Coordinates"):
             IStructure(Lattice.cubic(1), ["H", "H", "H"], coords)
+
+    def test_types_of_specie_alias(self):
+        assert self.V2O3.types_of_specie == self.V2O3.types_of_species
+        assert {str(sp) for sp in self.V2O3.types_of_specie} == {"V3+", "O2-"}
+
+    def test_atomic_numbers(self):
+        assert self.struct.atomic_numbers == (14, 14)
+        disordered = IStructure(self.lattice, [{"Fe": 0.5, "Mn": 0.5}], [[0, 0, 0]])
+        with pytest.raises(AttributeError, match="atomic_numbers available only for ordered Structures"):
+            _ = disordered.atomic_numbers
+
+    def test_repr(self):
+        struct = IStructure(Lattice.cubic(3), ["Na"], [[0, 0, 0]], charge=1)
+        lines = repr(struct).splitlines()
+        assert lines[0] == "Structure Summary"
+        assert "Overall Charge: +1" in lines
+        assert lines[-1].startswith("PeriodicSite: Na")
+        assert "Overall Charge" not in repr(self.struct)
+
+    def test_eq_different_properties(self):
+        struct1 = IStructure(self.lattice, ["Si"], [[0, 0, 0]], properties={"energy": 1})
+        struct2 = IStructure(self.lattice, ["Si"], [[0, 0, 0]], properties={"energy": 2})
+        assert struct1 != struct2
+        assert struct1 == IStructure(self.lattice, ["Si"], [[0, 0, 0]], properties={"energy": 1})
+
+    def test_from_sites_errors_and_warnings(self):
+        struct = IStructure(
+            self.lattice, ["Si", "Si"], [[0, 0, 0], [0.5, 0.5, 0.5]], site_properties={"magmom": [1, 2]}
+        )
+        other_lattice_site = PeriodicSite("Si", [0, 0, 0], Lattice.cubic(5))
+        with pytest.raises(ValueError, match="Sites must belong to the same lattice"):
+            IStructure.from_sites([struct[0], other_lattice_site])
+
+        no_prop_site = PeriodicSite("Ge", [0.25, 0.25, 0.25], self.lattice)
+        with pytest.warns(UserWarning, match="Not all sites have property magmom"):
+            mixed = IStructure.from_sites([struct[0], no_prop_site])
+        assert mixed.site_properties["magmom"] == [1, None]
+
+    @pytest.mark.parametrize(
+        ("lattice", "species", "coords", "site_props", "match"),
+        [
+            (Lattice.tetragonal(4.87, 3.30), ["Mn"], [[0, 0, 0]], {}, "Magnetic moments have to be defined"),
+            (Lattice.hexagonal(4, 6), ["Mn"], [[0, 0, 0]], {"magmom": [4]}, "is incompatible with supplied spacegroup"),
+            (Lattice.tetragonal(4.87, 3.30), ["Mn", "F"], [[0, 0, 0]], {"magmom": [4, 0]}, r"len\(coords\)=1"),
+            (Lattice.tetragonal(4.87, 3.30), ["Mn"], [[0, 0, 0]], {"magmom": [4, 0]}, r"len\(magmoms\)=2"),
+        ],
+    )
+    def test_from_magnetic_spacegroup_errors(self, lattice, species, coords, site_props, match):
+        with pytest.raises(ValueError, match=match):
+            IStructure.from_magnetic_spacegroup("P4_2'/mnm'", lattice, species, coords, site_props)
+
+    def test_from_magnetic_spacegroup_extra_props_and_labels(self):
+        struct = IStructure.from_magnetic_spacegroup(
+            "P4_2'/mnm'",
+            [[4.87, 0, 0], [0, 4.87, 0], [0, 0, 3.30]],  # plain matrix is converted to a Lattice
+            ["Mn", "F"],
+            [[0, 0, 0], [0.30, 0.30, 0]],
+            {"magmom": [4, 0], "charge": [2, -1]},
+            labels=["Mn1", "F1"],
+        )
+        assert struct.formula == "Mn2 F4"
+        assert struct.site_properties["charge"] == [2, 2, -1, -1, -1, -1]
+        assert struct.labels == ["Mn1", "Mn1", "F1", "F1", "F1", "F1"]
+
+    def test_unset_charge(self):
+        struct = IStructure(Lattice.cubic(3), ["Na"], [[0, 0, 0]], charge=1)
+        assert struct.charge == 1
+        struct.unset_charge()
+        assert struct._charge is None
+        assert struct.charge == 0  # now computed from (absent) oxidation states
+
+    def test_matches_anonymous(self):
+        perovskite1 = Structure.from_prototype("perovskite", ["Ca", "Ti", "O"], a=3.9)
+        perovskite2 = Structure.from_prototype("perovskite", ["Sr", "Zr", "S"], a=4.2)
+        assert not perovskite1.matches(perovskite2)
+        assert perovskite1.matches(perovskite2, anonymous=True)
+
+    def test_get_symmetric_neighbor_list_sg_variants(self):
+        struct = Structure.from_prototype("perovskite", ["Ca", "Ti", "O"], a=3.9)
+        by_none = struct.get_symmetric_neighbor_list(3.0, sg=None)
+        by_symbol = struct.get_symmetric_neighbor_list(3.0, sg="Pm-3m")
+        by_number = struct.get_symmetric_neighbor_list(3.0, sg=221)
+        for arr_none, arr_symbol, arr_number in zip(by_none[:5], by_symbol[:5], by_number[:5], strict=True):
+            assert_array_equal(arr_none, arr_symbol)
+            assert_array_equal(arr_none, arr_number)
+        assert len(by_none[0]) == 60
+
+        with pytest.raises(ValueError, match="incompatible with supplied spacegroup P6_3/mmc"):
+            struct.get_symmetric_neighbor_list(3.0, sg="P6_3/mmc")
+
+    def test_get_all_neighbors_py_isolated_site(self):
+        struct = IStructure(Lattice.cubic(10), ["Si"], [[0, 0, 0]])
+        assert struct.get_all_neighbors_py(1.0) == [[]]
+        # A query point with nothing (not even itself) within r gets an empty neighbor list
+        far_site = PeriodicSite("Si", [0.5, 0.5, 0.5], struct.lattice)
+        assert struct.get_all_neighbors_py(1.0, sites=[far_site]) == [[]]
+        assert len(struct.get_all_neighbors_py(9.0, sites=[far_site])[0]) == 8
+
+    def test_get_reduced_structure(self):
+        struct = IStructure(Lattice([[4, 0, 0], [4, 4, 0], [0, 0, 4]]), ["Si"], [[0, 0, 0]])
+        for algo in ("niggli", "LLL"):
+            reduced = struct.get_reduced_structure(algo)
+            assert reduced.lattice.abc == approx((4, 4, 4))
+            assert reduced.volume == approx(struct.volume)
+        with pytest.raises(ValueError, match="Invalid reduction_algo='foo', must be 'niggli' or 'LLL'"):
+            struct.get_reduced_structure("foo")
+
+    def test_interpolate_errors(self):
+        lattice = Lattice.cubic(4)
+        start = IStructure(lattice, ["Na"] * 3, [[0, 0, 0], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25]])
+        with pytest.raises(ValueError, match="Structures have different lengths"):
+            start.interpolate(IStructure(lattice, ["Na"], [[0, 0, 0]]))
+
+        end = IStructure(lattice, ["Na"] * 3, [[0.1, 0.1, 0.1], [0.6, 0.6, 0.6], [0.35, 0.35, 0.35]])
+        with pytest.raises(ValueError, match=r"Unable to reliably match structures with autosort_tol = 0\.01"):
+            start.interpolate(end, autosort_tol=0.01)
+
+    def test_get_primitive_structure_bad_tolerance(self):
+        with pytest.raises(ValueError, match="tolerance cannot be <=0"):
+            self.struct.get_primitive_structure(tolerance=0)
+
+    def test_get_orderings_mocked(self):
+        assert self.struct.get_orderings() == [self.struct]  # ordered structures are returned as-is
+
+        disordered = IStructure.from_spacegroup("Im-3m", Lattice.cubic(3), [Composition("Fe0.5Mn0.5")], [[0, 0, 0]])
+
+        with mock.patch("pymatgen.command_line.enumlib_caller.EnumlibAdaptor") as mock_adaptor:
+            mock_adaptor.return_value.structures = ["enum_result"]
+            assert disordered.get_orderings(mode="enum", max_cell_size=2) == ["enum_result"]
+        mock_adaptor.assert_called_once_with(disordered, max_cell_size=2)
+        mock_adaptor.return_value.run.assert_called_once_with()
+
+        with mock.patch("pymatgen.command_line.mcsqs_caller.run_mcsqs") as mock_mcsqs:
+            mock_mcsqs.return_value.bestsqs = "sqs_result"
+            assert disordered.get_orderings(mode="sqs", scaling=2) == ["sqs_result"]
+        call_kwargs = mock_mcsqs.call_args.kwargs
+        assert call_kwargs["scaling"] == 2
+        # Only the bcc 1NN distance (a * sqrt(3) / 2) is available in the 2-site cell
+        assert call_kwargs["clusters"] == {2: approx(3 * math.sqrt(3) / 2 + 0.01)}
+
+        with pytest.raises(ValueError, match="Invalid mode"):
+            disordered.get_orderings(mode="foo")
+
+    def test_invalid_formats(self):
+        with pytest.raises(ValueError, match="Invalid fmt='foo', valid options are"):
+            self.struct.to(fmt="foo")
+        with pytest.raises(ValueError, match="Invalid fmt='foo', valid options are"):
+            IStructure.from_str("", fmt="foo")
+        with pytest.raises(ValueError, match="Invalid cell_type='foo', valid values are"):
+            self.struct.to_cell("foo")
+
+    def test_from_str_and_file_sort_and_merge(self):
+        # Two half-occupied Na sites 0.004 A apart merge (mode="sum") into one fully occupied Na site
+        unsorted = IStructure(
+            Lattice.cubic(4),
+            ["Cl", {"Na": 0.5}, {"Na": 0.5}],
+            [[0.5, 0.5, 0.5], [0, 0, 0], [0.001, 0, 0]],
+        )
+        json_str = unsorted.to(fmt="json")
+
+        from_str = IStructure.from_str(json_str, fmt="json", sort=True, merge_tol=0.01)
+        assert type(from_str) is IStructure
+        assert [site.species_string for site in from_str] == ["Na", "Cl"]
+        assert from_str.is_ordered
+
+        json_path = f"{self.tmp_path}/struct.json"
+        unsorted.to(filename=json_path)
+        from_file = IStructure.from_file(json_path, sort=True, merge_tol=0.01)
+        assert type(from_file) is IStructure
+        assert [site.species_string for site in from_file] == ["Na", "Cl"]
+        assert from_file.is_ordered
+
+    def test_from_id_mocked(self):
+        sentinel = IStructure(Lattice.cubic(3), ["Na"], [[0, 0, 0]])
+        mp_rester = mock.MagicMock()
+        mp_rester.return_value.get_structure_by_material_id.return_value = sentinel
+        cod = mock.MagicMock()
+        cod.return_value.get_structure_by_id.return_value = sentinel
+        fake_modules = {
+            "pymatgen.ext": _fake_module("pymatgen.ext"),
+            "pymatgen.ext.matproj": _fake_module("pymatgen.ext.matproj", MPRester=mp_rester),
+            "pymatgen.ext.cod": _fake_module("pymatgen.ext.cod", COD=cod),
+        }
+        with mock.patch.dict(sys.modules, fake_modules):
+            assert IStructure.from_id("mp-1", api_key="dummy") is sentinel
+            assert IStructure.from_id("1101077", source="COD") is sentinel
+        mp_rester.assert_called_once_with(api_key="dummy")
+        mp_rester.return_value.get_structure_by_material_id.assert_called_once_with("mp-1")
+        cod.return_value.get_structure_by_id.assert_called_once_with(1101077)
+
+        with pytest.raises(ValueError, match="Invalid source: foo"):
+            IStructure.from_id("mp-1", source="foo")
 
 
 class TestStructure(MatSciTest):
@@ -2300,14 +2526,23 @@ Sites (8)
   1  Li    0.5  0.5  0
   2  Li    0.5  0    0.5
   3  Li    0    0.5  0.5
-  4  Cl    0.5  0    0.5
-  5  Cl    0    0.5  0.5
-  6  Cl    0.5  0.5  0
-  7  Cl    0    0    0"""
+  4  Cl    0.5  0.5  0.5
+  5  Cl    0    0    0.5
+  6  Cl    0    0.5  0
+  7  Cl    0.5  0    0"""
         assert str(struct) == expected_struct_str
+        assert struct.get_space_group_info() == ("Fm-3m", 225)
+        assert min(struct.get_distance(0, idx) for idx in range(4, 8)) == approx(2.56 / 2)
         for prototype in ("cscl", "fluorite", "antifluorite", "zincblende"):
             struct = Structure.from_prototype(prototype, ["Cs", "Cl"], a=5)
             assert struct.lattice.is_orthogonal
+
+        perovskite = Structure.from_prototype("Perovskite", ["Ca", "Ti", "O"], a=3.9)
+        assert perovskite.formula == "Ca1 Ti1 O3"
+        assert perovskite.get_space_group_info() == ("Pm-3m", 221)
+
+        with pytest.raises(ValueError, match="Unsupported prototype='foo'"):
+            Structure.from_prototype("foo", ["C"], a=3)
 
     def test_to_primitive(self):
         struct = Structure.from_file(f"{TEST_FILES_DIR}/cif/orci_1010.cif")
@@ -2362,6 +2597,147 @@ Sites (8)
         struct_deuter.to(f"{self.tmp_path}/POSCAR_deuter")
         struct = Structure.from_file(f"{self.tmp_path}/POSCAR_deuter")
         assert "Deuterium" not in [el.long_name for el in struct.composition.elements]
+
+    def test_setitem_periodic_site_errors(self):
+        struct = self.struct
+        with pytest.raises(ValueError, match="PeriodicSite added must have same lattice as Structure"):
+            struct[0] = PeriodicSite("Ge", [0, 0, 0], Lattice.cubic(5))
+        with pytest.raises(ValueError, match="Site assignments makes sense only for single int indices"):
+            struct[[0, 1]] = PeriodicSite("Ge", [0, 0, 0], struct.lattice)
+
+    def test_lattice_setter_from_matrix(self):
+        self.struct.lattice = [[5, 0, 0], [0, 5, 0], [0, 0, 5]]
+        assert isinstance(self.struct.lattice, Lattice)
+        assert self.struct.lattice.abc == approx((5, 5, 5))
+        assert_allclose(self.struct[1].frac_coords, [0.75, 0.5, 0.75])
+
+    def test_insert_validate_proximity(self):
+        with pytest.raises(ValueError, match="New site is too close to an existing site"):
+            self.struct.insert(0, "Ge", [0.001, 0, 0], validate_proximity=True)
+        assert len(self.struct) == 2
+
+    def test_replace_cartesian_coords(self):
+        self.struct.replace(0, "Ge", [1.0, 0.5, 0.25], coords_are_cartesian=True)
+        assert self.struct[0].species_string == "Ge"
+        assert_allclose(self.struct[0].coords, [1.0, 0.5, 0.25], atol=1e-8)
+
+    def test_translate_sites_scalar_index(self):
+        orig = self.struct[1].frac_coords.copy()
+        self.struct.translate_sites(1, [0.1, 0, 0])
+        assert_allclose(self.struct[1].frac_coords, orig + np.array([0.1, 0, 0]))
+        assert_allclose(self.struct[0].frac_coords, [0, 0, 0])
+
+    def test_rotate_sites_all_indices(self):
+        struct = Structure(Lattice.cubic(4), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        struct.rotate_sites(theta=np.pi / 2, axis=[0, 0, 1], anchor=[0, 0, 0], to_unit_cell=False)
+        assert_allclose(struct.cart_coords, [[0, 0, 0], [-2, 2, 2]], atol=1e-8)
+
+    @pytest.fixture
+    def boxed_methane(self) -> Structure:
+        methane = Molecule(
+            ["C", "H", "H", "H", "H"],
+            [
+                [0, 0, 0],
+                [0, 0, 1.089],
+                [1.026719, 0, -0.363],
+                [-0.51336, -0.889165, -0.363],
+                [-0.51336, 0.889165, -0.363],
+            ],
+        )
+        return methane.get_boxed_structure(10, 10, 10, reorder=False)
+
+    def test_substitute_molecule_group_antiparallel(self, boxed_methane):
+        # X->F points along -z while the replaced C-H bond points along +z: 180 deg inversion branch
+        boxed_methane.substitute(1, Molecule(["X", "F"], [[0, 0, 0], [0, 0, -1.11]]))
+        assert boxed_methane.formula == "H3 C1 F1"
+        assert boxed_methane[-1].species_string == "F"
+        assert_allclose(boxed_methane[-1].coords - boxed_methane[0].coords, [0, 0, 1.35], atol=1e-8)
+
+    def test_substitute_species_without_bond_length(self, boxed_methane):
+        # get_bond_length raises TypeError for Species, so the template bond length is kept
+        boxed_methane.replace_species({"C": Species("C", -4), "H": Species("H", 1)})
+        boxed_methane.substitute(1, "fluoro")
+        assert boxed_methane.formula == "H3 C1 F1"
+        assert boxed_methane.get_distance(0, len(boxed_methane) - 1) == approx(1.11)
+
+    def test_substitute_no_non_terminal_neighbor(self):
+        h2 = Structure(Lattice.cubic(10), ["H", "H"], [[0, 0, 0], [0, 0, 0.074]])
+        with pytest.raises(RuntimeError, match="Can't find a non-terminal neighbor"):
+            h2.substitute(0, "methyl")
+
+    def test_calc_property_mocked(self):
+        elasticity_calc = mock.MagicMock()
+        elasticity_calc.return_value.calc.return_value = {"bulk_modulus_vrh": 100.0}
+        fake_matcalc = _fake_module("matcalc", ElasticityCalc=elasticity_calc)
+        with mock.patch.dict(sys.modules, {"matcalc": fake_matcalc}):
+            result = self.struct.calc_property("Elasticity", calculator="my-pes", fmax=0.05)
+        assert result == {"bulk_modulus_vrh": 100.0}
+        elasticity_calc.assert_called_once_with("my-pes", fmax=0.05)
+        elasticity_calc.return_value.calc.assert_called_once_with(self.struct)
+
+    def test_calculate_with_calculator_class(self):
+        pytest.importorskip("ase")
+        calculator = self.cu_structure.calculate(calculator=EMT)
+        assert isinstance(calculator, EMT)
+        assert calculator.results["energy"] == approx(1.82559661)
+
+    def test_relax_with_optimizer_class(self):
+        pytest.importorskip("ase")
+        from ase.optimize import BFGS
+
+        relaxed = self.cu_structure.relax(calculator=EMT(), relax_cell=False, optimizer=BFGS)
+        assert relaxed.dynamics["optimizer"] == "BFGS"
+        assert relaxed.calc.results["energy"] == approx(1.82559661)
+
+    def test_relax_invalid_optimizer(self):
+        pytest.importorskip("ase")
+        with pytest.raises(ValueError, match="Unknown optimizer='Nope', must be one of"):
+            self.cu_structure.relax(calculator=EMT(), optimizer="Nope")
+
+    @pytest.mark.parametrize(
+        ("calculator", "blocked_modules", "err_cls", "match"),
+        [
+            ("not-a-calculator", (), ValueError, "Unknown calculator='not-a-calculator'"),
+            ("m3gnet", ("matgl", "matgl.ext", "matgl.ext.ase"), ImportError, "matgl not installed"),
+            ("gfn2-xtb", ("tblite", "tblite.ase"), ImportError, "Must install tblite"),
+        ],
+    )
+    def test_prep_calculator_errors(self, calculator, blocked_modules, err_cls, match):
+        with (
+            mock.patch.dict(sys.modules, dict.fromkeys(blocked_modules)),
+            pytest.raises(err_cls, match=match),
+        ):
+            self.cu_structure._prep_calculator(calculator)
+
+    def test_relax_matgl_string_calculator_mocked(self):
+        pytest.importorskip("ase")
+        observer_calls = []
+
+        class FakeTrajectoryObserver:
+            def __init__(self, atoms):
+                self.atoms = atoms
+
+            def __call__(self):
+                observer_calls.append(self.atoms)
+
+        load_model = mock.MagicMock(return_value="potential")
+        pes_calculator = mock.MagicMock(side_effect=lambda potential, **params: EMT())
+        fake_modules = {
+            "matgl": _fake_module("matgl", load_model=load_model),
+            "matgl.ext": _fake_module("matgl.ext"),
+            "matgl.ext.ase": _fake_module(
+                "matgl.ext.ase", PESCalculator=pes_calculator, TrajectoryObserver=FakeTrajectoryObserver
+            ),
+        }
+        with mock.patch.dict(sys.modules, fake_modules):
+            relaxed, traj = self.cu_structure.relax(calculator="m3gnet", steps=2, return_trajectory=True)
+
+        load_model.assert_called_once_with("M3GNet-MP-2021.2.8-PES")
+        pes_calculator.assert_called_once_with(potential="potential", stress_weight=0.01)
+        assert isinstance(traj, FakeTrajectoryObserver)
+        assert len(observer_calls) == 1
+        assert isinstance(relaxed, Structure)
+        assert relaxed.dynamics["optimizer"] == "FIRE"
 
 
 class TestIMolecule(MatSciTest):
@@ -2664,6 +3040,79 @@ Site: H (-0.5134, 0.8892, -0.3630)"""
         assert isinstance(atoms, Atoms)
 
         assert type(IMolecule.from_ase_atoms(atoms)) is IMolecule
+
+    def test_init_length_mismatch(self):
+        with pytest.raises(StructureError, match=r"len\(species\) != len\(coords\) \(2 != 1\)"):
+            IMolecule(["C", "O"], [[0, 0, 0]])
+
+    def test_hash(self):
+        imol = IMolecule(["C", "O"], [[0, 0, 0], [0, 0, 1.2]])
+        assert hash(imol) == hash(imol.composition)
+        assert len({imol, IMolecule(["C", "O"], [[0, 0, 0], [0, 0, 1.2]])}) == 1
+
+    @pytest.mark.parametrize(
+        ("other_kwargs", "expected"),
+        [
+            ({}, True),
+            ({"species": ["C"], "coords": [[0, 0, 0]]}, False),
+            ({"charge": 2}, False),
+            ({"spin_multiplicity": 3}, False),
+            ({"properties": {"energy": -1}}, False),
+        ],
+    )
+    def test_eq(self, other_kwargs, expected):
+        imol = IMolecule(["C", "O"], [[0, 0, 0], [0, 0, 1.2]])
+        kwargs = {"species": ["C", "O"], "coords": [[0, 0, 0], [0, 0, 1.2]]} | other_kwargs
+        assert (imol == IMolecule(**kwargs)) is expected
+
+    def test_eq_unrelated_object(self):
+        assert self.mol.__eq__("CH4") is NotImplemented
+        assert self.mol != "CH4"
+
+    def test_break_bond_multi_pass(self):
+        # The far C (index 2) is only bonded to index 3, so it is matched on the second pass
+        chain = IMolecule(["C", "C", "C", "C"], [[0, 0, 0], [0, 0, 1.5], [0, 0, 4.5], [0, 0, 3.0]])
+        mol1, mol2 = chain.break_bond(0, 1)
+        assert mol1.formula == "C1"
+        assert mol2.formula == "C3"
+
+        isolated = IMolecule(["C", "C", "C"], [[0, 0, 0], [0, 0, 1.5], [0, 0, 20]])
+        with pytest.raises(ValueError, match="Not all sites are matched"):
+            isolated.break_bond(0, 1)
+
+    def test_get_boxed_structure_random_rotation(self):
+        with mock.patch("numpy.random.default_rng", return_value=np.random.default_rng(0)):
+            boxed = self.mol.get_boxed_structure(6, 6, 6, images=(2, 2, 1), random_rotation=True, min_dist=1.0)
+        assert boxed.formula == "H16 C4"
+        assert boxed.lattice.abc == approx((12, 12, 6))
+        # Bonded C-H pairs are 1.089 A apart; inter-molecule distances respect min_dist
+        dists = boxed.distance_matrix[np.triu_indices(len(boxed), 1)]
+        assert dists.min() == approx(1.089, abs=1e-6)
+
+    def test_get_boxed_structure_no_cross(self):
+        rod = IMolecule(["C", "C"], [[0, 0, 0], [0, 0, 1.5]])
+        with (
+            mock.patch("numpy.random.default_rng", return_value=np.random.default_rng(2)),
+            pytest.raises(ValueError, match="Molecule crosses boundary of box"),
+        ):
+            rod.get_boxed_structure(1, 1, 1.6, random_rotation=True, no_cross=True)
+
+    def test_to_default_json(self):
+        json_str = self.mol.to()
+        assert json.loads(json_str)["@class"] == "Molecule"
+        assert IMolecule.from_str(json_str, fmt="json") == self.mol
+
+    def test_to_babel_extension_inferred(self):
+        if find_spec("openbabel") is not None:
+            pytest.skip("only checks the error path without openbabel")
+        with pytest.raises(RuntimeError, match="BabelMolAdaptor requires openbabel"):
+            self.mol.to(f"{self.tmp_path}/methane.mol")
+
+    def test_from_file_unknown_extension(self):
+        path = Path(f"{self.tmp_path}/methane.unknownext")
+        path.write_text("junk")
+        with pytest.raises(ValueError, match="Cannot determine file type"):
+            IMolecule.from_file(path)
 
 
 class TestMolecule(MatSciTest):
@@ -2985,3 +3434,57 @@ class TestMolecule(MatSciTest):
                 any_different = True
                 break
         assert any_different, "Using min_distance should give different perturbations"
+
+    def test_insert_validate_proximity(self):
+        with pytest.raises(ValueError, match="New site is too close to an existing site"):
+            self.mol.insert(0, "H", [0, 0, 0.1], validate_proximity=True)
+        assert len(self.mol) == 5
+        self.mol.insert(0, "F", [0, 0, -2], validate_proximity=True)
+        assert self.mol.formula == "H4 C1 F1"
+
+    def test_remove_species(self):
+        mol = Molecule(
+            [{"C": 0.5, "N": 0.5}, "H", "O"],
+            [[0, 0, 0], [0, 0, 1.1], [1, 1, 1]],
+            charge_spin_check=False,
+            site_properties={"tag": [1, 2, 3]},
+            labels=["CN", "H1", "O1"],
+        )
+        returned = mol.remove_species(["C", "H"])
+        assert returned is mol
+        assert mol.composition == Composition("N0.5O")
+        assert mol.labels == ["CN", "O1"]
+        assert mol.site_properties["tag"] == [1, 3]
+
+    def test_translate_sites_defaults(self):
+        orig_coords = self.mol.cart_coords.copy()
+        assert self.mol.translate_sites() is self.mol  # zero vector on all sites
+        assert_allclose(self.mol.cart_coords, orig_coords)
+        self.mol.translate_sites(vector=[1, 0, 0])
+        assert_allclose(self.mol.cart_coords, orig_coords + np.array([1, 0, 0]))
+
+    def test_substitute_errors(self):
+        with pytest.raises(RuntimeError, match="Can't find functional group in list"):
+            self.mol.substitute(1, "not-a-group")
+        h2 = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        with pytest.raises(RuntimeError, match="Can't find a non-terminal neighbor"):
+            h2.substitute(0, "methyl")
+
+    def test_calculate_unsupported_string_calculator(self):
+        with pytest.raises(ValueError, match="Can't use calculator='m3gnet' for a Molecule"):
+            self.mol.calculate("m3gnet")
+
+    def test_relax_cell_not_allowed(self):
+        pytest.importorskip("ase")
+        with pytest.raises(ValueError, match="Can't relax cell for a Molecule"):
+            self.mol._relax(EMT(), relax_cell=True)
+
+    def test_calculate_gfn2_xtb_mocked(self):
+        pytest.importorskip("ase")
+        tblite = mock.MagicMock(side_effect=lambda method, **params: EMT())
+        fake_modules = {"tblite": _fake_module("tblite"), "tblite.ase": _fake_module("tblite.ase", TBLite=tblite)}
+        with mock.patch.dict(sys.modules, fake_modules):
+            calculator = self.mol.calculate("gfn2-xtb")
+        tblite.assert_called_once_with(method="GFN2-xTB")
+        assert isinstance(calculator, EMT)
+        assert "energy" in calculator.results

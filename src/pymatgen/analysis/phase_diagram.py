@@ -1727,7 +1727,8 @@ class CompoundPhaseDiagram(PhaseDiagram):
             CompoundPhaseDiagram
         """
         entries = MontyDecoder().process_decoded(dct["original_entries"])
-        terminal_compositions = MontyDecoder().process_decoded(dct["terminal_compositions"])
+        # as_dict stores terminal compositions as plain {element: amount} dicts
+        terminal_compositions = [Composition(comp) for comp in dct["terminal_compositions"]]
         return cls(entries, terminal_compositions, dct["normalize_terminal_compositions"])
 
 
@@ -3715,7 +3716,7 @@ class PDPlotter:
 
         stable_props = get_marker_props(stable_coords, stable_entries)
         unstable_props = get_marker_props(unstable_coords, unstable_entries)
-        highlight_props = get_marker_props(highlight_coords, highlight_entries)
+        highlight_props = get_marker_props(highlight_coords, highlight_ents)
 
         stable_markers, unstable_markers, highlight_markers = {}, {}, {}
 
@@ -4206,13 +4207,9 @@ class PDPlotter:
                 cmap = energy_colormap
             norm = Normalize(vmin=vmin, vmax=vmax)
             _map = ScalarMappable(norm=norm, cmap=cmap)
-            _energies: list[float] = list(
-                filter(
-                    None,
-                    (self._pd.get_equilibrium_reaction_energy(entry) for entry in labels.values()),
-                )
-            )
-            energies = [en if en < 0 else -0.000_000_01 for en in _energies]
+            # Keep one value per stable entry: elemental entries have a reaction energy of 0
+            _energies = [self._pd.get_equilibrium_reaction_energy(entry) for entry in labels.values()]
+            energies = [en if en is not None and en < 0 else -0.000_000_01 for en in _energies]
             vals_stable = _map.to_rgba(np.array(energies))
             ii = 0
             if process_attributes:
@@ -4293,15 +4290,15 @@ class PDPlotter:
         if self.show_unstable:
             font = FontProperties()
             font.set_size(16)
-            energies_unstable = list(filter(None, (self._pd.get_e_above_hull(entry) for entry in unstable)))
+            # Keep one value per unstable entry so colors stay aligned with the entries
+            energies_unstable = [self._pd.get_e_above_hull(entry) or 0.0 for entry in unstable]
             if energy_colormap is not None and energies is not None and _map is not None:
                 energies.extend(energies_unstable)
                 vals_unstable = _map.to_rgba(np.array(energies_unstable))
             else:
                 vals_unstable = None
 
-            ii = 0
-            for entry, coords in unstable.items():
+            for idx, (entry, coords) in enumerate(unstable.items()):
                 ehull = self._pd.get_e_above_hull(entry)
                 if ehull is not None and ehull < self.show_unstable:
                     vec = np.asarray(coords) - center
@@ -4324,7 +4321,7 @@ class PDPlotter:
                             "s",
                             linewidth=3,
                             markeredgecolor="k",
-                            markerfacecolor=vals_unstable[ii],
+                            markerfacecolor=vals_unstable[idx],
                             markersize=8,
                         )
                     if label_unstable:
@@ -4338,11 +4335,10 @@ class PDPlotter:
                             verticalalignment=valign,
                             fontproperties=font,
                         )
-                    ii += 1
 
         if energy_colormap is not None and show_colorbar and energies is not None and _map is not None:
             _map.set_array(energies)
-            cbar = plt.colorbar(_map)
+            cbar = plt.colorbar(_map, ax=ax)
             cbar.set_label(
                 "Energy [meV/at] above hull (positive values)\nInverse energy [meV/at] above hull (negative values)",
                 rotation=-90,
