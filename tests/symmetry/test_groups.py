@@ -19,7 +19,7 @@ __email__ = "shyue@nus.edu"
 __date__ = "4/10/14"
 
 ORDERED_SYMBOLS = (
-    "P1 P-1 P121 P12_11 C121 P1m1 P1c1 C1m1 C1c1 P12/m1 P12_1/m1 C12/m1 P12/c1 P12_1/c1 C12/c1 P222 P222_1"
+    "P1 P-1 P2 P2_1 C2 Pm Pc Cm Cc P2/m P2_1/m C2/m P2/c P2_1/c C2/c P222 P222_1"
     " P2_12_12 P2_12_12_1 C222_1 C222 F222 I222 I2_12_12_1 Pmm2 Pmc2_1 Pcc2 Pma2 Pca2_1 Pnc2 Pmn2_1 Pba2 Pna2_1 Pnn2 "
     "Cmm2 Cmc2_1 Ccc2 Amm2 Aem2 Ama2 Aea2 Fmm2 Fdd2 Imm2 Iba2 Ima2 Pmmm Pnnn Pccm Pban Pmma Pnna Pmna Pcca Pbam "
     "Pccn Pbcm Pnnm Pmmn Pbcn Pbca Pnma Cmcm Cmce Cmmm Cccm Cmme Ccce Fmmm Fddd Immm Ibam Ibca Imma P4 P4_1 P4_2 "
@@ -97,6 +97,48 @@ class TestSpaceGroup:
         sg = SpaceGroup("R-3mH")
         assert sg.int_number == 166
 
+    @pytest.mark.parametrize(
+        ("number", "short_symbol", "full_symbol"),
+        [
+            (3, "P2", "P121"),
+            (4, "P2_1", "P12_11"),
+            (5, "C2", "C121"),
+            (6, "Pm", "P1m1"),
+            (7, "Pc", "P1c1"),
+            (8, "Cm", "C1m1"),
+            (9, "Cc", "C1c1"),
+            (10, "P2/m", "P12/m1"),
+            (11, "P2_1/m", "P12_1/m1"),
+            (12, "C2/m", "C12/m1"),
+            (13, "P2/c", "P12/c1"),
+            (14, "P2_1/c", "P12_1/c1"),
+            (15, "C2/c", "C12/c1"),
+        ],
+    )
+    def test_short_monoclinic_symbols(self, number, short_symbol, full_symbol):
+        for symbol in (short_symbol, full_symbol):
+            sg = SpaceGroup(symbol)
+            assert sg.symbol == short_symbol
+            assert sg.full_symbol == full_symbol
+            assert sg.int_number == number
+        assert SpaceGroup.from_int_number(number).symbol == short_symbol
+
+    @pytest.mark.parametrize(
+        ("symbol", "diagonal"),
+        [("P2", (-1, 1, -1)), ("P112", (-1, -1, 1)), ("P211", (1, -1, -1))],
+    )
+    def test_monoclinic_symbol_preserves_unique_axis(self, symbol, diagonal):
+        sg = SpaceGroup(symbol)
+        assert sg.symbol == symbol
+        assert sg.int_number == 3
+        assert sg.order == 2
+        assert SymmOp.from_rotation_and_translation(np.diag(diagonal)) in sg.symmetry_ops
+
+    @pytest.mark.parametrize("number", range(3, 16))
+    def test_monoclinic_symbol_settings(self, number):
+        sg = SpaceGroup.from_int_number(number)
+        assert SpaceGroup.get_settings(sg.symbol) == SpaceGroup.get_settings(sg.full_symbol)
+
     def test_attr(self):
         sg = SpaceGroup("Fm-3m")
         assert sg.full_symbol == "F4/m-32/m"
@@ -121,6 +163,13 @@ class TestSpaceGroup:
             assert len(sg.symmetry_ops) == sg.order
 
     def test_get_settings(self):
+        assert SpaceGroup.get_settings("P2") == {
+            "P121",
+            "P112",
+            "P211",
+            "P121(2*a+c,b,c)",
+            "P121(c,2*a+c,b)",
+        }
         assert SpaceGroup.get_settings("Fm-3m") == {"Fm-3m(a-1/4,b-1/4,c-1/4)", "Fm-3m"}
 
         pmmn_settings = {
