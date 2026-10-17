@@ -3741,10 +3741,6 @@ class TestVasprunEdgeCases(MatSciTest):
         self.vasprun.dielectric_data = {"density": []}
         assert self.vasprun.optical_absorption_coeff is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="optical_absorption_coeff raises KeyError('density') instead of returning None without dielectric data",
-    )
     def test_optical_absorption_coeff_no_dielectric_data(self):
         assert self.vasprun.dielectric_data == {}
         assert self.vasprun.optical_absorption_coeff is None
@@ -3803,10 +3799,6 @@ class TestVasprunEdgeCases(MatSciTest):
         _, probability = Vasprun._parse_optical_transition(elem)
         assert_allclose(probability, [0.1, 0.2])
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="_parse_optical_transition returns the full (n, 2) array as oscillator strength instead of column 0",
-    )
     def test_parse_optical_transition_oscillator_strength(self):
         elem = ET.fromstring(
             '<dielectricfunction><varray name="opticaltransitions">'

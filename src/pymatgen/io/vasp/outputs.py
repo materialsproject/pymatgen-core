@@ -695,7 +695,7 @@ class Vasprun(MSONable):
         Note that this method is only implemented for optical properties
         calculated with GGA and BSE.
         """
-        diel_data = self.dielectric_data.get("freq_dependent") or self.dielectric_data["density"]
+        diel_data = self.dielectric_data.get("freq_dependent") or self.dielectric_data.get("density")
         if diel_data:
             real_avg = [sum(diel_data[1][i][:3]) / 3 for i in range(len(diel_data[0]))]
             imag_avg = [sum(diel_data[2][i][:3]) / 3 for i in range(len(diel_data[0]))]
@@ -1662,10 +1662,11 @@ class Vasprun(MSONable):
         for va in elem.findall("varray"):
             if va.attrib.get("name") == "opticaltransitions":
                 # optical transitions array contains oscillator strength and probability of transition
-                oscillator_strength = _parse_vasp_array(va)[:]
-                probability_transition = _parse_vasp_array(va)[:, 1]
+                transitions = np.asarray(_parse_vasp_array(va))
+                oscillator_strength = transitions[:, 0]
+                probability_transition = transitions[:, 1]
                 elem.clear()
-                return oscillator_strength, probability_transition  # type:ignore[return-value]
+                return oscillator_strength, probability_transition
 
         raise RuntimeError("Failed to parse optical transitions.")
 
