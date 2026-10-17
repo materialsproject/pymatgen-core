@@ -271,10 +271,10 @@ class AbinitTimerParser(collections.abc.Iterable):
 
         # Compute the parallel efficiency (total and section efficiency)
         peff = {}
-        ctime_peff = [
+        ctime_peff = [(min_ncpus * ref_t.cpu_time) / (t.cpu_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)]
+        wtime_peff = [
             (min_ncpus * ref_t.wall_time) / (t.wall_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)
         ]
-        wtime_peff = [(min_ncpus * ref_t.cpu_time) / (t.cpu_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)]
         n = len(timers)
 
         peff["total"] = {}

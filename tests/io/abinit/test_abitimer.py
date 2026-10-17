@@ -236,23 +236,25 @@ class TestAbinitTimerParser:
         assert peff["total"]["wall_fract"] == [100, 100, 100]
 
         # Ordering by efficiency (sections with -1 are excluded).
-        assert peff.good_sections() == ("total", "fourwf%(pot)", "nonlop(apply)", "pspini")
-        assert peff.good_sections(nmax=2, criterion="max") == ("total", "fourwf%(pot)")
+        # Wall-time efficiencies of the non-reference runs: total [2**-0.5, 0.5], fourwf [1, 1],
+        # nonlop [0.5, 0.5], pspini [0.25, 0.25].
+        assert peff.good_sections() == ("fourwf%(pot)", "total", "nonlop(apply)", "pspini")
+        assert peff.good_sections(nmax=2, criterion="max") == ("fourwf%(pot)", "total")
         assert peff.bad_sections(nmax=1) == ("pspini",)
-        assert peff.bad_sections(criterion="min", nmax=2) == ("pspini", "nonlop(apply)")
+        worst = peff.bad_sections(criterion="min", nmax=3)
+        assert worst[0] == "pspini"
+        assert set(worst[1:]) == {"total", "nonlop(apply)"}  # tied at 0.5
+        # Total cpu time scales ideally, so its cpu-time efficiency is 1 for every run.
+        assert set(peff.good_sections(key="cpu_time", nmax=2)) == {"fourwf%(pot)", "total"}
 
         table = peff.totable()
         assert table[0][0] == "AbinitTimerSection"
         assert len(table[0]) == 1 + 2 * 3
-        assert [row[0] for row in table[1:]] == ["total", "fourwf%(pot)", "nonlop(apply)", "pspini"]
+        assert [row[0] for row in table[1:]] == ["fourwf%(pot)", "total", "nonlop(apply)", "pspini"]
         assert table[-1][1:] == ["0.25", "10.00", "1.00", "10.00", "0.25", "10.00"]
         assert len(peff.totable(stop=2)) == 3
         assert peff.totable(reverse=False)[1][0] == "pspini"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="pefficiency computes the total cpu_time efficiency from wall_time and vice versa (swapped)",
-    )
     def test_pefficiency_total_cpu_vs_wall(self, scaling_parser):
         peff = scaling_parser.pefficiency()
         # cpu_total scales ideally (8/ncpus), wall_total as 16/sqrt(ncpus).
@@ -284,8 +286,8 @@ class TestAbinitTimerParser:
         _, ax2 = plt.subplots()
         fig = scaling_parser.plot_efficiency(what="good", nmax=1, ax=ax2, linewidth=1, markersize=3, show=False)
         assert fig is ax2.figure
-        # "total" is the best section, so no extra total line is added.
-        assert [text.get_text() for text in ax2.get_legend().get_texts()] == ["total"]
+        # "total" is not the best section, so a separate total line is added.
+        assert [text.get_text() for text in ax2.get_legend().get_texts()] == ["fourwf%(pot)", "total"]
 
         _, ax3 = plt.subplots()
         scaling_parser.plot_efficiency(what="bad", nmax=1, ax=ax3, show=False)
