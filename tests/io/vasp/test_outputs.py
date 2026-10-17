@@ -3881,19 +3881,11 @@ class TestOutcarEdgeCases(MatSciTest):
         assert_allclose(outcar.er_bp_tot, [0.05, 0.07, 0.09])
         assert_allclose(outcar.p_ion, [1.0, 1.1, 1.2])
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="read_igpar stores the electronic dipole in p_elc instead of the documented p_elec attribute",
-    )
     def test_read_igpar_p_elec(self):
         outcar = self._igpar_outcar(IGPAR_SPIN)
         outcar.read_igpar()
         assert_allclose(outcar.p_elec, [0.7, 0.8, 0.9])
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="read_igpar non-spin e<r>_ev handler builds np.array(map(...)) from groups()[1:4], raising TypeError",
-    )
     def test_read_igpar_nonspin(self):
         outcar = self._igpar_outcar(IGPAR_NONSPIN)
         outcar.read_igpar()
@@ -3929,12 +3921,10 @@ class TestOutcarEdgeCases(MatSciTest):
         self.outcar.read_pattern(patterns, postprocess=float)
         assert {key: self.outcar.data[key] for key in patterns} == cached
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="has_onsite_density_matrices is always True: read_pattern always sets the key in self.data",
-    )
     def test_has_onsite_density_matrices_false(self):
-        assert self.outcar.data["onsite_density_matrices"] == []
+        # The pattern is searched for but not found, so the onsite matrices are never read
+        assert self.outcar.data["has_onsite_density_matrices"] == []
+        assert "onsite_density_matrices" not in self.outcar.data
         assert not self.outcar.has_onsite_density_matrices
 
     def test_as_dict_lcalcpol(self):

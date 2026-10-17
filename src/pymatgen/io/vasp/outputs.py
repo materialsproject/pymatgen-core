@@ -2418,7 +2418,8 @@ class Outcar:
             {"has_onsite_density_matrices": r"onsite density matrix"},
             terminate_on_match=True,
         )
-        if "has_onsite_density_matrices" in self.data:
+        # read_pattern always sets the key, to an empty list when there is no match
+        if self.data.get("has_onsite_density_matrices"):
             self.has_onsite_density_matrices: bool = True
             self.read_onsite_density_matrices()
         else:
@@ -3106,7 +3107,7 @@ class Outcar:
 
             # Non-spin cases
             def er_ev(results: Outcar, match: re.Match[str]) -> None:
-                results.er_ev[Spin.up] = np.array(map(float, match.groups()[1:4])) / 2
+                results.er_ev[Spin.up] = np.array([float(match[i]) for i in range(1, 4)]) / 2
                 results.er_ev[Spin.down] = results.er_ev[Spin.up]
                 results.context = 2
 
@@ -3161,7 +3162,7 @@ class Outcar:
 
             # Always present spin/non-spin
             def p_elc(results: Outcar, match: re.Match[str]) -> None:
-                results.p_elc = np.array([float(match[i]) for i in range(1, 4)])
+                results.p_elec = np.array([float(match[i]) for i in range(1, 4)])
 
             elec_dipole_moment_pattern = (
                 r"^.*Total electronic dipole moment: *p\[elc\]=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
