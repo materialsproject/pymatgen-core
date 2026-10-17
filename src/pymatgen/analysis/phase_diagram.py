@@ -1727,7 +1727,8 @@ class CompoundPhaseDiagram(PhaseDiagram):
             CompoundPhaseDiagram
         """
         entries = MontyDecoder().process_decoded(dct["original_entries"])
-        terminal_compositions = MontyDecoder().process_decoded(dct["terminal_compositions"])
+        # as_dict stores terminal compositions as plain {element: amount} dicts
+        terminal_compositions = [Composition(comp) for comp in dct["terminal_compositions"]]
         return cls(entries, terminal_compositions, dct["normalize_terminal_compositions"])
 
 

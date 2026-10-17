@@ -1622,11 +1622,6 @@ class TestCompoundPhaseDiagramEdgeCases:
         assert len(dct["original_entries"]) == len(self.entries)
         assert [Composition(c) for c in dct["terminal_compositions"]] == self.terminals
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="CompoundPhaseDiagram.as_dict serializes terminals via Composition.as_dict (no @module/@class), "
-        "so from_dict passes plain dicts to transform_entries and raises AttributeError",
-    )
     def test_from_dict_round_trip(self):
         cpd = CompoundPhaseDiagram.from_dict(self.cpd.as_dict())
         assert sorted(e.name for e in cpd.stable_entries) == sorted(e.name for e in self.cpd.stable_entries)
