@@ -479,9 +479,17 @@ class BandStructure:
     def get_direct_band_gap_dict(self) -> dict[Spin, dict[str, Any]]:
         """Get information about the direct band gap.
 
+        Spin channels without both fully occupied and fully unoccupied bands
+        (e.g. a fully spin-polarized system whose minority channel has no
+        occupied bands) cannot define a direct gap and are omitted from the result.
+
         Returns:
             dict[Spin, dict[str, Any]]: The band gaps indexed by spin
                 along with their band indices and kpoint index.
+
+        Raises:
+            ValueError: If the band structure is metallic, or if no spin
+                channel has both occupied and unoccupied bands.
         """
         if self.is_metal():
             raise ValueError("get_direct_band_gap_dict should only be used with non-metals")
@@ -489,8 +497,10 @@ class BandStructure:
         direct_gap_dict = {}
         for spin, v in self.bands.items():
             above = v[np.all(v > self.efermi, axis=1)]
-            min_above = np.min(above, axis=0)
             below = v[np.all(v < self.efermi, axis=1)]
+            if len(above) == 0 or len(below) == 0:
+                continue
+            min_above = np.min(above, axis=0)
             max_below = np.max(below, axis=0)
             diff = min_above - max_below
             kpoint_index = np.argmin(diff)
@@ -503,6 +513,8 @@ class BandStructure:
                 "kpoint_index": kpoint_index,
                 "band_indices": band_indices,
             }
+        if not direct_gap_dict:
+            raise ValueError("No spin channel has both occupied and unoccupied bands; direct gap is undefined")
         return direct_gap_dict
 
     def get_direct_band_gap(self) -> float:

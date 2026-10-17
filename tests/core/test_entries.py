@@ -1,23 +1,31 @@
 from __future__ import annotations
 
+import json
 import warnings
 from collections import defaultdict
 
 import numpy as np
 import pytest
+from monty.json import MontyDecoder
 from pytest import approx
 
+from pymatgen.analysis.phase_diagram import PDEntry
+from pymatgen.core import Composition, Element, Lattice, Structure
 from pymatgen.core.entries import (
     CompositionEnergyAdjustment,
     ComputedEntry,
     ComputedStructureEntry,
     ConstantEnergyAdjustment,
     EnergyAdjustment,
+    Entry,
+    EntrySet,
     ManualEnergyAdjustment,
     TemperatureEnergyAdjustment,
+    group_entries_by_composition,
+    group_entries_by_structure,
 )
 from pymatgen.io.vasp.outputs import Vasprun
-from pymatgen.util.testing import VASP_OUT_DIR
+from pymatgen.util.testing import TEST_FILES_DIR, VASP_OUT_DIR
 
 vasp_run = Vasprun(f"{VASP_OUT_DIR}/vasprun.xml.gz")
 
@@ -463,3 +471,296 @@ class TestComputedStructureEntry:
         # check different energy adjustments (but same id) --> not equal
         copy3.energy_adjustments.append(ConstantEnergyAdjustment(0.1))
         assert copy3 != copy1
+
+
+class TestEntry:
+    """Tests for the generic Entry base class, exercised via the PDEntry subclass."""
+
+    def test_properties(self):
+        entry = PDEntry("Fe4O6", -60.0)
+        assert entry.formula == "Fe4 O6"
+        assert entry.reduced_formula == "Fe2O3"
+        assert entry.elements == [Element.Fe, Element.O]
+        assert entry.energy_per_atom == approx(-6.0)
+        assert not entry.is_element
+        assert PDEntry("O2", -9.0).is_element
+        assert entry.composition == Composition("Fe4O6")
+
+    def test_base_repr_and_abstract_energy(self):
+        class MinimalEntry(Entry):
+            @property
+            def energy(self) -> float:
+                return self._energy
+
+        entry = MinimalEntry("Li2O", -14.0)
+        assert repr(entry) == "MinimalEntry : Li2 O1 with energy = -14.0000"
+        with pytest.raises(NotImplementedError):
+            Entry.energy.fget(entry)
+        with pytest.raises(TypeError, match="abstract"):
+            Entry("Li2O", -14.0)
+
+    def test_init_with_composition(self):
+        comp = Composition("Li2O")
+        entry = PDEntry(comp, -14.0)
+        assert entry.composition is comp
+
+    @pytest.mark.parametrize(
+        ("mode", "formula", "energy"),
+        [("formula_unit", "Fe2 O3", -30.0), ("atom", "Fe0.4 O0.6", -6.0)],
+    )
+    def test_normalize(self, mode, formula, energy):
+        entry = PDEntry("Fe4O6", -60.0)
+        normed = entry.normalize(mode)
+        assert isinstance(normed, PDEntry)
+        assert normed.formula == formula
+        assert normed.energy == approx(energy)
+        assert normed.energy_per_atom == approx(entry.energy_per_atom)
+        # original entry untouched
+        assert entry.energy == approx(-60.0)
+
+    @pytest.mark.parametrize("entry_cls", [PDEntry, ComputedEntry])
+    def test_normalize_invalid_mode(self, entry_cls):
+        with pytest.raises(ValueError, match="bad_mode is not an allowed option for normalization"):
+            entry_cls("Fe4O6", -60.0).normalize("bad_mode")
+
+    def test_eq_and_hash(self):
+        entry = PDEntry("Fe2O3", -30.0)
+        assert entry == entry  # noqa: PLR0124
+        assert entry == PDEntry("Fe2O3", -30.0)
+        assert hash(entry) == hash(PDEntry("Fe2O3", -30.0))
+        assert entry != PDEntry("Fe2O3", -30.1)
+        assert entry != PDEntry("Fe4O6", -30.0)
+        # comparison with a foreign type defers to NotImplemented -> unequal
+        assert entry.__eq__("Fe2O3") is NotImplemented
+        assert entry != "Fe2O3"
+        assert len({entry, PDEntry("Fe2O3", -30.0), PDEntry("Li2O", -14.0)}) == 2
+
+
+class TestComputedEntryExtra:
+    def test_repr_with_adjustments_parameters_and_data(self):
+        entry = ComputedEntry(
+            "Fe2O3",
+            -30.0,
+            energy_adjustments=[ConstantEnergyAdjustment(-1.0, name="Dummy")],
+            parameters={"run_type": "GGA"},
+            data={"oxide_type": "oxide"},
+            entry_id="mp-1",
+        )
+        text = repr(entry)
+        assert text.startswith("mp-1 ComputedEntry - Fe2 O3")
+        assert "  Dummy                  : -1.0000   eV (-0.2000  eV/atom)" in text
+        assert "  run_type               = GGA" in text
+        assert "  oxide_type             = oxide" in text
+        assert "Energy (Final)           = -31.0000" in text
+
+    def test_eq(self):
+        entry = ComputedEntry("Fe2O3", -30.0, entry_id="mp-1")
+        assert entry == entry  # noqa: PLR0124
+        # objects lacking composition/energy/entry_id -> NotImplemented -> unequal
+        assert entry.__eq__(1) is NotImplemented
+        assert entry != 1
+        # same id, different energy
+        assert entry != ComputedEntry("Fe2O3", -31.0, entry_id="mp-1")
+        # same energy, different composition, no ids
+        assert ComputedEntry("Fe2O3", -30.0) != ComputedEntry("FeO", -30.0)
+
+    def test_hash(self):
+        with_id = ComputedEntry("Fe2O3", -30.0, entry_id="mp-1")
+        assert hash(with_id) == hash("ComputedEntrymp-1")
+        # hash depends only on entry_id when it is set
+        assert hash(with_id) == hash(ComputedEntry("FeO", -5.0, entry_id="mp-1"))
+        no_id = ComputedEntry("Fe2O3", -30.0)
+        assert hash(no_id) == hash(f"ComputedEntry{no_id.composition.formula}{-30.0:.8f}")
+
+
+@pytest.fixture
+def fe_bcc() -> Structure:
+    return Structure(Lattice.cubic(2.87), ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+
+
+class TestComputedStructureEntryExtra:
+    @pytest.mark.parametrize("composition", ["Fe4", Composition("Fe")])
+    def test_composition_argument(self, fe_bcc, composition):
+        entry = ComputedStructureEntry(fe_bcc, -16.0, composition=composition)
+        assert entry.composition == Composition(composition)
+        assert entry.structure is fe_bcc
+
+    def test_mismatching_composition(self, fe_bcc):
+        with pytest.raises(ValueError, match="Mismatching composition provided"):
+            ComputedStructureEntry(fe_bcc, -16.0, composition="FeO")
+
+    def test_from_dict_legacy_correction(self, fe_bcc):
+        dct = ComputedStructureEntry(
+            fe_bcc, -16.0, parameters={"run_type": "GGA"}, data={"a": 1}, entry_id="mp-13"
+        ).as_dict()
+        dct["correction"] = -1.5
+        del dct["energy_adjustments"]
+        entry = ComputedStructureEntry.from_dict(dct)
+        assert isinstance(entry, ComputedStructureEntry)
+        assert entry.uncorrected_energy == approx(-16.0)
+        assert entry.correction == approx(-1.5)
+        assert entry.energy == approx(-17.5)
+        assert len(entry.energy_adjustments) == 1
+        assert isinstance(entry.energy_adjustments[0], ManualEnergyAdjustment)
+        assert entry.parameters == {"run_type": "GGA"}
+        assert entry.data == {"a": 1}
+        assert entry.entry_id == "mp-13"
+        assert entry.structure == fe_bcc
+
+    @pytest.mark.parametrize("mode", ["formula_unit", "atom"])
+    def test_normalize(self, fe_bcc, mode):
+        entry = ComputedStructureEntry(fe_bcc, -16.0, correction=-2.0)
+        with pytest.warns(UserWarning, match="inconsistent"):
+            normed = entry.normalize(mode)
+        assert isinstance(normed, ComputedStructureEntry)
+        assert normed.uncorrected_energy == approx(-8.0)
+        assert normed.correction == approx(-1.0)
+        assert normed.energy == approx(-9.0)
+        # structure is left unchanged
+        assert normed.structure == fe_bcc
+        assert len(normed.structure) == 2
+
+    @pytest.mark.parametrize("mode", ["formula_unit", "atom"])
+    def test_normalize_composition(self, fe_bcc, mode):
+        entry = ComputedStructureEntry(fe_bcc, -16.0)
+        with pytest.warns(UserWarning, match="inconsistent"):
+            normed = entry.normalize(mode)
+        assert normed.composition == Composition("Fe")
+        assert normed.energy_per_atom == approx(entry.energy_per_atom)
+
+
+@pytest.fixture(scope="module")
+def tio2_entries() -> list[ComputedStructureEntry]:
+    with open(f"{TEST_FILES_DIR}/entries/TiO2_entries.json", encoding="utf-8") as file:
+        return json.load(file, cls=MontyDecoder)
+
+
+def _group_ids(groups) -> list[list]:
+    return sorted(sorted(entry.entry_id for entry in group) for group in groups)
+
+
+TIO2_GROUPS = [
+    [390, 34688],
+    [430],
+    [1439],
+    [1840],
+    [2657],
+    [9173],
+    [25262, 25263, 25334, 25434],
+    [25433],
+    [554278, 554439],
+    [562577],
+    [572822],
+]
+
+
+class TestGroupEntries:
+    def test_group_entries_by_structure(self, tio2_entries):
+        groups = group_entries_by_structure(tio2_entries)
+        assert _group_ids(groups) == TIO2_GROUPS
+        assert all(isinstance(entry, ComputedStructureEntry) for group in groups for entry in group)
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AttributeError,
+        reason="ncpus path calls comparator.get_structure_hash, which no AbstractComparator subclass defines",
+    )
+    def test_group_entries_by_structure_parallel(self, tio2_entries):
+        groups = group_entries_by_structure(tio2_entries, ncpus=2)
+        assert _group_ids(groups) == TIO2_GROUPS
+
+    def test_group_entries_by_structure_species_to_remove(self, tio2_entries):
+        # Comparing only the Ti sublattice merges 9173 and 572822
+        groups = group_entries_by_structure(tio2_entries, species_to_remove=["O"])
+        expected = sorted([g for g in TIO2_GROUPS if g not in ([9173], [572822])] + [[9173, 572822]])
+        assert _group_ids(groups) == expected
+        # input structures must not be modified
+        assert all(entry.structure.reduced_formula == "TiO2" for entry in tio2_entries)
+
+    @pytest.mark.parametrize(
+        ("sort_by_e_per_atom", "expected"),
+        [(True, [["c", "a", "d"], ["b"]]), (False, [["a", "c", "d"], ["b"]])],
+    )
+    def test_group_entries_by_composition(self, sort_by_e_per_atom, expected):
+        entries = [
+            ComputedEntry("Fe2O3", -30.0, entry_id="a"),
+            ComputedEntry("Li2O", -14.0, entry_id="b"),
+            ComputedEntry("Fe4O6", -61.0, entry_id="c"),
+            ComputedEntry("Fe2O3", -29.0, entry_id="d"),
+        ]
+        groups = group_entries_by_composition(entries, sort_by_e_per_atom=sort_by_e_per_atom)
+        assert [group[0].reduced_formula for group in groups] == ["Fe2O3", "Li2O"]
+        assert [[entry.entry_id for entry in group] for group in groups] == expected
+
+
+class TestEntrySet:
+    def setup_method(self):
+        self.entries = [
+            ComputedEntry("Li", -1.9, entry_id="Li"),
+            ComputedEntry("O2", -9.8, entry_id="O"),
+            ComputedEntry("Li2O", -14.3, entry_id="Li2O"),
+            ComputedEntry("Li4O2", -28.0, entry_id="Li2O-hi"),
+            ComputedEntry("Fe", -8.3, entry_id="Fe"),
+            ComputedEntry("Fe2O3", -38.0, entry_id="Fe2O3"),
+        ]
+        self.entry_set = EntrySet(self.entries)
+
+    def test_container(self):
+        entry_set = self.entry_set
+        assert len(entry_set) == 6
+        assert self.entries[0] in entry_set
+        assert {entry.entry_id for entry in entry_set} == {entry.entry_id for entry in self.entries}
+        new = ComputedEntry("FeO", -16.0, entry_id="FeO")
+        entry_set.add(new)
+        assert len(entry_set) == 7
+        assert new in entry_set
+        entry_set.discard(new)
+        assert len(entry_set) == 6
+        assert new not in entry_set
+        entry_set.discard(new)  # discarding a missing entry is a no-op
+        assert len(entry_set) == 6
+
+    def test_chemsys(self):
+        assert self.entry_set.chemsys == {"Li", "O", "Fe"}
+
+    def test_ground_states(self):
+        assert {entry.entry_id for entry in self.entry_set.ground_states} == {"Li", "O", "Li2O", "Fe", "Fe2O3"}
+        assert self.entry_set.is_ground_state(self.entries[2])
+        assert not self.entry_set.is_ground_state(self.entries[3])
+        self.entry_set.remove_non_ground_states()
+        assert len(self.entry_set) == 5
+        assert self.entries[3] not in self.entry_set
+
+    def test_get_subset_in_chemsys(self):
+        subset = self.entry_set.get_subset_in_chemsys(["Li", "O"])
+        assert isinstance(subset, EntrySet)
+        assert {entry.entry_id for entry in subset} == {"Li", "O", "Li2O", "Li2O-hi"}
+        assert subset.chemsys == {"Li", "O"}
+        with pytest.raises(ValueError, match=r"\['Li', 'Na'\] is not a subset of \['Fe', 'Li', 'O'\]"):
+            self.entry_set.get_subset_in_chemsys(["Li", "Na"])
+
+    def test_as_dict(self):
+        dct = self.entry_set.as_dict()
+        assert set(dct) == {"entries"}
+        assert set(dct["entries"]) == set(self.entries)
+        decoded = json.loads(self.entry_set.to_json(), cls=MontyDecoder)
+        assert isinstance(decoded, EntrySet)
+        assert {entry.entry_id for entry in decoded} == {entry.entry_id for entry in self.entries}
+
+    @pytest.mark.parametrize(("latexify_names", "li2o_name"), [(False, "Li2O"), (True, "Li_{2}O")])
+    def test_to_from_csv(self, latexify_names, li2o_name):
+        self.entry_set.to_csv("entries.csv", latexify_names=latexify_names)
+        with open("entries.csv", encoding="utf-8") as file:
+            lines = file.read().splitlines()
+        # element columns are sorted by electronegativity
+        assert lines[0] == "Name,Li,Fe,O,Energy"
+        assert len(lines) == 7
+        assert li2o_name in {line.split(",")[0] for line in lines[1:]}
+
+        loaded = EntrySet.from_csv("entries.csv")
+        assert len(loaded) == len(self.entry_set)
+        assert all(isinstance(entry, PDEntry) for entry in loaded)
+        loaded_by_energy = {round(entry.energy, 6): entry for entry in loaded}
+        for entry in self.entries:
+            assert loaded_by_energy[round(entry.energy, 6)].composition == entry.composition
+        assert li2o_name in {entry.name for entry in loaded}

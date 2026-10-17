@@ -695,7 +695,7 @@ class Vasprun(MSONable):
         Note that this method is only implemented for optical properties
         calculated with GGA and BSE.
         """
-        diel_data = self.dielectric_data.get("freq_dependent") or self.dielectric_data["density"]
+        diel_data = self.dielectric_data.get("freq_dependent") or self.dielectric_data.get("density")
         if diel_data:
             real_avg = [sum(diel_data[1][i][:3]) / 3 for i in range(len(diel_data[0]))]
             imag_avg = [sum(diel_data[2][i][:3]) / 3 for i in range(len(diel_data[0]))]
@@ -1662,10 +1662,11 @@ class Vasprun(MSONable):
         for va in elem.findall("varray"):
             if va.attrib.get("name") == "opticaltransitions":
                 # optical transitions array contains oscillator strength and probability of transition
-                oscillator_strength = _parse_vasp_array(va)[:]
-                probability_transition = _parse_vasp_array(va)[:, 1]
+                transitions = np.asarray(_parse_vasp_array(va))
+                oscillator_strength = transitions[:, 0]
+                probability_transition = transitions[:, 1]
                 elem.clear()
-                return oscillator_strength, probability_transition  # type:ignore[return-value]
+                return oscillator_strength, probability_transition
 
         raise RuntimeError("Failed to parse optical transitions.")
 
@@ -2417,7 +2418,8 @@ class Outcar:
             {"has_onsite_density_matrices": r"onsite density matrix"},
             terminate_on_match=True,
         )
-        if "has_onsite_density_matrices" in self.data:
+        # read_pattern always sets the key, to an empty list when there is no match
+        if self.data.get("has_onsite_density_matrices"):
             self.has_onsite_density_matrices: bool = True
             self.read_onsite_density_matrices()
         else:
@@ -3105,7 +3107,7 @@ class Outcar:
 
             # Non-spin cases
             def er_ev(results: Outcar, match: re.Match[str]) -> None:
-                results.er_ev[Spin.up] = np.array(map(float, match.groups()[1:4])) / 2
+                results.er_ev[Spin.up] = np.array([float(match[i]) for i in range(1, 4)]) / 2
                 results.er_ev[Spin.down] = results.er_ev[Spin.up]
                 results.context = 2
 
@@ -3160,7 +3162,7 @@ class Outcar:
 
             # Always present spin/non-spin
             def p_elc(results: Outcar, match: re.Match[str]) -> None:
-                results.p_elc = np.array([float(match[i]) for i in range(1, 4)])
+                results.p_elec = np.array([float(match[i]) for i in range(1, 4)])
 
             elec_dipole_moment_pattern = (
                 r"^.*Total electronic dipole moment: *p\[elc\]=\( *([-0-9.Ee+]*) *([-0-9.Ee+]*) *([-0-9.Ee+]*) *\)"
@@ -4334,7 +4336,7 @@ class Procar(MSONable):
             phase_factors_list.append(phase_factors)
 
         # Combine arrays along the kpoints axis:
-        # nbands (axis = 2) could differ between arrays, so set missing values to zero:
+        # nbands (axis = 1) could differ between arrays, so set missing values to zero:
         max_nbands = max(eig_dict[Spin.up].shape[1] for eig_dict in eigenvalues_list)
         for dict_array in itertools.chain(
             occupancies_list,
@@ -4349,7 +4351,7 @@ class Procar(MSONable):
                         if len(array.shape) == 2:  # occupancies, eigenvalues
                             dict_array[key] = np.pad(
                                 array,
-                                ((0, 0), (0, max_nbands - array.shape[2])),
+                                ((0, 0), (0, max_nbands - array.shape[1])),
                                 mode="constant",
                             )
                         elif len(array.shape) == 4:  # data, phase_factors
@@ -4357,7 +4359,7 @@ class Procar(MSONable):
                                 array,
                                 (
                                     (0, 0),
-                                    (0, max_nbands - array.shape[2]),
+                                    (0, max_nbands - array.shape[1]),
                                     (0, 0),
                                     (0, 0),
                                 ),
@@ -4368,7 +4370,7 @@ class Procar(MSONable):
                                 array,
                                 (
                                     (0, 0),
-                                    (0, max_nbands - array.shape[2]),
+                                    (0, max_nbands - array.shape[1]),
                                     (0, 0),
                                     (0, 0),
                                     (0, 0),
@@ -5116,7 +5118,7 @@ class Dynmat:
         with zopen(filename, mode="rt", encoding="utf-8") as file:
             lines: list[str] = list(clean_lines(file.readlines()))  # type:ignore[arg-type]
             self._nspecs, self._natoms, self._ndisps = map(int, lines[0].split())
-            self._masses = map(float, lines[1].split())
+            self._masses = [float(mass) for mass in lines[1].split()]
             self.data: dict[int, dict] = defaultdict(dict)
             atom, disp = None, None
             for idx, line in enumerate(lines[2:]):
@@ -5208,7 +5210,7 @@ def get_adjusted_fermi_level(
         energy = efermi
         while energy < cbm:
             energy += energy_step
-            bs_working._efermi = energy
+            bs_working.efermi = energy
             if not bs_working.is_metal():
                 return energy
     return efermi
@@ -7280,7 +7282,7 @@ class Vaspout(Vasprun):
             lattice=Lattice(positions["scale"] * np.array(positions["lattice_vectors"])),
             species=species,
             coords=positions["position_ions"],
-            coords_are_cartesian=(positions["direct_coordinates"] == 1),
+            coords_are_cartesian=(positions["direct_coordinates"] != 1),
         )
 
     @staticmethod

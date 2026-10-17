@@ -806,12 +806,9 @@ class ComputedStructureEntry(ComputedEntry):
             stacklevel=2,
         )
         # TODO: find a better solution for creating copies instead of as/from dict
-        factor = self._normalization_factor(mode)
         dct = super().normalize(mode).as_dict()
         dct["structure"] = self.structure.as_dict()
-        entry = self.from_dict(dct)
-        entry._composition /= factor
-        return entry
+        return self.from_dict(dct)
 
     def copy(self) -> ComputedStructureEntry:
         """Get a copy of the ComputedStructureEntry."""
@@ -1102,7 +1099,7 @@ class EntrySet(collections.abc.MutableSet, MSONable):
         for entry in self.entries:
             els.update(entry.elements)
         elements = sorted(els, key=lambda a: a.X)
-        with open(filename, mode="w", encoding="utf-8") as file:
+        with open(filename, mode="w", encoding="utf-8", newline="") as file:
             writer = csv.writer(
                 file,
                 delimiter=",",
@@ -1128,7 +1125,7 @@ class EntrySet(collections.abc.MutableSet, MSONable):
         """
         from pymatgen.analysis.phase_diagram import PDEntry
 
-        with open(filename, encoding="utf-8") as file:
+        with open(filename, encoding="utf-8", newline="") as file:
             reader = csv.reader(file, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
             entries = []
             header_read = False

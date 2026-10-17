@@ -271,10 +271,10 @@ class AbinitTimerParser(collections.abc.Iterable):
 
         # Compute the parallel efficiency (total and section efficiency)
         peff = {}
-        ctime_peff = [
+        ctime_peff = [(min_ncpus * ref_t.cpu_time) / (t.cpu_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)]
+        wtime_peff = [
             (min_ncpus * ref_t.wall_time) / (t.wall_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)
         ]
-        wtime_peff = [(min_ncpus * ref_t.cpu_time) / (t.cpu_time * ncp) for (t, ncp) in zip(timers, ncpus, strict=True)]
         n = len(timers)
 
         peff["total"] = {}
@@ -320,9 +320,9 @@ class AbinitTimerParser(collections.abc.Iterable):
             "mpi_rank",
         ]
 
-        frame = pd.DataFrame(columns=col_names)
-        for timer in self.timers():
-            frame = frame.append({key: getattr(timer, key) for key in col_names}, ignore_index=True)
+        frame = pd.DataFrame(
+            [{key: getattr(timer, key) for key in col_names} for timer in self.timers()], columns=col_names
+        )
         frame["tot_ncpus"] = frame["mpi_nprocs"] * frame["omp_nthreads"]
 
         # Compute parallel efficiency (use the run with min number of cpus to normalize).
@@ -641,7 +641,7 @@ class AbinitTimerSection:
         """String representation."""
         string = ""
         for a in AbinitTimerSection.FIELDS:
-            string = f"{a} = {self.__dict__[a]},"
+            string += f"{a} = {self.__dict__[a]},"
         return string[:-1]
 
 
@@ -823,10 +823,10 @@ class AbinitTimer:
         width = 0.35  # the width of the bars
 
         cpu_times = self.get_values("cpu_time")
-        rects1 = plt.bar(ind, cpu_times, width, color="r")
+        rects1 = ax.bar(ind, cpu_times, width, color="r")
 
         wall_times = self.get_values("wall_time")
-        rects2 = plt.bar(ind + width, wall_times, width, color="y")
+        rects2 = ax.bar(ind + width, wall_times, width, color="y")
 
         # Add ylable and title
         ax.set_ylabel("Time (s)")
@@ -879,7 +879,7 @@ class AbinitTimer:
         y = np.asarray(self.get_values("wall_time"))
 
         # the scatter plot:
-        axScatter = plt.subplot(1, 1, 1)
+        axScatter = ax
         axScatter.scatter(x, y)
         axScatter.set_aspect("auto")
 
