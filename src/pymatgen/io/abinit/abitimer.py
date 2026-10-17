@@ -320,9 +320,9 @@ class AbinitTimerParser(collections.abc.Iterable):
             "mpi_rank",
         ]
 
-        frame = pd.DataFrame(columns=col_names)
-        for timer in self.timers():
-            frame = frame.append({key: getattr(timer, key) for key in col_names}, ignore_index=True)
+        frame = pd.DataFrame(
+            [{key: getattr(timer, key) for key in col_names} for timer in self.timers()], columns=col_names
+        )
         frame["tot_ncpus"] = frame["mpi_nprocs"] * frame["omp_nthreads"]
 
         # Compute parallel efficiency (use the run with min number of cpus to normalize).

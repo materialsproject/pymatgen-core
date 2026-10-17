@@ -261,7 +261,6 @@ class TestAbinitTimerParser:
         assert peff["total"]["cpu_time"] == pytest.approx([1.0, 1.0, 1.0])
         assert peff["total"]["wall_time"] == pytest.approx([2**-0.5, 1.0, 0.5], abs=1e-2)
 
-    @pytest.mark.xfail(strict=True, reason="summarize uses DataFrame.append, which was removed in pandas 2.0")
     def test_summarize(self, scaling_parser):
         frame = scaling_parser.summarize()
         assert list(frame["tot_ncpus"]) == [2, 1, 4]
