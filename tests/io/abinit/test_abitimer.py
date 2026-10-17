@@ -353,10 +353,6 @@ class TestAbinitTimerSection:
         assert fake.name == "fake"
         assert fake.to_tuple() == ("fake", 0.0, 0.0, 0.0, 0.0, -1, 0.0)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="AbinitTimerSection.__str__ reassigns the string in the loop, keeping only the last field",
-    )
     def test_str(self):
         string = str(AbinitTimerSection("fourwf", 1.5, 10.0, 2.0, 20.0, 7, -1.0))
         assert "name = fourwf" in string

@@ -641,7 +641,7 @@ class AbinitTimerSection:
         """String representation."""
         string = ""
         for a in AbinitTimerSection.FIELDS:
-            string = f"{a} = {self.__dict__[a]},"
+            string += f"{a} = {self.__dict__[a]},"
         return string[:-1]
 
 
