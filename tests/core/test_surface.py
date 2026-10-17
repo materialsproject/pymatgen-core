@@ -10,11 +10,14 @@ from pytest import approx
 
 import pymatgen.core
 from pymatgen.core import Composition, Lattice, Structure
+from pymatgen.core.local_env import VoronoiNN
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.core.surface import (
+    RECONSTRUCTIONS_ARCHIVE,
     ReconstructionGenerator,
     Slab,
     SlabGenerator,
+    center_slab,
     generate_all_slabs,
     get_d,
     get_slab_regions,
@@ -347,6 +350,158 @@ class TestSlab(MatSciTest):
         d = orjson.loads(dict_str)
         assert slab == Slab.from_dict(d)
 
+    def _ag_100_slab(self) -> Slab:
+        """Six-layer centered Ag(100) slab with one site per layer."""
+        return SlabGenerator(self.ag_fcc, (1, 0, 0), 10, 10, center_slab=True).get_slab()
+
+    def test_str(self):
+        lines = str(self.zno55).splitlines()
+        assert lines[0] == "Slab Summary (Zn4 O4)"
+        assert lines[1] == "Reduced Formula: ZnO"
+        assert lines[2] == "Miller index: (1, 0, 0)"
+        assert lines[3].startswith("Shift: 0.0000, Scale Factor: ")
+        assert lines[-9] == "Sites (8)"
+        site_lines = lines[-8:]
+        for idx, (line, site) in enumerate(zip(site_lines, self.zno55, strict=True)):
+            label, species, *coords = line.split()
+            assert int(label) == idx + 1
+            assert species == site.species_string
+            assert_allclose([float(x) for x in coords], site.frac_coords, atol=1e-6)
+
+    def test_add_adsorbate_atom_deprecated_specie(self):
+        slab = self.zno55.copy()
+        with pytest.warns(DeprecationWarning, match="'specie' is deprecated"):
+            slab.add_adsorbate_atom([1], species="O", distance=1, specie="H")
+        assert len(slab) == len(self.zno55) + 1
+        assert slab[-1].species_string == "H"
+        assert slab.get_distance(1, len(slab) - 1) == approx(1.0)
+
+    def test_symmetrically_add_atom_deprecated_specie(self):
+        slab = self._ag_100_slab()
+        n_sites = len(slab)
+        point = np.array([0.5, 0.5, slab.frac_coords[:, 2].max() + 0.05])
+        with pytest.warns(DeprecationWarning, match="'specie' is deprecated"):
+            slab.symmetrically_add_atom(species="O", point=point, specie="H")
+        assert len(slab) == n_sites + 2
+        assert [site.species_string for site in slab[-2:]] == ["H", "H"]
+        assert_allclose(slab[-2].frac_coords, point)
+        # The equivalent site sits on the opposite surface, mirrored about the slab center
+        assert slab[-1].frac_coords[2] % 1 == approx(1 - point[2], abs=1e-6)
+        assert slab.is_symmetric()
+
+    def test_get_symmetric_site_no_symmetry_ops(self, monkeypatch):
+        monkeypatch.setattr(SpacegroupAnalyzer, "get_symmetry_operations", lambda self, cartesian=False: [])
+        with pytest.raises(RuntimeError, match="Failed to get symmetric site"):
+            self.zno55.get_symmetric_site(np.array([0.5, 0.5, 0.5]))
+
+    def test_get_surface_sites_tag(self):
+        slab = self._ag_100_slab()
+        surf_sites = slab.get_surface_sites(tag=True)
+        z_coords = slab.frac_coords[:, 2]
+        assert [idx for _, idx in surf_sites["top"]] == [int(np.argmax(z_coords))]
+        assert [idx for _, idx in surf_sites["bottom"]] == [int(np.argmin(z_coords))]
+        is_surf = slab.site_properties["is_surf_site"]
+        assert len(is_surf) == len(slab)
+        assert {idx for idx, flag in enumerate(is_surf) if flag} == {
+            int(np.argmax(z_coords)),
+            int(np.argmin(z_coords)),
+        }
+
+    def test_get_surface_sites_voronoi_error(self, monkeypatch):
+        # A RuntimeError from VoronoiNN on the slab is treated as a surface site
+        original_get_cn = VoronoiNN.get_cn
+
+        def get_cn(self, structure, n, **kwargs):
+            if not isinstance(structure, Slab):
+                return original_get_cn(self, structure, n, **kwargs)
+            raise RuntimeError("pathological Voronoi tessellation")
+
+        monkeypatch.setattr(VoronoiNN, "get_cn", get_cn)
+        slab = self._ag_100_slab()
+        surf_sites = slab.get_surface_sites(tag=True)
+        com_z = slab.center_of_mass[2]
+        assert {idx for _, idx in surf_sites["top"]} == {
+            idx for idx, site in enumerate(slab) if site.frac_coords[2] > com_z
+        }
+        assert {idx for _, idx in surf_sites["bottom"]} == {
+            idx for idx, site in enumerate(slab) if site.frac_coords[2] <= com_z
+        }
+        assert all(slab.site_properties["is_surf_site"])
+
+    def test_get_tasker2_slabs_odd_sites(self):
+        # Ag(100) has a single atom per surface layer, so it cannot be split
+        slab = SlabGenerator(self.ag_fcc, (1, 0, 0), 10, 10).get_slab()
+        with pytest.warns(UserWarning, match="Odd number of sites to divide"):
+            assert slab.get_tasker2_slabs() == []
+
+    def test_symmetrically_remove_atoms(self):
+        slab = self._ag_100_slab()
+        z_coords = slab.frac_coords[:, 2]
+        top_idx = int(np.argmax(z_coords))
+        slab.symmetrically_remove_atoms([top_idx])
+        assert len(slab) == 4
+        assert_allclose(sorted(slab.frac_coords[:, 2]), sorted(z_coords)[1:-1])
+        assert slab.is_symmetric()
+
+    def test_symmetrically_remove_atoms_bottom_site(self):
+        slab = self._ag_100_slab()
+        z_coords = slab.frac_coords[:, 2]
+        bottom_idx = int(np.argmin(z_coords))
+        slab.symmetrically_remove_atoms([bottom_idx])
+        assert len(slab) == 4
+        assert slab.is_symmetric()
+
+    def test_symmetrically_remove_atoms_no_equivalent(self):
+        mgo = Structure(
+            Lattice.cubic(3.01),
+            ["Mg"] * 4 + ["O"] * 4,
+            [
+                [0, 0, 0],
+                [0, 0.5, 0.5],
+                [0.5, 0, 0.5],
+                [0.5, 0.5, 0],
+                [0.5, 0, 0],
+                [0.5, 0.5, 0.5],
+                [0, 0, 0.5],
+                [0, 0.5, 0],
+            ],
+        )
+        # Tasker 3 (111) slab: the two surfaces are terminated by different species
+        slab = SlabGenerator(mgo, (1, 1, 1), 10, 10, max_normal_search=1).get_slab()
+        assert not slab.is_symmetric()
+        n_sites = len(slab)
+        top_idx = int(np.argmax(slab.frac_coords[:, 2]))
+        with pytest.warns(UserWarning, match="Equivalent sites could not be found"):
+            slab.symmetrically_remove_atoms([top_idx])
+        assert len(slab) == n_sites
+
+    def test_center_slab_thin_cell(self):
+        # When the c lattice parameter is smaller than the neighbor cutoff,
+        # sites "spill over" and get shifted before the final centering
+        struct = Structure(Lattice.tetragonal(2.87, 4.0), ["Ag"], [[0, 0, 0.1]])
+        centered = center_slab(struct)
+        assert_allclose(centered.frac_coords, [[0, 0, 0.5]], atol=1e-8)
+
+    def test_center_slab(self):
+        slab = self._ag_100_slab()
+        z_coords = sorted(slab.frac_coords[:, 2])
+        slab.translate_sites(list(range(len(slab))), [0, 0, -0.1])
+        centered = center_slab(slab)
+        assert_allclose(sorted(centered.frac_coords[:, 2]), z_coords, atol=1e-8)
+        assert np.mean(centered.frac_coords[:, 2]) == approx(0.5)
+
+    def test_center_slab_wrapped_across_boundary(self):
+        slab = self._ag_100_slab()
+        z_coords = sorted(slab.frac_coords[:, 2])
+        slab.translate_sites(list(range(len(slab))), [0, 0, 0.5])
+        centered = center_slab(slab)
+        assert_allclose(sorted(centered.frac_coords[:, 2]), z_coords, atol=1e-6)
+
+    def test_get_slab_regions_contiguous(self):
+        slab = self._ag_100_slab()
+        z_coords = slab.frac_coords[:, 2]
+        assert_allclose(get_slab_regions(slab), [(z_coords.min(), z_coords.max())])
+
 
 class TestSlabGenerator(MatSciTest):
     def setup_method(self):
@@ -668,6 +823,48 @@ class TestSlabGenerator(MatSciTest):
         slabs = SlabGenerator(struct, (0, 0, 1), 1, 0).get_slabs()
         assert slabs[0].sites[0].species == comp
 
+    def test_get_slab_lll_mapping_failure(self, monkeypatch):
+        slab_gen = SlabGenerator(self.MgO, (1, 1, 1), 10, 10, lll_reduce=True)
+        monkeypatch.setattr(Lattice, "find_mapping", lambda *args, **kwargs: None)
+        with pytest.raises(RuntimeError, match="LLL reduction has failed"):
+            slab_gen.get_slab()
+
+    def test_gen_possible_terminations_empty(self):
+        slab_gen = SlabGenerator(self.MgO, (1, 0, 0), 10, 10)
+        slab_gen.oriented_unit_cell = Structure(slab_gen.oriented_unit_cell.lattice, [], [])
+        assert slab_gen.gen_possible_terminations() == []
+
+    def test_get_slabs_no_filter(self):
+        slab_gen = SlabGenerator(self.MgO, (1, 1, 1), 10, 10, max_normal_search=1)
+        filtered = slab_gen.get_slabs()
+        unfiltered = slab_gen.get_slabs(filter_out_sym_slabs=False)
+        assert len(filtered) == 1
+        assert len(unfiltered) == len(slab_gen.gen_possible_terminations()) == 6
+        # Unfiltered Slabs are all equivalent to the single filtered one
+        matcher = StructureMatcher(ltol=0.1, stol=0.1, primitive_cell=False, scale=False)
+        assert len(matcher.group_structures(unfiltered)) == 1
+
+    def test_move_to_other_side_in_unit_planes(self):
+        slab_gen = SlabGenerator(self.MgO, (1, 0, 0), 3, 3, in_unit_planes=True, center_slab=True)
+        slab = slab_gen.get_slab()
+        z_coords = slab.frac_coords[:, 2]
+        layers = np.unique(np.round(z_coords, 6))
+        top_idx = int(np.argmax(z_coords))
+        moved = slab_gen.move_to_other_side(slab, [top_idx])
+        # The top site moves to the next (empty) layer below the bottom surface
+        assert moved[top_idx].frac_coords[2] == approx(layers[0] - (layers[1] - layers[0]), abs=1e-5)
+        others = [idx for idx in range(len(slab)) if idx != top_idx]
+        assert_allclose(moved.frac_coords[others], slab.frac_coords[others])
+
+    def test_repair_broken_bonds_reversed_pair(self):
+        # The reference element is chosen by coordination, so the order of the pair should not matter
+        slab_gen = SlabGenerator(self.get_structure("LiFePO4"), (0, 0, 1), 10, 10, center_slab=True)
+        slab = slab_gen.get_slab()
+        repaired = slab_gen.repair_broken_bonds(slab.copy(), {("P", "O"): 3})
+        repaired_rev = slab_gen.repair_broken_bonds(slab.copy(), {("O", "P"): 3})
+        assert not np.allclose(repaired.frac_coords, slab.frac_coords)
+        assert_allclose(repaired_rev.frac_coords, repaired.frac_coords)
+
 
 class TestReconstructionGenerator(MatSciTest):
     def setup_method(self):
@@ -731,6 +928,42 @@ class TestReconstructionGenerator(MatSciTest):
         s1 = recon.get_unreconstructed_slabs()[0]
         s2 = recon2.get_unreconstructed_slabs()[0]
         assert get_d(s1) == approx(get_d(s2))
+
+    def test_get_d_single_layer(self):
+        lattice = Lattice.tetragonal(2.5, 10)
+        ouc = Structure(Lattice.cubic(2.5), ["Fe"], [[0, 0, 0]])
+        slab = Slab(lattice, ["Fe", "Fe"], [[0, 0, 0.5], [0.5, 0.5, 0.5]], (0, 0, 1), ouc, 0, np.eye(3))
+        with pytest.raises(RuntimeError, match="Cannot identify any layer"):
+            get_d(slab)
+
+    def test_invalid_reconstruction_name(self):
+        with pytest.raises(KeyError, match="does not exist in the archive"):
+            ReconstructionGenerator(self.Ni, 10, 10, "fcc_999_nonexistent")
+
+    def test_base_reconstruction_points_to_remove(self, monkeypatch):
+        # A derived reconstruction only specifying points_to_remove replaces both
+        # the points_to_remove and points_to_add of its base reconstruction
+        points_to_remove = [[0.25, 0.25, 0]]
+        monkeypatch.setitem(
+            RECONSTRUCTIONS_ARCHIVE,
+            "diamond_100_derived",
+            {"base_reconstruction": "diamond_100_2x1", "points_to_remove": points_to_remove},
+        )
+        base = RECONSTRUCTIONS_ARCHIVE["diamond_100_2x1"]
+        assert "points_to_add" in base
+        assert "points_to_remove" in base
+
+        recon = ReconstructionGenerator(self.Si, 10, 10, "diamond_100_derived")
+        assert recon.reconstruction_json["points_to_remove"] == points_to_remove
+        assert "points_to_add" not in recon.reconstruction_json
+        assert recon.reconstruction_json["miller_index"] == base["miller_index"]
+        assert recon.trans_matrix == base["transformation_matrix"]
+        # The archive entry of the base reconstruction is left untouched
+        assert "points_to_add" in RECONSTRUCTIONS_ARCHIVE["diamond_100_2x1"]
+
+    def test_generate_all_slabs_skips_high_index_reconstructions(self):
+        # All Fm-3m reconstructions in the archive have a max Miller index of 1
+        assert generate_all_slabs(self.Ni, 0, 10, 10, include_reconstructions=True) == []
 
     @pytest.mark.xfail(reason="This test relies on neighbor orders and is hard coded. Disable temporarily")
     def test_previous_reconstructions(self):
@@ -1044,3 +1277,50 @@ class TestMillerIndexFinder(MatSciTest):
         s3 = np.array([1.1595, 0.66943764, 0.9065])
         hkl = miller_index_from_sites(matrix, [s1, s2, s3])
         assert hkl == (2, -1, 0)
+
+    @pytest.mark.parametrize(
+        ("struct_name", "miller_index", "system", "n_expected"),
+        [
+            ("cscl", (1, 0, 0), "cubic", 6),
+            ("cscl", (1, 1, 1), "cubic", 8),
+            ("LiCoO2", (1, 0, 4), "trigonal", 12),
+        ],
+    )
+    def test_get_symmetrically_equivalent_miller_indices_given_system(
+        self, struct_name, miller_index, system, n_expected
+    ):
+        struct = getattr(self, struct_name)
+        # Supplying the crystal system skips the SpacegroupAnalyzer call but gives the same result
+        given = get_symmetrically_equivalent_miller_indices(struct, miller_index, system=system)
+        detected = get_symmetrically_equivalent_miller_indices(struct, miller_index)
+        assert len(given) == n_expected
+        assert set(given) == set(detected)
+
+    def test_get_symmetrically_distinct_miller_indices_invalid_cell(self):
+        with pytest.raises(ValueError, match="Unsupported cell type invalid"):
+            get_symmetrically_distinct_miller_indices(self.cscl, 1, cell="invalid")
+
+    def test_get_symmetrically_distinct_miller_indices_prim_2conv(self):
+        # Primitive bcc indices up to 1 correspond to conventional {100}, {110}, {111} and {112}
+        indices = get_symmetrically_distinct_miller_indices(self.Fe, 1, cell="prim_2conv")
+        assert [tuple(int(i) for i in hkl) for hkl in indices] == [(0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 1, 2)]
+        # For a non-centered (P) lattice, prim_2conv is the same as primitive
+        assert get_symmetrically_distinct_miller_indices(
+            self.cscl, 1, cell="prim_2conv"
+        ) == get_symmetrically_distinct_miller_indices(self.cscl, 1, cell="primitive")
+
+    def test_get_symmetrically_distinct_miller_indices_hkil_non_hexagonal(self):
+        with pytest.warns(UserWarning, match="hkil miller indices .* the cubic family"):
+            indices = get_symmetrically_distinct_miller_indices(self.cscl, 1, return_hkil=True, cell="conventional")
+        assert indices == [(1, 0, -1, 0), (1, 1, -2, 0), (1, 1, -2, 1)]
+
+    @pytest.mark.parametrize(
+        ("transf", "hkl", "expected"),
+        [
+            (np.eye(3), (-1, 1, 0), (1, -1, 0)),
+            (-np.eye(3), (1, 2, 0), (1, 2, 0)),
+            (np.eye(3), (0, -2, 1), (0, 2, -1)),
+        ],
+    )
+    def test_hkl_transformation_positive_first_index(self, transf, hkl, expected):
+        assert hkl_transformation(transf, hkl) == expected
