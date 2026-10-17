@@ -361,18 +361,9 @@ class GrainBoundaryGenerator:
             )
         self.lat_type = lat_types[lattice_type]
 
-        # Use the conventional cell for tetragonal
+        # Use the conventional cell for tetragonal, which always has the unique axis as c
         if self.lat_type == "t":
             initial_structure = analyzer.get_conventional_standard_structure()
-            a, b, c = initial_structure.lattice.abc
-            # c axis of tetragonal structure not in the third direction
-            if abs(a - b) > symprec:
-                # a == c, rotate b to the third direction
-                if abs(a - c) < symprec:
-                    initial_structure.make_supercell([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
-                # b == c, rotate a to the third direction
-                else:
-                    initial_structure.make_supercell([[0, 1, 0], [0, 0, 1], [1, 0, 0]])
 
         elif self.lat_type == "h":
             alpha, beta, gamma = initial_structure.lattice.angles
@@ -646,12 +637,10 @@ class GrainBoundaryGenerator:
                         mu, mv = ratio
                     lam = mv
 
-                elif lat_type == "o" and ratio is not None:
-                    new_ratio = [1 if v is None else v for v in ratio]
-                    mu, lam, mv = new_ratio
-
                 else:
-                    raise RuntimeError("Invalid lattice type.")
+                    # Orthorhombic. ratio=None was already rejected at the top of this method.
+                    new_ratio = [1 if v is None else v for v in cast("list[int | None]", ratio)]
+                    mu, lam, mv = new_ratio
 
                 trans_cry1 = np.array([[1, 0, 0], [0, np.sqrt(lam / mv), 0], [0, 0, np.sqrt(mu / mv)]])
 
@@ -1276,8 +1265,6 @@ class GrainBoundaryGenerator:
             )
         # Transform surface, r_axis, r_matrix in terms of primitive lattice
         surface = np.matmul(surface, np.transpose(trans_cry))
-        if surface is None:
-            raise ValueError("surface is None.")
         fractions = [Fraction(x).limit_denominator() for x in surface]
         least_mul = reduce(math.lcm, [fraction.denominator for fraction in fractions])
         surface = cast("tuple[int, int, int]", tuple(round(x * least_mul) for x in surface))
@@ -1382,13 +1369,8 @@ class GrainBoundaryGenerator:
 
         # Count the number of odds in r_axis
         odd_r = len(list(filter(lambda x: x % 2 == 1, r_axis)))
-        # Compute the max n we need to enumerate
-        if odd_r == 3:
-            a_max = 4
-        elif odd_r == 0:
-            a_max = 1
-        else:
-            a_max = 2
+        # Compute the max n we need to enumerate. r_axis is coprime, so at least one component is odd.
+        a_max = 4 if odd_r == 3 else 2
         n_max = int(np.sqrt(cutoff * a_max / sum(np.array(r_axis) ** 2)))
         # Enumerate all possible n, m to give possible sigmas within the cutoff
         sigmas: dict[int, list[float]] = {}
@@ -2040,8 +2022,6 @@ class GrainBoundaryGenerator:
 
         elif lat_type == "t":
             logger.info("Make sure this is for tetragonal system")
-            if ratio is None:
-                logger.info("Make sure this is for irrational c2/a2 ratio")
             sigma_dict = GrainBoundaryGenerator.enum_sigma_tet(
                 cutoff=sigma,
                 r_axis=cast("tuple[int, int, int]", r_axis),
@@ -2058,16 +2038,12 @@ class GrainBoundaryGenerator:
 
         elif lat_type == "h":
             logger.info("Make sure this is for hexagonal system")
-            if ratio is None:
-                logger.info("Make sure this is for irrational c2/a2 ratio")
             sigma_dict = GrainBoundaryGenerator.enum_sigma_hex(
                 cutoff=sigma, r_axis=r_axis, c2_a2_ratio=cast("tuple[int, int]", ratio)
             )
 
         elif lat_type == "r":
             logger.info("Make sure this is for rhombohedral system")
-            if ratio is None:
-                logger.info("Make sure this is for irrational (1+2*cos(alpha)/cos(alpha) ratio")
             sigma_dict = GrainBoundaryGenerator.enum_sigma_rho(
                 cutoff=sigma,
                 r_axis=cast("tuple[int, int, int]", r_axis),

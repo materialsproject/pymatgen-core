@@ -758,8 +758,8 @@ class Slab(Structure):
 
         # Check if found any equivalent sites
         if len(equi_sites) == len(indices):
-            self.remove_sites(indices)
-            self.remove_sites(equi_sites)
+            # Remove in one call: removing in two calls would shift the indices in between
+            self.remove_sites([*indices, *equi_sites])
 
         else:
             warnings.warn("Equivalent sites could not be found for some indices. Surface unchanged.", stacklevel=2)
@@ -776,11 +776,10 @@ def center_slab(slab: Structure) -> Structure:
         1. When the slab region is completely positioned between
         two vacuum layers in the cell but is not centered, we simply
         shift the slab to the center along z-axis.
-        2. If the slab completely resides outside the cell either
-        from the bottom or the top, we iterate through all sites that
-        spill over and shift all sites such that it is now
-        on the other side. An edge case being, either the top
-        of the slab is at z = 0 or the bottom is at z = 1.
+        2. If the slab is split across the periodic boundary along c
+        (part of it near z = 0 and the rest near z = 1), we first shift
+        all sites so that the vacuum, taken as the largest gap between
+        sites along c, straddles the boundary. This reduces it to case 1.
 
     Args:
         slab (Structure): The slab to center.
@@ -791,24 +790,15 @@ def center_slab(slab: Structure) -> Structure:
     # Get all site indices
     all_indices = list(range(len(slab)))
 
-    # Get a reasonable cutoff radius to sample neighbors
-    bond_dists = sorted(nn[1] for nn in slab.get_neighbors(slab[0], 10) if nn[1] > 0)
-    # TODO (@DanielYang59): magic number for cutoff radius (would 3 be too large?)
-    cutoff_radius = bond_dists[0] * 3
-
-    # TODO (@DanielYang59): do we need the following complex method?
-    # Why don't we just calculate the center of the Slab and move it to z=0.5?
-    # Before moving we need to ensure there is only one Slab layer though
-
-    # If structure is case 2, shift all the sites
-    # to the other side until it is case 1
-    for site in slab:  # DEBUG (@DanielYang59): Slab position changes during loop?
-        # DEBUG (@DanielYang59): sites below z=0 is not considered (only check coord > c)
-        if any(nn[1] >= slab.lattice.c for nn in slab.get_neighbors(site, cutoff_radius)):
-            # TODO (@DanielYang59): the magic offset "0.05" seems unnecessary,
-            # as the Slab would be centered later anyway
-            shift = 1 - site.frac_coords[2] + 0.05
-            slab.translate_sites(all_indices, [0, 0, shift])
+    # If structure is case 2, the slab is split across the periodic boundary along c.
+    # The largest gap between consecutive sites along c (including the gap across
+    # the boundary) is the vacuum. Shift all sites so that the middle of the vacuum
+    # sits at z=0, which leaves the slab contiguous inside the cell (case 1).
+    z_coords = np.sort(np.mod(slab.frac_coords[:, 2], 1))
+    gaps = np.diff(np.append(z_coords, z_coords[0] + 1))
+    idx_gap = int(np.argmax(gaps))
+    vacuum_center = z_coords[idx_gap] + gaps[idx_gap] / 2
+    slab.translate_sites(all_indices, [0, 0, -vacuum_center])
 
     # Now the slab is case 1, move it to the center
     weights = [site.species.weight for site in slab]
