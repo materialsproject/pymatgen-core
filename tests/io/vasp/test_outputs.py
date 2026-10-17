@@ -4105,10 +4105,6 @@ class TestDynmatEdgeCases:
         # atom 4, displacement 1: row 4 of the dynamical matrix is (-0.297585, 0.055901, 0)
         assert freqs[0] == approx(np.sqrt(0.297585 + 0.055901) * 2 * np.pi * 15.633302)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Dynmat stores masses as a map iterator, so the masses property is empty after the first access",
-    )
     def test_masses_repeatable(self):
         dynmat = Dynmat(f"{VASP_OUT_DIR}/DYNMAT")
         assert dynmat.masses == approx([63.546, 196.966])

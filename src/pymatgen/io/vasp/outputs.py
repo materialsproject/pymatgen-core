@@ -5118,7 +5118,7 @@ class Dynmat:
         with zopen(filename, mode="rt", encoding="utf-8") as file:
             lines: list[str] = list(clean_lines(file.readlines()))  # type:ignore[arg-type]
             self._nspecs, self._natoms, self._ndisps = map(int, lines[0].split())
-            self._masses = map(float, lines[1].split())
+            self._masses = [float(mass) for mass in lines[1].split()]
             self.data: dict[int, dict] = defaultdict(dict)
             atom, disp = None, None
             for idx, line in enumerate(lines[2:]):
