@@ -11,6 +11,7 @@ from pytest import approx
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.electronic_structure.bandstructure import (
+    BandStructure,
     BandStructureSymmLine,
     Kpoint,
     LobsterBandStructureSymmLine,
@@ -132,6 +133,25 @@ class TestBandStructureSymmLine(MatSciTest):
         assert self.bs2.get_direct_band_gap() == approx(4.0125999999999999)
         assert self.bs_diff_spins.get_direct_band_gap() > 0
         assert self.bs_cu.get_direct_band_gap() == 0
+
+    def test_get_direct_band_gap_empty_spin_channel(self):
+        # pymatgen-core#163: a spin channel with no occupied (or no unoccupied) bands is skipped
+        kpts = [[0, 0, 0], [0.5, 0, 0]]
+        bands = {
+            Spin.up: np.array([[-1.0, -1.2], [1.0, 1.2]]),
+            Spin.down: np.array([[2.0, 2.1], [3.0, 3.1]]),
+        }
+        bs = BandStructure(kpts, bands, Lattice.cubic(3), efermi=0)
+        dg_dict = bs.get_direct_band_gap_dict()
+        assert set(dg_dict) == {Spin.up}
+        assert dg_dict[Spin.up]["value"] == approx(2.0)
+        assert dg_dict[Spin.up]["kpoint_index"] == 0
+        assert dg_dict[Spin.up]["band_indices"] == [0, 1]
+        assert bs.get_direct_band_gap() == approx(2.0)
+
+        bs_empty = BandStructure(kpts, {Spin.up: bands[Spin.down], Spin.down: bands[Spin.down]}, Lattice.cubic(3), 0)
+        with pytest.raises(ValueError, match="No spin channel has both occupied and unoccupied bands"):
+            bs_empty.get_direct_band_gap_dict()
 
     def test_is_metal(self):
         assert not self.bs2.is_metal(), "wrong metal assignment"

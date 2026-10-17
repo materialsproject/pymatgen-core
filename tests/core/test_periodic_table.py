@@ -410,6 +410,58 @@ class TestElement(MatSciTest):
 
         assert Element.named_isotopes == (Element.D, Element.T)
 
+    def test_repr(self):
+        assert repr(Element.Fe) == "Element Fe"
+        assert repr(Element.D) == "Element H"
+
+    def test_lt_not_implemented(self):
+        assert Element.Fe.__lt__(26) is NotImplemented
+        with pytest.raises(TypeError, match="'<' not supported"):
+            _ = Element.Fe < "Fe"
+
+    def test_number_and_mass_number(self):
+        assert Element.Fe.number == Element.Fe.Z == 26
+        assert Element.D.number == 1
+        assert Element.Fe.atomic_mass_number is None
+        assert Element.D.atomic_mass_number == approx(2)
+        assert str(Element.D.atomic_mass_number.unit) == "amu"
+
+    @pytest.mark.parametrize(
+        ("symbol", "avg", "avg_cation", "avg_anion", "radii"),
+        [
+            ("Fe", 0.8525, 0.8525, 0.0, {2: 0.92, 3: 0.785}),
+            ("O", 1.26, 0.0, 1.26, {-2: 1.26}),
+            ("Na", 1.16, 1.16, 0.0, {1: 1.16}),
+            ("He", 0.0, 0.0, 0.0, {}),
+        ],
+    )
+    def test_average_ionic_radii(self, symbol, avg, avg_cation, avg_anion, radii):
+        elem = Element(symbol)
+        for value, expected in (
+            (elem.average_ionic_radius, avg),
+            (elem.average_cationic_radius, avg_cation),
+            (elem.average_anionic_radius, avg_anion),
+        ):
+            assert value == approx(expected)
+            assert str(value.unit) == "ang"
+        assert elem.ionic_radii == approx(radii)
+        assert all(str(val.unit) == "ang" for val in elem.ionic_radii.values())
+
+    @pytest.mark.parametrize(
+        ("symbol", "expected"),
+        [("La", True), ("Ce", True), ("U", True), ("Sc", True), ("Y", True), ("Fe", False), ("Ba", False)],
+    )
+    def test_is_rare_earth(self, symbol, expected):
+        assert Element(symbol).is_rare_earth is expected
+
+    @pytest.mark.parametrize(("symbol", "expected"), [("Fe", True), ("Li", True), ("C", True), ("He", False)])
+    def test_is_quadrupolar(self, symbol, expected):
+        assert Element(symbol).is_quadrupolar is expected
+
+    def test_from_name_invalid(self):
+        with pytest.raises(ValueError, match="No element with the name='Unobtainium'"):
+            Element.from_name("Unobtainium")
+
 
 class TestSpecies(MatSciTest):
     def setup_method(self):
@@ -672,6 +724,102 @@ class TestSpecies(MatSciTest):
         with pytest.raises(ParseError, match=re.escape(f"Failed to parse {symbol=}")):
             _ = Species(symbol)
 
+    def test_init_oxi_state_twice_raises(self):
+        with pytest.raises(ValueError, match="Oxidation state should be specified either in symbol='Fe2\\+'"):
+            Species("Fe2+", 2)
+
+    def test_repr(self):
+        assert repr(Species("Fe", 2)) == "Species Fe2+"
+        assert repr(Species("O", -2, spin=1)) == "Species O2-,spin=1"
+
+    @pytest.mark.parametrize(
+        ("oxi_state", "expected"),
+        [(0.25, "Fe0.25+"), (2.5, "Fe2.50+"), (-0.5, "Fe0.50-")],
+    )
+    def test_fractional_oxi_state_str(self, oxi_state, expected):
+        species = Species("Fe", oxi_state, spin=3)
+        assert str(species) == f"{expected},spin=3"
+        assert species.to_pretty_string() == expected
+
+    def test_to_pretty_string(self):
+        assert Species("Fe", 3, spin=5).to_pretty_string() == "Fe3+"
+        assert Species("O", -2).to_pretty_string() == "O2-"
+        assert Species("Na", 1).to_pretty_string() == "Na+"
+        assert Species("Fe", None, spin=2).to_pretty_string() == "Fe"
+
+    def test_lt(self):
+        # Species.__lt__ only compares with the same Species type
+        assert Species("Fe", 2).__lt__(Element.Fe) is NotImplemented
+        # Same element and zero oxidation state: sort by spin
+        assert Species("Fe", 0, spin=2) < Species("Fe", 0, spin=3)
+        assert not Species("Fe", 0, spin=3) < Species("Fe", 0, spin=2)
+        assert not Species("Fe", 0, spin=2) < Species("Fe", 0)
+        # Neither oxidation state nor spin distinguishes them
+        assert not Species("Fe", 0) < Species("Fe", 0, spin=1)
+        assert not Species("Fe", 0) < Species("Fe", 0)
+
+    def test_valence_noble_gas(self):
+        n_valence, n_electrons = Species("Ar", 0).valence
+        assert math.isnan(n_valence)
+        assert n_electrons == 0
+
+    def test_ionic_radius_fallbacks(self, monkeypatch):
+        # Fe4+ has no default ionic radius, but low-spin data exists
+        with pytest.warns(UserWarning, match=r"No default ionic radius for Fe4\+. Using ls data."):
+            assert Species("Fe", 4).ionic_radius == approx(0.725)
+
+        # No radius data at all for Fe5+
+        with pytest.warns(UserWarning, match=r"No ionic radius for Fe5\+!"):
+            assert Species("Fe", 5).ionic_radius is None
+
+        # Inject a high-spin-only radius to exercise the hs fallback (not present in shipped data)
+        monkeypatch.setitem(Element.Fe._data["Ionic radii hs"], "5", 0.6)
+        with pytest.warns(UserWarning, match=r"No default ionic radius for Fe5\+. Using hs data."):
+            assert Species("Fe", 5).ionic_radius == approx(0.6)
+
+    def test_get_shannon_radius_no_oxi_state(self):
+        with pytest.raises(ValueError, match="oxi_state is None"):
+            Species("Fe").get_shannon_radius("VI")
+
+    @pytest.mark.parametrize(
+        ("species", "coordination", "expected"),
+        [
+            (("Cr", 3), "oct", 3),  # d3
+            (("Fe", 2), "oct", 0),  # d6
+            (("Ni", 2), "oct", 2),  # d8
+            (("Cu", 2), "oct", 1),  # d9
+            (("Ti", 2), "tet", 2),  # d2
+            (("V", 2), "tet", 1),  # d3
+            (("Fe", 3), "tet", 1),  # d5
+            (("Ni", 2), "tet", 2),  # d8
+            (("Cu", 2), "tet", 1),  # d9
+        ],
+    )
+    def test_get_crystal_field_spin_low_spin(self, species, coordination, expected):
+        assert Species(*species).get_crystal_field_spin(coordination, spin_config="low") == expected
+
+    def test_get_crystal_field_spin_no_oxi_state(self):
+        with pytest.raises(ValueError, match="oxi_state is None"):
+            Species("Fe").get_crystal_field_spin()
+
+    def test_from_str_invalid(self):
+        with pytest.raises(ValueError, match="Invalid species string"):
+            Species.from_str("fe2+")
+        with pytest.raises(ValueError, match="Invalid species string"):
+            Species.from_str("Fe")
+
+    @pytest.mark.parametrize("species", [Species("Fe", 2), Species("Fe", 3, spin=5), Species("O", -2)])
+    def test_as_from_dict(self, species):
+        dct = species.as_dict()
+        assert dct == {
+            "@module": "pymatgen.core.periodic_table",
+            "@class": "Species",
+            "element": species.symbol,
+            "oxidation_state": species.oxi_state,
+            "spin": species.spin,
+        }
+        assert Species.from_dict(dct) == species
+
 
 class TestDummySpecies:
     def test_init(self):
@@ -724,6 +872,50 @@ class TestDummySpecies:
         with pytest.raises(AttributeError, match=r"(can't set attribute|'Species' object has no setter)"):
             sp.spin = 6
         assert sp.spin == 5
+
+    def test_sort_by_symbol_and_none_oxi_state(self):
+        assert DummySpecies("Xa") < DummySpecies("Xb")
+        assert not DummySpecies("Xb") < DummySpecies("Xa")
+        assert DummySpecies("X", -1) < Element.Fe
+        with pytest.raises(RuntimeError, match="oxi_state for both species are None"):
+            _ = DummySpecies("X", None) < DummySpecies("X", None)
+
+    def test_getattr_raises(self):
+        dummy = DummySpecies("X", 2)
+        with pytest.raises(AttributeError):
+            _ = dummy.ionic_radius
+        assert not hasattr(dummy, "nonexistent_attr")
+
+    def test_repr_str(self):
+        assert repr(DummySpecies("X", 2)) == "DummySpecies X2+"
+        assert str(DummySpecies("X", -1, spin=2)) == "X-,spin=2"
+        assert str(DummySpecies("X", None)) == "X"
+
+    def test_z_a_x(self):
+        dummy = DummySpecies("Xa")
+        assert hash("Xa") == dummy.Z
+        assert dummy.A is None
+        assert dummy.X == 0.0
+
+    def test_deepcopy(self):
+        dummy = DummySpecies("X", 3)
+        copied = deepcopy(dummy)
+        assert copied == dummy
+        assert copied is not dummy
+
+    @pytest.mark.parametrize("dummy", [DummySpecies("X", 2), DummySpecies("Xa", -1, spin=3), DummySpecies("X", None)])
+    def test_as_from_dict(self, dummy):
+        dct = dummy.as_dict()
+        assert dct == {
+            "@module": "pymatgen.core.periodic_table",
+            "@class": "DummySpecies",
+            "element": dummy.symbol,
+            "oxidation_state": dummy.oxi_state,
+            "spin": dummy.spin,
+        }
+        restored = DummySpecies.from_dict(dct)
+        assert restored == dummy
+        assert restored.spin == dummy.spin
 
 
 def test_get_el_sp():
