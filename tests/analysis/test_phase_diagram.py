@@ -1734,11 +1734,6 @@ class TestPDPlotterExtra:
         above_hull = next(trace for trace in fig.data if trace.name == "Above Hull")
         assert len(above_hull.x) == 0
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="PDPlotter._create_plotly_markers passes the user-supplied highlight_entries (user order) instead of "
-        "the matched highlight_ents (plot order) to get_marker_props, so coords and labels get mismatched",
-    )
     def test_plotly_highlight_order_independent(self):
         pd, stable, unstable = self._small_binary()
         fig = PDPlotter(pd, backend="plotly").get_plot(highlight_entries=[unstable, stable])

@@ -3716,7 +3716,7 @@ class PDPlotter:
 
         stable_props = get_marker_props(stable_coords, stable_entries)
         unstable_props = get_marker_props(unstable_coords, unstable_entries)
-        highlight_props = get_marker_props(highlight_coords, highlight_entries)
+        highlight_props = get_marker_props(highlight_coords, highlight_ents)
 
         stable_markers, unstable_markers, highlight_markers = {}, {}, {}
 
