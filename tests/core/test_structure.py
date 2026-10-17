@@ -94,15 +94,13 @@ class TestNeighbor:
         assert dct["index"] == 3
         assert dct["label"] == "C1"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Neighbor.from_dict passes the serialized species dict straight to __init__ instead of a Composition",
-    )
     def test_from_dict_round_trip(self):
-        neighbor = Neighbor(Composition("C"), np.zeros(3), nn_distance=1.5, index=3)
-        restored = Neighbor.from_dict(neighbor.as_dict())
-        assert restored.species_string == "C"
+        neighbor = Neighbor(Composition({Species("Fe", 2): 1}), np.array([1.0, 2.0, 3.0]), nn_distance=1.5, index=3)
+        restored = Neighbor.from_dict(json.loads(json.dumps(neighbor.as_dict(), cls=MontyEncoder)))
+        assert restored.species == Composition({Species("Fe", 2): 1})
+        assert_allclose(restored.coords, [1.0, 2.0, 3.0])
         assert restored.nn_distance == approx(1.5)
+        assert restored.index == 3
 
 
 def _fake_module(name: str, **attrs) -> types.ModuleType:
