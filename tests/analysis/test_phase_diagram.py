@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 import pytest
-from matplotlib.colors import same_color
+from matplotlib.colors import Normalize, same_color
 from monty.json import MontyDecoder
 from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
@@ -1822,12 +1822,6 @@ class TestPDPlotterExtra:
         ("energy_colormap", "process_attributes"),
         [("default", False), ("default", True), ("viridis", False)],
     )
-    @pytest.mark.xfail(
-        strict=True,
-        raises=IndexError,
-        reason="PDPlotter._get_matplotlib_2d_plot uses filter(None, ...) on equilibrium reaction energies, which "
-        "drops the 0.0 values of elemental entries so the color array is shorter than the stable labels",
-    )
     def test_matplotlib_energy_colormap(self, energy_colormap, process_attributes):
         entries = [PDEntry(e.composition, e.energy) for e in self.entries]
         for entry in entries:
@@ -1838,6 +1832,24 @@ class TestPDPlotterExtra:
         # colorbar adds an additional axes to the figure
         assert len(ax.figure.axes) == 2
         assert "above hull" in ax.figure.axes[1].get_ylabel()
+        plt.close("all")
+
+    def test_matplotlib_energy_colormap_unstable_colors(self):
+        # Only unstable entries with e_above_hull < show_unstable are drawn. Each square must be colored by
+        # its own e_above_hull, not by that of the n-th unstable entry overall.
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib", show_unstable=0.05)
+        ax = plotter.get_plot(energy_colormap="viridis")
+        unstable = plotter.pd_plot_data[2]
+        assert any(self.pd_ternary.get_e_above_hull(entry) >= 0.05 for entry in unstable)  # some entries are skipped
+        # Squares are drawn in the order of the shown unstable entries (polymorphs share coordinates)
+        shown = [entry for entry in unstable if self.pd_ternary.get_e_above_hull(entry) < 0.05]
+        squares = [line for line in ax.get_lines() if line.get_marker() == "s"]
+        assert len(squares) == len(shown) > 0
+        norm = Normalize(vmin=-0.06, vmax=0.06)
+        for line, entry in zip(squares, shown, strict=True):
+            assert_allclose(line.get_xydata()[0], unstable[entry])
+            expected = plt.get_cmap("viridis")(norm(self.pd_ternary.get_e_above_hull(entry)))
+            assert_allclose(line.get_markerfacecolor(), expected)
         plt.close("all")
 
     def test_write_image(self):
