@@ -2526,11 +2526,13 @@ Sites (8)
   1  Li    0.5  0.5  0
   2  Li    0.5  0    0.5
   3  Li    0    0.5  0.5
-  4  Cl    0.5  0    0.5
-  5  Cl    0    0.5  0.5
-  6  Cl    0.5  0.5  0
-  7  Cl    0    0    0"""
+  4  Cl    0.5  0.5  0.5
+  5  Cl    0    0    0.5
+  6  Cl    0    0.5  0
+  7  Cl    0.5  0    0"""
         assert str(struct) == expected_struct_str
+        assert struct.get_space_group_info() == ("Fm-3m", 225)
+        assert min(struct.get_distance(0, idx) for idx in range(4, 8)) == approx(2.56 / 2)
         for prototype in ("cscl", "fluorite", "antifluorite", "zincblende"):
             struct = Structure.from_prototype(prototype, ["Cs", "Cl"], a=5)
             assert struct.lattice.is_orthogonal

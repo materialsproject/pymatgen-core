@@ -4827,7 +4827,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
                     "Fm-3m",
                     Lattice.cubic(kwargs["a"]),
                     species,
-                    [[0, 0, 0], [0.5, 0.5, 0]],
+                    [[0, 0, 0], [0.5, 0.5, 0.5]],
                 )
             if prototype == "perovskite":
                 return cls.from_spacegroup(
