@@ -620,10 +620,6 @@ class TestComputedStructureEntryExtra:
         assert normed.structure == fe_bcc
         assert len(normed.structure) == 2
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="ComputedStructureEntry.normalize divides the composition by the normalization factor twice",
-    )
     @pytest.mark.parametrize("mode", ["formula_unit", "atom"])
     def test_normalize_composition(self, fe_bcc, mode):
         entry = ComputedStructureEntry(fe_bcc, -16.0)

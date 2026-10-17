@@ -806,12 +806,9 @@ class ComputedStructureEntry(ComputedEntry):
             stacklevel=2,
         )
         # TODO: find a better solution for creating copies instead of as/from dict
-        factor = self._normalization_factor(mode)
         dct = super().normalize(mode).as_dict()
         dct["structure"] = self.structure.as_dict()
-        entry = self.from_dict(dct)
-        entry._composition /= factor
-        return entry
+        return self.from_dict(dct)
 
     def copy(self) -> ComputedStructureEntry:
         """Get a copy of the ComputedStructureEntry."""
