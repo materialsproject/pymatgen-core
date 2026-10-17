@@ -3823,11 +3823,6 @@ class TestGetAdjustedFermiLevel:
         cbm = bs.get_cbm()["energy"]
         assert get_adjusted_fermi_level(bs.efermi, cbm, bs) == bs.efermi
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="get_adjusted_fermi_level sets bs_working._efermi, but BandStructure.is_metal reads efermi, so it "
-        "never adjusts",
-    )
     def test_fermi_level_shifted_into_gap(self):
         bs = self._load_bs()
         vbm, cbm = bs.get_vbm()["energy"], bs.get_cbm()["energy"]
@@ -3836,7 +3831,11 @@ class TestGetAdjustedFermiLevel:
         assert bs_low.is_metal()
 
         adjusted = get_adjusted_fermi_level(low_efermi, cbm, bs_low, energy_step=0.01)
-        assert vbm < adjusted < vbm + 0.02
+        # Scanning up from vbm - 0.05 in 0.01 eV steps, the first insulating level is the VBM itself
+        # (is_metal uses a 1e-4 eV tolerance)
+        assert adjusted == approx(vbm, abs=1e-6)
+        bs_check = self._load_bs(efermi=adjusted)
+        assert not bs_check.is_metal()
         # the input band structure is not modified
         assert bs_low.efermi == approx(low_efermi)
 

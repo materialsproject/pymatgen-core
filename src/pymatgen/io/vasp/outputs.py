@@ -5210,7 +5210,7 @@ def get_adjusted_fermi_level(
         energy = efermi
         while energy < cbm:
             energy += energy_step
-            bs_working._efermi = energy
+            bs_working.efermi = energy
             if not bs_working.is_metal():
                 return energy
     return efermi
