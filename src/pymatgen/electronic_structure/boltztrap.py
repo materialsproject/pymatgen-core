@@ -419,7 +419,7 @@ class BoltztrapRunner(MSONable):
             for orb_idx, orb in enumerate(Orbital):
                 for site_nb in range(len(self._bs.structure)):
                     if orb_idx < len(self._bs.projections[Spin.up][0][0]):
-                        file.write(f"{kpt_idx},'boltztrap.proj_{site_nb}_{orb.name}old', 'formatted',0\n")
+                        file.write(f"{kpt_idx},'boltztrap.proj_{site_nb}_{orb.name}' 'old', 'formatted',0\n")
                         kpt_idx += 1
 
     def write_intrans(self, output_file) -> None:

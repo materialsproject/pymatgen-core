@@ -792,7 +792,6 @@ class TestBoltztrapRunner:
         expected = [cu2o_bs.projections[Spin.up][j][0][orb_idx][1] for j in range(n_bands)]
         assert projs == approx(expected, abs=1e-8)
 
-    @pytest.mark.xfail(strict=True, reason="write_proj def entries merge the file name and 'old' status fields")
     def test_write_proj_def_format(self, make_runner, cu2o_bs, tmp_path):
         runner = make_runner(cu2o_bs, 10, run_type="DOS", spin=1)
         runner.write_proj(f"{tmp_path}/boltztrap.proj", f"{tmp_path}/BoltzTraP.def")
