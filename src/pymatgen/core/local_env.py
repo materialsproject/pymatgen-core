@@ -3738,9 +3738,9 @@ class EconNN(NearNeighbors):
         if self.cation_anion and oxi_state is not None:
             # filter out neighbor of like charge (except for neutral sites)
             if oxi_state >= 0:
-                neighbors = [n for n in neighbors if n.oxi_state <= 0]
+                neighbors = [nghbr for nghbr in neighbors if nghbr.specie.oxi_state <= 0]
             elif oxi_state < 0:
-                neighbors = [nghbr for nghbr in neighbors if nghbr.oxi_state >= 0]
+                neighbors = [nghbr for nghbr in neighbors if nghbr.specie.oxi_state >= 0]
 
         if self.use_fictive_radius:
             # calculate fictive ionic radii

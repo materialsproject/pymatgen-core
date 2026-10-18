@@ -1775,11 +1775,6 @@ class TestEconNNExtra:
         nacl.add_oxidation_state_by_guess()
         assert EconNN(use_fictive_radius=True).get_cn(nacl, 0, use_weights=True) == approx(6.0)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AttributeError,
-        reason="EconNN cation_anion filter reads oxi_state from PeriodicNeighbor instead of its specie",
-    )
     def test_cation_anion(self, nacl):
         nacl.add_oxidation_state_by_guess()
         assert EconNN(cation_anion=True).get_cn(nacl, 0) == 6
