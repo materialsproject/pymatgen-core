@@ -1037,11 +1037,6 @@ class TestBSPlotterProjectedExtra:
         with pytest.raises(ValueError, match="Can only plot binary and ternary compounds, got 4 elements"):
             BSPlotterProjected(bs).get_elt_projected_plots_color()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="get_elt_projected_plots_color sets ylim to E_f +/- 10 when zero_to_efermi=True (bands are "
-        "already shifted) and sets nothing when zero_to_efermi=False",
-    )
     def test_elt_projected_plots_color_metal_ylim(self, bs_spin_metal):
         ax = BSPlotterProjected(bs_spin_metal).get_elt_projected_plots_color(zero_to_efermi=True)
         assert ax.get_ylim() == approx((-10, 10))
@@ -1386,9 +1381,6 @@ class TestBSPlotterProjectedExtra:
         axes = plotter.get_projected_plots_dots_patom_pmorb({"C": ["s"]}, {"C": [1]}, selected_branches=[1])
         assert axes[0].get_ylim() == approx((-10, 10))
 
-    @pytest.mark.xfail(
-        strict=True, reason="uses non-existent BandStructure._efermi for metals with zero_to_efermi=False"
-    )
     def test_patom_pmorb_plot_metal_absolute_energies(self, bs_c_metal):
         plotter = BSPlotterProjected(bs_c_metal)
         axes = plotter.get_projected_plots_dots_patom_pmorb(

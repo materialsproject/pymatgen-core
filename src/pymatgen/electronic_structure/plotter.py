@@ -1270,10 +1270,10 @@ class BSPlotterProjected(BSPlotter):
                         )
 
         if self._bs.is_metal():
+            e_min, e_max = -10, 10
             if zero_to_efermi:
-                e_min = -10
-                e_max = 10
                 ax.set_ylim(e_min, e_max)
+            else:
                 ax.set_ylim(self._bs.efermi + e_min, self._bs.efermi + e_max)
         else:
             ax.set_ylim(data["vbm"][0][1] - 4.0, data["cbm"][0][1] + 2.0)
@@ -1737,7 +1737,7 @@ class BSPlotterProjected(BSPlotter):
                             if zero_to_efermi:
                                 ax.set_ylim(e_min, e_max)
                             else:
-                                ax.set_ylim(self._bs.efermi + e_min, self._bs._efermi + e_max)
+                                ax.set_ylim(self._bs.efermi + e_min, self._bs.efermi + e_max)
                         else:
                             if vbm_cbm_marker:
                                 for cbm in data["cbm"]:
