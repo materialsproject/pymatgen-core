@@ -573,7 +573,7 @@ class BoltztrapRunner(MSONable):
         else:
             path_dir = os.path.abspath(os.path.join(path_dir, dir_bz_name))
 
-        os.mkdir(path_dir, exist_ok=True)
+        os.makedirs(path_dir, exist_ok=True)
         if clear_dir:
             for c in os.listdir(path_dir):
                 os.remove(os.path.join(path_dir, c))

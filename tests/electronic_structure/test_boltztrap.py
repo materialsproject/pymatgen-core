@@ -812,7 +812,6 @@ class TestBoltztrapRunner:
         with pytest.raises(BoltztrapError, match="Spin parameter must be specified"):
             runner.run(path_dir=str(tmp_path))
 
-    @pytest.mark.xfail(strict=True, reason="run() calls os.mkdir with an unsupported exist_ok kwarg")
     def test_run_writes_input_before_calling_binary(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
         class PopenCalledError(Exception):
             pass
