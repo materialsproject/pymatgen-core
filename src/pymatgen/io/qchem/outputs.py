@@ -367,15 +367,12 @@ class QCOutput(MSONable):
                 self.text,
                 {"key": r"\-D3 energy without 3body term =\s*([\d\.\-]+) hartrees"},
             ).get("key")
-            real_d3 = np.zeros(len(temp_d3))
             if temp_d3 is None:
                 self.data["dft_d3"] = None
             elif len(temp_d3) == 1:
                 self.data["dft_d3"] = float(temp_d3[0][0])
             else:
-                for ii, entry in enumerate(temp_d3):
-                    real_d3[ii] = float(entry[0])
-                self.data["dft_d3"] = real_d3
+                self.data["dft_d3"] = np.array([float(entry[0]) for entry in temp_d3])
 
         # Parse the S2 values in the case of an unrestricted calculation
         if self.data.get("unrestricted", []):

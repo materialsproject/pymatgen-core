@@ -948,10 +948,6 @@ def test_dft_d3(tmp_path):
     assert_allclose(data["dft_d3"], [-0.0123, -0.0125])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QCOutput calls len() on the D3 energy match before its None check, so TypeError when none is printed",
-)
 def test_dft_d3_missing_energy(tmp_path):
     data = _write_and_parse(tmp_path, QCHEM_BANNER + "dft_d = d3\n")
     assert data["dft_d3"] is None
