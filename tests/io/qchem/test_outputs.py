@@ -9,6 +9,7 @@ from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core.periodic_table import DummySpecies
 from pymatgen.core.structure import Molecule
 from pymatgen.io.qchem.outputs import (
     QCOutput,
@@ -816,18 +817,28 @@ def test_freq_ordinal_not_in_range():
     assert "frequency_length_inconsistency" not in data["warnings"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QCOutput builds initial_molecule from the 'GH' ghost-atom label, which Molecule cannot parse",
-)
 @pytest.mark.parametrize(
-    ("filename", "n_atoms"),
-    [("ghost_atoms.qcout", 8), ("MgBF4_b_overalpped.qcout", 6)],  # codespell:ignore overalpped
+    ("filename", "n_ghosts", "real_formula"),
+    [("ghost_atoms.qcout", 3, "H4 C1"), ("MgBF4_b_overalpped.qcout", 1, "Mg1 B1 F3")],  # codespell:ignore overalpped
 )
-def test_ghost_atoms(filename, n_atoms):
+def test_ghost_atoms(filename, n_ghosts, real_formula):
     data = QCOutput(f"{TEST_DIR}/{filename}").data
-    assert len(data["species"]) == n_atoms
-    assert data["species"][0] == "GH"
+    # data["species"] keeps Q-Chem's labels; ghost atoms are printed as "GH" and listed first in these inputs
+    assert data["species"][:n_ghosts] == ["GH"] * n_ghosts
+    assert "GH" not in data["species"][n_ghosts:]
+
+    # In the Molecule, ghost atoms are DummySpecies("X") sites in the same order and at the same positions
+    mol = data["initial_molecule"]
+    assert len(mol) == len(data["species"])
+    assert [site.species_string for site in mol[:n_ghosts]] == ["X0+"] * n_ghosts
+    assert all(isinstance(site.specie, DummySpecies) for site in mol[:n_ghosts])
+    assert_allclose(mol.cart_coords, data["initial_geometry"])
+    # Ghost atoms carry no electrons, so the charge and multiplicity of the real atoms are kept
+    assert mol.composition.formula == f"X{n_ghosts} {real_formula}"
+    assert (mol.charge, mol.spin_multiplicity) == (data["charge"], data["multiplicity"])
+
+    # Q-Chem prints a Mulliken charge for every site, ghosts included, so per-atom data lines up with the sites
+    assert len(data["Mulliken"][-1]) == len(mol)
 
 
 def test_as_dict():
