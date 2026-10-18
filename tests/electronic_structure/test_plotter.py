@@ -610,8 +610,6 @@ class TestBoltztrapPlotter:
         assert ax.get_lines()[0].get_data()[0][0] == approx(-2.0702422655947665), "wrong 0 data in line 0"
         assert ax.get_lines()[0].get_data()[1][0] == approx(6412.881888198197), "wrong 1 data in line 0"
 
-    @pytest.mark.xfail(strict=True, reason="plot_complexity_factor_mu calls ax.gca(), which Axes does not have")
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_complexity_factor_mu(self):
         pytest.importorskip("fdint")
         ax = self.plotter.plot_complexity_factor_mu()
