@@ -867,11 +867,6 @@ class TestBSPlotterExtra:
         assert ticks_old["label"][-2] == "K$\\mid$U"
         assert ticks_old["distance"][-1] == approx(8.334526261560772)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="plot_compare treats BSPlotter._nb_bands/_bs as scalars and data['energy'] as a list; "
-        "it raises instead of overlaying the second band structure",
-    )
     def test_plot_compare(self, bs_cao):
         plotter = BSPlotter(bs_cao)
         with pytest.warns(UserWarning, match="Deprecated method"):

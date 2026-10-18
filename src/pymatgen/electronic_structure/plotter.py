@@ -870,21 +870,11 @@ class BSPlotter:
         data_orig = self.bs_plot_data()
         data = other_plotter.bs_plot_data()
         band_linewidth = 1
-        for i in range(other_plotter._nb_bands):
-            for d in range(len(data_orig["distances"])):
-                ax.plot(
-                    data_orig["distances"][d],
-                    [e[str(Spin.up)][i] for e in data["energy"]][d],
-                    "c-",
-                    linewidth=band_linewidth,
-                )
-                if other_plotter._bs.is_spin_polarized:
-                    ax.plot(
-                        data_orig["distances"][d],
-                        [e[str(Spin.down)][i] for e in data["energy"]][d],
-                        "m--",
-                        linewidth=band_linewidth,
-                    )
+        # data["energy"][spin] holds one (nbands, nkpts) array per path segment
+        for seg_idx, distances in enumerate(data_orig["distances"]):
+            ax.plot(distances, data["energy"][str(Spin.up)][seg_idx].T, "c-", linewidth=band_linewidth)
+            if other_plotter._bs[0].is_spin_polarized:
+                ax.plot(distances, data["energy"][str(Spin.down)][seg_idx].T, "m--", linewidth=band_linewidth)
         if legend:
             handles = [
                 mlines.Line2D([], [], linewidth=2, color="b", label="bs 1 up"),
