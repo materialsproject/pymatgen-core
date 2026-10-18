@@ -392,10 +392,6 @@ class TestBoltztrapPlotter:
         self.bz = bz_analyzer
         self.plotter = BoltztrapPlotter(bz_analyzer)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BoltztrapPlotter passes fontsize to Axes.set_[xy]ticks without labels, which raises ValueError",
-    )
     @pytest.mark.parametrize("method", BZ_METHODS_WITH_TICK_FONTSIZE)
     def test_plot_methods_run(self, method):
         assert isinstance(getattr(self.plotter, method)(), plt.Axes)
@@ -409,7 +405,6 @@ class TestBoltztrapPlotter:
         assert_allclose(lines[0].get_ydata(), self.bz.dos.get_smeared_densities(0.05)[Spin.up])
         assert lines[0].get_data()[0][0] == approx(-2.4197044934588674)
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     @pytest.mark.parametrize(
         ("method", "getter", "kwargs", "legend"),
         [
@@ -462,13 +457,11 @@ class TestBoltztrapPlotter:
         assert x_lo <= -1
         assert x_hi >= 1
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_seebeck_mu_first_point(self):
         ax = self.plotter.plot_seebeck_mu()
         assert ax.get_lines()[0].get_data()[0][0] == approx(-2.0702422655947665)
         assert ax.get_lines()[0].get_data()[1][0] == approx(-433.11096000000003)
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_conductivity_mu_scale(self):
         ax = self.plotter.plot_conductivity_mu(relaxation_time=1e-13)
         assert ax.get_yscale() == "log"
@@ -477,7 +470,6 @@ class TestBoltztrapPlotter:
         assert y_lo <= 1e13 * 1e-13
         assert y_hi >= 1e20 * 1e-13
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_carriers(self):
         bz = self.bz
         ax = self.plotter.plot_carriers(temp=300)
@@ -490,7 +482,6 @@ class TestBoltztrapPlotter:
         assert ax.get_yscale() == "log"
         assert ax.get_ylabel() == "carrier concentration (cm-3)"
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_hall_carriers(self):
         bz = self.bz
         ax = self.plotter.plot_hall_carriers(temp=300)
@@ -501,7 +492,6 @@ class TestBoltztrapPlotter:
         assert lines[0].get_data()[1][0] == approx(9.538187273102463e17)
         assert ax.get_ylabel() == "Hall carrier concentration (cm-3)"
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     @pytest.mark.parametrize(
         ("method", "getter", "kwargs"),
         [
@@ -532,7 +522,6 @@ class TestBoltztrapPlotter:
                         for line in lines
                     )
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     @pytest.mark.parametrize(
         ("method", "getter", "kwargs"),
         [
@@ -593,7 +582,6 @@ class TestBoltztrapPlotter:
         reason="*_temp/*_dop methods call plt.subplot() but keep drawing on the original Axes, so the n- and "
         "p-type panels stay empty and all curves end up on one Axes",
     )
-    @pytest.mark.usefixtures("lenient_set_ticks")
     @pytest.mark.parametrize(
         "method",
         [
