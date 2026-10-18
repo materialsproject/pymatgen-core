@@ -699,14 +699,12 @@ class TestBoltztrapRunner:
         assert intrans["scissor"] == approx(scissor)
         assert intrans["dos_type"] == "TETRA"
 
-    @pytest.mark.xfail(strict=True, reason="BOLTZ/DOS intrans writes nelec with a literal '.1f' suffix")
     def test_write_intrans_boltz_nelec(self, make_runner, cu2o_bs, tmp_path):
         runner = make_runner(cu2o_bs, 10)
         runner.write_intrans(tmp_path / "boltztrap.intrans")
         lines = (tmp_path / "boltztrap.intrans").read_text().splitlines()
         assert lines[2].split("#")[0].split()[-1] == "10.0"
 
-    @pytest.mark.xfail(strict=True, reason="intrans energies are FloatWithUnit formatted with a trailing 'Ry' unit")
     @pytest.mark.parametrize("run_type", ["BOLTZ", "FERMI", "BANDS"])
     def test_write_intrans_plain_numbers(self, make_runner, cu2o_bs, tmp_path, run_type):
         runner = make_runner(cu2o_bs, 10, run_type=run_type, band_nb=6, spin=1, scissor=0.5)

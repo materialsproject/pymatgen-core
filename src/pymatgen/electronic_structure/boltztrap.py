@@ -434,12 +434,12 @@ class BoltztrapRunner(MSONable):
             with open(output_file, mode="w", encoding="utf-8") as fout:
                 fout.write("GENE          # use generic interface\n")
                 fout.write(
-                    f"1 0 {set_gap} {Energy(self.scissor, 'eV').to('Ry')}         "
+                    f"1 0 {set_gap} {float(Energy(self.scissor, 'eV').to('Ry'))}         "
                     "# iskip (not presently used) idebug setgap shiftgap \n"
                 )
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} "
-                    f"{Energy(self.energy_span_around_fermi, 'eV').to('Ry')} {self._nelec}.1f     "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} "
+                    f"{float(Energy(self.energy_span_around_fermi, 'eV').to('Ry'))} {self._nelec:.1f}     "
                     f"# Fermilevel (Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
@@ -460,7 +460,7 @@ class BoltztrapRunner(MSONable):
                 fout.write("GENE          # use generic interface\n")
                 fout.write("1 0 0 0.0         # iskip (not presently used) idebug setgap shiftgap \n")
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} 0.1 {self._nelec:6.1f}     # Fermilevel "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} 0.1 {self._nelec:6.1f}     # Fermilevel "
                     "(Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
@@ -481,12 +481,12 @@ class BoltztrapRunner(MSONable):
             with open(output_file, mode="w", encoding="utf-8") as fout:
                 fout.write("GENE          # use generic interface\n")
                 fout.write(
-                    f"1 0 {set_gap} {Energy(self.scissor, 'eV').to('Ry')}         # iskip (not presently used) "
+                    f"1 0 {set_gap} {float(Energy(self.scissor, 'eV').to('Ry'))}         # iskip (not presently used) "
                     "idebug setgap shiftgap \n"
                 )
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} "
-                    f"{Energy(self.energy_span_around_fermi, 'eV').to('Ry')} {self._nelec:.1f}     "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} "
+                    f"{float(Energy(self.energy_span_around_fermi, 'eV').to('Ry'))} {self._nelec:.1f}     "
                     f"# Fermilevel (Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
