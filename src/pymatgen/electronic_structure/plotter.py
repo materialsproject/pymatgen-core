@@ -1961,6 +1961,10 @@ class BSPlotterProjected(BSPlotter):
         else:
             for elt in sum_atoms:
                 if Element.is_valid_symbol(elt):
+                    if elt not in dictpa:
+                        raise ValueError(
+                            f"You cannot sum projection over atoms {elt!r} because it is not mentioned in 'dictio'."
+                        )
                     if isinstance(sum_atoms[elt], list):
                         if len(sum_atoms[elt]) == 0:
                             raise ValueError(f"The sum_atoms[{elt}] is empty. We cannot do anything")
@@ -1993,10 +1997,6 @@ class BSPlotterProjected(BSPlotter):
                     else:
                         raise TypeError(
                             f"The invalid type of value was put into 'sum_atoms[{elt}]'. It should be list type."
-                        )
-                    if elt not in dictpa:
-                        raise ValueError(
-                            f"You cannot sum projection over atoms {elt!r} because it is not mentioned in 'dictio'."
                         )
                 else:
                     raise KeyError(f"The invalid element was put into 'sum_atoms' as a key: {elt}")

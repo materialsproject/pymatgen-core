@@ -1140,11 +1140,6 @@ class TestBSPlotterProjectedExtra:
         with pytest.raises(exc, match=match):
             plotter._number_of_subfigures(dictio, dictpa, sum_atoms, None)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="_number_of_subfigures indexes dictpa[elt] before checking elt is in dictpa, raising a bare "
-        "KeyError instead of the intended ValueError",
-    )
     def test_number_of_subfigures_sum_atoms_not_in_dictpa(self, bs_cu2o):
         plotter = BSPlotterProjected(bs_cu2o)
         with pytest.raises(ValueError, match="You cannot sum projection over atoms 'O'"):
