@@ -451,6 +451,15 @@ class TestSlab(MatSciTest):
         assert len(slab) == 4
         assert slab.is_symmetric()
 
+    def test_symmetrically_remove_atoms_multiple_sites(self):
+        slab = self._ag_100_slab()
+        z_coords = slab.frac_coords[:, 2]
+        top_two = [int(idx) for idx in np.argsort(z_coords)[-2:]]
+        slab.symmetrically_remove_atoms(top_two)
+        # the two top layers and their two equivalent bottom layers are removed
+        assert len(slab) == 2
+        assert slab.is_symmetric()
+
     def test_symmetrically_remove_atoms_no_equivalent(self):
         mgo = Structure(
             Lattice.cubic(3.01),

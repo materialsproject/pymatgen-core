@@ -742,10 +742,11 @@ class Slab(Structure):
                         continue
                     if slab[i2].frac_coords[2] == slab[i1].frac_coords[2]:
                         continue
-                    # Test site remove to see if it results in symmetric slab
-                    slab = self.copy()
-                    slab.remove_sites([i1, i2])
-                    if slab.is_symmetric():
+                    # Test site remove to see if it results in symmetric slab. Use a separate trial copy so the
+                    # symmetrized slab used for the remaining lookups is not replaced.
+                    trial_slab = self.copy()
+                    trial_slab.remove_sites([i1, i2])
+                    if trial_slab.is_symmetric():
                         equi_sites.append(i2)
                         break
 
