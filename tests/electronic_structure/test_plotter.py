@@ -936,11 +936,6 @@ class TestBSPlotterProjectedExtra:
         assert len(dots) == 2 * len(bs.kpoints) * bs.nb_bands
         assert ax.get_title() == "${\\mathrm{Cu}}_{\\mathrm{d}}$"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="get_projected_plots_dots calls np.min on the ragged list of per-branch distances, which fails "
-        "whenever branches have different numbers of k-points",
-    )
     def test_projected_plots_dots_unequal_branches(self, bs_n2):
         axes = BSPlotterProjected(bs_n2).get_projected_plots_dots({"N": ["p"]})
         assert axes[0].get_xlim() == approx((0, bs_n2.distance[-1]))

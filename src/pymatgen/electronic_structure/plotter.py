@@ -1064,7 +1064,8 @@ class BSPlotterProjected(BSPlotter):
                                 )
 
                 # Set x range
-                ax.set_xlim(np.min(data["distances"]), np.max(data["distances"]))
+                all_distances = np.concatenate(data["distances"])
+                ax.set_xlim(np.min(all_distances), np.max(all_distances))
 
                 # Set y range
                 if ylim is None:
