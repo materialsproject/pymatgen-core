@@ -116,14 +116,16 @@ class ValenceIonicRadiusEvaluator:
             return after if after - skey < skey - before else before
 
         for idx, site in enumerate(self._structure):
-            if isinstance(site.specie, Element):
-                radius = site.specie.atomic_radius
+            # Zero-valence species (e.g. noble gases) have no ionic radius, so use the atomic radius
+            if isinstance(site.specie, Element) or round(site.specie.oxi_state) == 0:
+                element = site.specie if isinstance(site.specie, Element) else site.specie.element
+                radius = element.atomic_radius
                 # Handle elements with no atomic_radius
                 # by using calculated values instead.
                 if radius is None:
-                    radius = site.specie.atomic_radius_calculated
+                    radius = element.atomic_radius_calculated
                 if radius is None:
-                    raise ValueError(f"cannot assign radius to element {site.specie}")
+                    raise ValueError(f"cannot assign radius to element {element}")
                 radii.append(radius)
                 continue
 

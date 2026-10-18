@@ -1693,15 +1693,12 @@ class TestValenceIonicRadiusEvaluatorExtra:
         assert evaluator.valences == {"Cu": 0, "Ar": 0}
         assert evaluator.radii == approx({"Cu": 1.35, "Ar": 0.71})
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=KeyError,
-        reason="noble-gas-only structures get oxi_state=0 Species that have no ionic radius entry",
-    )
     def test_noble_gas_only(self):
         ar_fcc = Structure.from_spacegroup("Fm-3m", Lattice.cubic(5.26), ["Ar"], [[0, 0, 0]])
         evaluator = ValenceIonicRadiusEvaluator(ar_fcc)
         assert list(evaluator.valences.values()) == [0]
+        # zero valence falls back to the atomic radius
+        assert list(evaluator.radii.values()) == approx([Element("Ar").atomic_radius])
 
 
 class TestLocalStructOrderParamsExtra:
