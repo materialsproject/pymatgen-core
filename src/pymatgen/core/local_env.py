@@ -1579,7 +1579,7 @@ class OpenBabelNN(NearNeighbors):
         output = []
         for info in sites:
             orig_site = structure[info["site_index"]]
-            info["site"] = Site(orig_site.species, orig_site._coords, properties=orig_site.properties)
+            info["site"] = Site(orig_site.species, orig_site.coords, properties=orig_site.properties)
             output.append(info)
         return output
 
@@ -1735,7 +1735,7 @@ class CovalentBondNN(NearNeighbors):
         output = []
         for info in sites:
             orig_site = structure[info["site_index"]]
-            info["site"] = Site(orig_site.species, orig_site._coords, properties=orig_site.properties)
+            info["site"] = Site(orig_site.species, orig_site.coords, properties=orig_site.properties)
             output.append(info)
         return output
 

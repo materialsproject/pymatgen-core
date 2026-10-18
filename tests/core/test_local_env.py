@@ -1615,14 +1615,12 @@ def test_covalent_bond_nn_decorate(methane):
     assert order_params[1:] == [None] * 4
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="CovalentBondNN.get_nn_shell_info accesses non-existent Site._coords",
-)
 def test_covalent_bond_nn_shell_info(methane):
     shell = CovalentBondNN().get_nn_shell_info(methane, 0, 1)
     assert len(shell) == 4
+    for info in shell:
+        assert_allclose(info["site"].coords, methane[info["site_index"]].coords)
+        assert info["site"].species == methane[info["site_index"]].species
 
 
 def test_minimum_okeeffe_nn_elemental(cu_fcc, nacl):
