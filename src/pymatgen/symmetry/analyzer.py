@@ -1664,8 +1664,8 @@ def cluster_sites(
     for idx in range(len(mol)):
         clustered_dists[f_cluster[idx]].append(dists[idx])
     avg_dist = {key: np.mean(val) for key, val in clustered_dists.items()}
-    clustered_sites = defaultdict(list)
-    origin_site = None
+    clustered_sites: defaultdict[tuple, list[int | Site]] = defaultdict(list)
+    origin_site: int | Site | None = None
     for idx, site in enumerate(mol):
         if avg_dist[f_cluster[idx]] < tol:
             origin_site = idx if give_only_index else site

@@ -378,7 +378,7 @@ class StructureGraph(MSONable):
         if to_jimage is None:
             # assume we want the closest site
             warnings.warn("Please specify to_jimage to be unambiguous, trying to automatically detect.", stacklevel=2)
-            dist, to_jimage = self.structure[from_index].distance_and_image(self.structure[to_index])
+            dist, _ = self.structure[from_index].distance_and_image(self.structure[to_index])
             if dist == 0:
                 # this will happen when from_index == to_index,
                 # typically in primitive single-atom lattices
@@ -393,12 +393,11 @@ class StructureGraph(MSONable):
                 self.structure[from_index].coords, dist, dist * 0.01, include_index=True
             )
             for nnsite in equiv_sites:
-                to_jimage = np.subtract(nnsite.frac_coords, self.structure[from_index].frac_coords)
-                to_jimage = np.round(to_jimage).astype(int)  # type: ignore[assignment]
+                image = np.round(np.subtract(nnsite.frac_coords, self.structure[from_index].frac_coords)).astype(int)
                 self.add_edge(
                     from_index=from_index,
                     from_jimage=(0, 0, 0),
-                    to_jimage=to_jimage,
+                    to_jimage=cast("tuple[int, int, int]", tuple(int(i) for i in image)),
                     to_index=nnsite.index,
                 )
             return

@@ -21,12 +21,14 @@ from pymatgen.io.ase import NO_ASE_ERR, AseAtomsAdaptor
 if NO_ASE_ERR is None:
     from ase.io.trajectory import Trajectory as AseTrajectory
 else:
-    AseTrajectory = None
+    AseTrajectory = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from typing import Any, Self
+
+    from ase.io.trajectory import TrajectoryReader
 
     from pymatgen.util.typing import PathLike, SitePropsType
 
@@ -732,7 +734,7 @@ class Trajectory(MSONable):
     @classmethod
     def from_ase(
         cls,
-        trajectory: str | Path | AseTrajectory,
+        trajectory: str | Path | TrajectoryReader,
         constant_lattice: bool | None = None,
         store_frame_properties: bool = True,
         property_map: dict[str, str] | None = None,
@@ -812,7 +814,7 @@ class Trajectory(MSONable):
         self,
         property_map: dict[str, str] | None = None,
         ase_traj_file: str | Path | None = None,
-    ) -> AseTrajectory:
+    ) -> TrajectoryReader:
         """
         Convert a pymatgen .Trajectory to an ASE .Trajectory.
 

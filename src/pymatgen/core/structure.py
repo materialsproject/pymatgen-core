@@ -69,7 +69,6 @@ if TYPE_CHECKING:
     import spglib
     from ase import Atoms
     from ase.calculators.calculator import Calculator
-    from ase.io.trajectory import Trajectory
     from ase.optimize.optimize import Optimizer
     from matgl.ext.ase import TrajectoryObserver
     from numpy.typing import ArrayLike, NDArray
@@ -838,23 +837,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
         self,
         calculator: str | Calculator,
         relax_cell: bool = True,
-        optimizer: (
-            Literal[
-                "BFGS",
-                "BFGSLineSearch",
-                "CellAwareBFGS",
-                "FIRE",
-                "FIRE2",
-                "GPMin",
-                "GoodOldQuasiNewton",
-                "LBFGS",
-                "LBFGSLineSearch",
-                "MDMin",
-                "ODE12r",
-                "QuasiNewton",
-            ]
-            | Optimizer
-        ) = "FIRE",
+        optimizer: str | Optimizer = "FIRE",
         steps: int = 500,
         fmax: float = 0.1,
         stress_weight: float = 0.01,
@@ -862,7 +845,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
         return_trajectory: bool = False,
         verbose: bool = False,
         asecellfilter_kwargs: dict | None = None,
-    ) -> Structure | Molecule | tuple[Structure | Molecule, TrajectoryObserver | Trajectory]:
+    ) -> Structure | Molecule | tuple[Structure | Molecule, TrajectoryObserver | list[Atoms]]:
         """Perform a structure relaxation using an ASE calculator.
 
         Args:
@@ -959,7 +942,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
 
         return system
 
-    def _prep_calculator(self, calculator: Literal["m3gnet", "gfn2-xtb"] | Calculator, **params) -> Calculator:
+    def _prep_calculator(self, calculator: str | Calculator, **params) -> Calculator:
         """Convert string name of special ASE calculators into ASE calculator objects.
 
         Args:
@@ -3228,6 +3211,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         if backend not in ("moyopy", "spglib"):
             raise ValueError(f"Invalid {backend=}, must be one of moyopy or spglib.")
 
+        dataset: moyopy.MoyoDataset | spglib.SpglibDataset
         if backend == "moyopy":
             try:
                 import moyopy
@@ -3236,7 +3220,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 raise ImportError("moyopy is not installed. Run pip install moyopy.")
 
             # Convert structure to MoyoDataset format
-            moyo_cell = moyopy.interface.MoyoAdapter.from_structure(self)
+            moyo_cell = moyopy.interface.MoyoAdapter.from_structure(cast("Structure", self))
             dataset = moyopy.MoyoDataset(cell=moyo_cell, symprec=symprec, **kwargs)
 
         else:
@@ -3496,7 +3480,7 @@ class IMolecule(SiteCollection[Site], MSONable):
             return any(CovalentBond.is_bonded(site, test_site, tol=tol) for test_site in cluster)
 
         while len(sites) > 0:
-            unmatched: list[PeriodicSite] = []
+            unmatched: list[Site] = []
             for site in sites:
                 for cluster in clusters:
                     if belongs_to_cluster(site, cluster):
@@ -4072,6 +4056,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
     @IStructure.frac_coords.setter
     def frac_coords(self, fractional_coords: ArrayLike) -> None:
         """Sets the fractional coordinates of the Sites in the Structure."""
+        fractional_coords = np.asarray(fractional_coords, dtype=np.float64)
         if len(fractional_coords) != len(self.sites):
             raise ValueError(
                 "A Structure must have as many coordinates as it has sites, "
@@ -4083,6 +4068,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
     @IStructure.cart_coords.setter
     def cart_coords(self, cartesian_coords: ArrayLike) -> None:
         """Sets the cartesian coordinates of the Sites in the Structure."""
+        cartesian_coords = np.asarray(cartesian_coords, dtype=np.float64)
         if len(cartesian_coords) != len(self.sites):
             raise ValueError(
                 "A Structure must have as many coordinates as it has sites, "
@@ -4203,7 +4189,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         elif coords_are_cartesian:
             frac_coords = self._lattice.get_fractional_coords(coords)
         else:
-            frac_coords = coords
+            frac_coords = np.asarray(coords, dtype=np.float64)
 
         new_site = PeriodicSite(species, frac_coords, self._lattice, properties=properties, label=label)
         self.sites[idx] = new_site
@@ -4716,7 +4702,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         return_trajectory: bool = False,
         verbose: bool = False,
         asecellfilter_kwargs: dict | None = None,
-    ) -> Structure | tuple[Structure, TrajectoryObserver | Trajectory]:
+    ) -> Structure | tuple[Structure, TrajectoryObserver | list[Atoms]]:
         """Perform a crystal structure relaxation using an ASE calculator.
 
         Args:
