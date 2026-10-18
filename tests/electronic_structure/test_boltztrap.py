@@ -362,10 +362,6 @@ class TestBoltztrapAnalyzer:
         with pytest.raises(BoltztrapError, match="energies of the two DOS are different"):
             self.bz_up.get_complete_dos(structure, shifted_dw)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="get_complete_dos dereferences analyzer_for_second_spin.dos before checking it is not None",
-    )
     def test_get_complete_dos_single_spin(self):
         structure = loadfn(f"{TEST_DIR}/structure_mp-12103.json")
         cdos = self.bz_up.get_complete_dos(structure)

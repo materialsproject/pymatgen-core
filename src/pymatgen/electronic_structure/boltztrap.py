@@ -1594,7 +1594,7 @@ class BoltztrapAnalyzer:
         """
         pdoss: dict[PeriodicSite, dict[Orbital, dict[Spin, ArrayLike]]] = {}
         spin_1 = next(iter(self.dos.densities))
-        spin_2 = next(iter(analyzer_for_second_spin.dos.densities))
+        spin_2 = next(iter(analyzer_for_second_spin.dos.densities)) if analyzer_for_second_spin else spin_1
 
         if analyzer_for_second_spin:
             if not np.all(self.dos.energies == analyzer_for_second_spin.dos.energies):
