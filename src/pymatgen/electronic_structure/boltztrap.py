@@ -275,7 +275,7 @@ class BoltztrapRunner(MSONable):
                         ).to("Ry")
                     )
                     a, b, c = kpt.frac_coords
-                    file.write(f"{a:12.8f} {b:12.8f} {c:12.8f}{len(eigs)}\n")
+                    file.write(f"{a:12.8f} {b:12.8f} {c:12.8f} {len(eigs)}\n")
                     file.writelines(f"{sign * float(e):18.8f}\n" for e in eigs)
 
             else:

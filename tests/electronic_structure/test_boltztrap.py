@@ -627,7 +627,6 @@ class TestBoltztrapRunner:
             expected = sign * _to_ry(cu2o_bs.bands[Spin.up][20][kpt_idx] - cu2o_bs.efermi)
             assert value == approx(expected, abs=1e-7)
 
-    @pytest.mark.xfail(strict=True, reason="FERMI write_energy omits the space between kz and the eigenvalue count")
     def test_write_energy_fermi_kpoint_line(self, make_runner, cu2o_bs, tmp_path):
         runner = make_runner(cu2o_bs, 10, run_type="FERMI", band_nb=20, spin=1)
         runner.write_energy(tmp_path / "boltztrap.energyso")
