@@ -3175,11 +3175,12 @@ class BoltztrapPlotter:
         """
         sbk = self._bz.get_seebeck(output="average") if output == "average" else self._bz.get_seebeck(output="eigs")
 
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         temperatures = sorted(sbk["n"])
         doping = self._bz.doping["n"] if doping == "all" else doping
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for dop in doping:
                 dop_idx = self._bz.doping[dop_type].index(dop)
                 sbk_temp = [sbk[dop_type][temp][dop_idx] for temp in temperatures]
@@ -3230,11 +3231,12 @@ class BoltztrapPlotter:
         else:
             cond = self._bz.get_conductivity(relaxation_time=relaxation_time, output="eigs")
 
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         temperatures = sorted(cond["n"])
         doping = self._bz.doping["n"] if doping == "all" else doping
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for dop in doping:
                 dop_idx = self._bz.doping[dop_type].index(dop)
                 cond_temp = [cond[dop_type][temp][dop_idx] for temp in temperatures]
@@ -3286,11 +3288,12 @@ class BoltztrapPlotter:
         else:
             pow_factor = self._bz.get_power_factor(relaxation_time=relaxation_time, output="eigs")
 
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         temperatures = sorted(pow_factor["n"])
         doping = self._bz.doping["n"] if doping == "all" else doping
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for dop in doping:
                 dop_idx = self._bz.doping[dop_type].index(dop)
                 pf_temp = [pow_factor[dop_type][temp][dop_idx] for temp in temperatures]
@@ -3343,11 +3346,12 @@ class BoltztrapPlotter:
             raise ValueError(f"{output=} must be 'average' or 'eigs'")
         zt = self._bz.get_zt(relaxation_time=relaxation_time, output=output)
 
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         temperatures = sorted(zt["n"])
         doping = self._bz.doping["n"] if doping == "all" else doping
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for dop in doping:
                 dop_idx = self._bz.doping[dop_type].index(dop)
                 zt_temp = [zt[dop_type][temp][dop_idx] for temp in temperatures]
@@ -3392,11 +3396,12 @@ class BoltztrapPlotter:
         else:
             eff_mass = self._bz.get_average_eff_mass(output="eigs")
 
-        ax_main = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         temperatures = sorted(eff_mass["n"])
         doping = self._bz.doping["n"] if doping == "all" else doping
         for idx, dop_type in enumerate("np"):
-            ax = plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for dop in doping:
                 dop_idx = self._bz.doping[dop_type].index(dop)
                 em_temp = [eff_mass[dop_type][temp][dop_idx] for temp in temperatures]
@@ -3420,7 +3425,7 @@ class BoltztrapPlotter:
             ax.tick_params(labelsize=25)
 
         plt.tight_layout()
-        return ax_main
+        return ax
 
     def plot_seebeck_dop(self, temps="all", output: Literal["average", "eigs"] = "average"):
         """Plot the Seebeck in function of doping levels for different temperatures.
@@ -3437,9 +3442,10 @@ class BoltztrapPlotter:
         sbk = self._bz.get_seebeck(output="average") if output == "average" else self._bz.get_seebeck(output="eigs")
 
         temperatures = sorted(sbk["n"]) if temps == "all" else temps
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for temp in temperatures:
                 if output == "eigs":
                     for xyz in range(3):
@@ -3496,9 +3502,10 @@ class BoltztrapPlotter:
             cond = self._bz.get_conductivity(relaxation_time=relaxation_time, output="eigs")
 
         temperatures = sorted(cond["n"]) if temps == "all" else temps
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for temp in temperatures:
                 if output == "eigs":
                     for xyz in range(3):
@@ -3553,9 +3560,10 @@ class BoltztrapPlotter:
             pow_factor = self._bz.get_power_factor(relaxation_time=relaxation_time, output="eigs")
 
         temperatures = sorted(pow_factor["n"]) if temps == "all" else temps
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for temp in temperatures:
                 if output == "eigs":
                     for xyz in range(3):
@@ -3612,9 +3620,10 @@ class BoltztrapPlotter:
             zt = self._bz.get_zt(relaxation_time=relaxation_time, output="eigs")
 
         temperatures = sorted(zt["n"]) if temps == "all" else temps
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for temp in temperatures:
                 if output == "eigs":
                     for xyz in range(3):
@@ -3666,9 +3675,10 @@ class BoltztrapPlotter:
             em = self._bz.get_average_eff_mass(output="eigs")
 
         temperatures = sorted(em["n"]) if temps == "all" else temps
-        ax = pretty_plot(22, 14)
+        fig = pretty_plot(22, 14).figure
+        fig.clear()  # n- and p-type curves go on two side-by-side panels
         for idx, dop_type in enumerate("np"):
-            plt.subplot(121 + idx)
+            ax = fig.add_subplot(121 + idx)
             for temp in temperatures:
                 if output == "eigs":
                     for xyz in range(3):

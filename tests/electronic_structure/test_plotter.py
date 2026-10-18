@@ -357,25 +357,6 @@ def bz_analyzer():
     return BoltztrapAnalyzer.from_files(f"{BOLTZTRAP_DIR}/transp/")
 
 
-@pytest.fixture
-def lenient_set_ticks(monkeypatch):
-    """Drop the label kwargs BoltztrapPlotter passes to set_[xy]ticks without labels.
-
-    This sidesteps the (xfailed) fontsize bug so the plotting logic itself can be tested.
-    """
-
-    def wrap(orig):
-        def set_ticks(self, ticks, labels=None, *, minor=False, **kwargs):
-            if labels is None:
-                kwargs = {}
-            return orig(self, ticks, labels, minor=minor, **kwargs)
-
-        return set_ticks
-
-    monkeypatch.setattr(plt.Axes, "set_xticks", wrap(plt.Axes.set_xticks))
-    monkeypatch.setattr(plt.Axes, "set_yticks", wrap(plt.Axes.set_yticks))
-
-
 def _all_lines(ax: plt.Axes) -> list:
     return [line for axis in ax.figure.axes for line in axis.get_lines()]
 
@@ -570,18 +551,10 @@ class TestBoltztrapPlotter:
         assert panels["n-type"].get_ylabel() == "Effective mass (m$_e$)"
         assert panels["p-type"].get_ylabel() == ""
 
-    @pytest.mark.xfail(
-        strict=True, reason="plot_eff_mass_temp plots on subplots but returns the empty figure-level Axes"
-    )
     def test_plot_eff_mass_temp_returns_populated_axes(self):
         ax = self.plotter.plot_eff_mass_temp()
         assert len(ax.get_lines()) > 0
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="*_temp/*_dop methods call plt.subplot() but keep drawing on the original Axes, so the n- and "
-        "p-type panels stay empty and all curves end up on one Axes",
-    )
     @pytest.mark.parametrize(
         "method",
         [
@@ -602,7 +575,6 @@ class TestBoltztrapPlotter:
         assert set(panels) == {"n-type", "p-type"}
         assert len(panels["n-type"].get_lines()) == len(panels["p-type"].get_lines()) > 0
 
-    @pytest.mark.usefixtures("lenient_set_ticks")
     def test_plot_seebeck_eff_mass_mu(self):
         pytest.importorskip("fdint")
         ax = self.plotter.plot_seebeck_eff_mass_mu()
