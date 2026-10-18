@@ -1211,7 +1211,6 @@ class TestBSPlotterProjectedExtra:
         assert dictio_d == expected_dictio
         assert dictpa_d == expected_dictpa
 
-    @pytest.mark.xfail(strict=True, reason="orbital_label uses str(list) and leaves quotes in labels like d'xy'-'yz'")
     def test_summarize_keys_partial_subshell_label(self, bs_cu2o):
         plotter = BSPlotterProjected(bs_cu2o)
         dictio_d, _ = plotter._summarize_keys_for_plot(

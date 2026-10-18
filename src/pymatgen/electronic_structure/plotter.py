@@ -2073,7 +2073,7 @@ class BSPlotterProjected(BSPlotter):
                     label += f"{elem},"
                 else:
                     orb_label = [orb[1:] for orb in orbs]
-                    label += f"{elem}{str(orb_label).replace('[', '').replace(']', '').replace(', ', '-')},"
+                    label += f"{elem}{'-'.join(orb_label)},"
             return label[:-1]
 
         if sum_atoms is None and sum_morbs is None:
