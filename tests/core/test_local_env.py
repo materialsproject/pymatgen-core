@@ -1725,11 +1725,9 @@ class TestLocalStructOrderParamsExtra:
         with pytest.raises(ValueError, match="List of polar and azimuthal angles have to be equal"):
             lsop.compute_trigonometric_terms([0.1, 0.2], [0.1])
 
-    @pytest.mark.xfail(
-        strict=True, raises=TypeError, reason="last_nneigh calls len() on the integer _last_nneigh attribute"
-    )
     def test_last_nneigh(self, nacl):
         lsop = LocalStructOrderParams(["cn"], cutoff=3)
+        assert lsop.last_nneigh == -1
         lsop.get_order_parameters(nacl, 0)
         assert lsop.last_nneigh == 6
 

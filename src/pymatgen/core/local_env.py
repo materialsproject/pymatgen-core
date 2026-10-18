@@ -2418,7 +2418,7 @@ class LocalStructOrderParams:
         """Number of neighbors encountered during the most recent order parameter calculation.
         A value of -1 indicates that no such calculation has yet been performed for this instance.
         """
-        return len(self._last_nneigh)
+        return self._last_nneigh
 
     def compute_trigonometric_terms(self, thetas, phis):
         """Compute trigonometric terms that are required to calculate
