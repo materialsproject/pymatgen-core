@@ -2031,29 +2031,33 @@ class BoltztrapAnalyzer:
             return list(a[:27])
 
         gap = data.get("gap")
-        mu_steps = [float(d) for d in data["mu_steps"]] if "mu_steps" in data else None
+        mu_steps = [float(d) for d in data["mu_steps"]] if data.get("mu_steps") is not None else None
         cond = (
-            {int(d): [_make_float_array(v) for v in data["cond"][d]] for d in data["cond"]} if "cond" in data else None
+            {int(d): [_make_float_array(v) for v in data["cond"][d]] for d in data["cond"]}
+            if data.get("cond") is not None
+            else None
         )
         seebeck = (
             {int(d): [_make_float_array(v) for v in data["seebeck"][d]] for d in data["seebeck"]}
-            if "seebeck" in data
+            if data.get("seebeck") is not None
             else None
         )
         kappa = (
             {int(d): [_make_float_array(v) for v in data["kappa"][d]] for d in data["kappa"]}
-            if "kappa" in data
+            if data.get("kappa") is not None
             else None
         )
         hall = (
-            {int(d): [_make_float_hall(v) for v in data["hall"][d]] for d in data["hall"]} if "hall" in data else None
+            {int(d): [_make_float_hall(v) for v in data["hall"][d]] for d in data["hall"]}
+            if data.get("hall") is not None
+            else None
         )
         doping = (
             {
                 "p": [float(d) for d in data["doping"]["p"]],
                 "n": [float(d) for d in data["doping"]["n"]],
             }
-            if "doping" in data
+            if data.get("doping") is not None
             else None
         )
 
@@ -2062,7 +2066,7 @@ class BoltztrapAnalyzer:
                 "p": {int(d): [float(v) for v in data["mu_doping"]["p"][d]] for d in data["mu_doping"]["p"]},
                 "n": {int(d): [float(v) for v in data["mu_doping"]["n"][d]] for d in data["mu_doping"]["n"]},
             }
-            if "mu_doping" in data
+            if data.get("mu_doping") is not None
             else None
         )
 
@@ -2077,7 +2081,7 @@ class BoltztrapAnalyzer:
                     for d in data["seebeck_doping"]["n"]
                 },
             }
-            if "seebeck_doping" in data
+            if data.get("seebeck_doping") is not None
             else None
         )
 
@@ -2092,7 +2096,7 @@ class BoltztrapAnalyzer:
                     for d in data["cond_doping"]["n"]
                 },
             }
-            if "cond_doping" in data
+            if data.get("cond_doping") is not None
             else None
         )
 
@@ -2107,7 +2111,7 @@ class BoltztrapAnalyzer:
                     for d in data["kappa_doping"]["n"]
                 },
             }
-            if "kappa_doping" in data
+            if data.get("kappa_doping") is not None
             else None
         )
 
@@ -2120,19 +2124,25 @@ class BoltztrapAnalyzer:
                     int(d): [_make_float_hall(v) for v in data["hall_doping"]["n"][d]] for d in data["hall_doping"]["n"]
                 },
             }
-            if "hall_doping" in data
+            if data.get("hall_doping") is not None
             else None
         )
 
-        dos = Dos.from_dict(data["dos"]) if "dos" in data else None
+        dos = Dos.from_dict(data["dos"]) if data.get("dos") is not None else None
         dos_partial = data.get("dos_partial")
-        carrier_conc = data.get("carrier_conc")
+        # JSON turns the integer temperature keys into strings
+        carrier_conc = (
+            {int(temp): conc for temp, conc in data["carrier_conc"].items()}
+            if data.get("carrier_conc") is not None
+            else None
+        )
         vol = data.get("vol")
         warning = data.get("warning")
 
         return cls(
             gap=gap,
             mu_steps=mu_steps,
+            intrans=data.get("intrans"),
             cond=cond,
             seebeck=seebeck,
             kappa=kappa,

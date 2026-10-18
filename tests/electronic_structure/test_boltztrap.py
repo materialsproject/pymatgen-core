@@ -383,17 +383,14 @@ class TestBoltztrapAnalyzer:
         )
         assert bz.dos.energies == approx(self.bz.dos.energies)
 
-    @pytest.mark.xfail(strict=True, reason="from_dict does not convert carrier_conc temperature keys back to int")
     def test_as_from_dict_carrier_conc(self):
         bz = BoltztrapAnalyzer.from_dict(json.loads(json.dumps(self.bz.as_dict())))
         assert bz.get_carrier_concentration()[300][39] == approx(self.bz.get_carrier_concentration()[300][39])
 
-    @pytest.mark.xfail(strict=True, reason="from_dict drops the intrans entry written by as_dict")
     def test_as_from_dict_intrans(self):
         bz = BoltztrapAnalyzer.from_dict(json.loads(json.dumps(self.bz.as_dict())))
         assert bz.intrans["scissor"] == approx(self.bz.intrans["scissor"])
 
-    @pytest.mark.xfail(strict=True, reason="from_dict fails on the None-valued tensors as_dict writes for DOS runs")
     def test_as_from_dict_dos_run(self):
         bz_up = BoltztrapAnalyzer.from_dict(self.bz_up.as_dict())
         assert bz_up.dos.energies == approx(self.bz_up.dos.energies)
