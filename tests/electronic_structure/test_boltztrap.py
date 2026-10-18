@@ -333,9 +333,6 @@ class TestBoltztrapAnalyzer:
             bcheck = BoltztrapAnalyzer.check_acc_bzt_bands(sbs_bzt, sbs, warn_thr=(0.0, 1.0))
         assert bcheck["acc_err"][0] is True
 
-    @pytest.mark.xfail(
-        strict=True, reason="check_acc_bzt_bands compares avg_distance against warn_thr[0] instead of warn_thr[1]"
-    )
     def test_check_acc_bzt_bands_distance_threshold(self):
         structure = loadfn(f"{TEST_DIR}/structure_mp-12103.json")
         sbs = loadfn(f"{TEST_DIR}/dft_bs_sym_line.json")

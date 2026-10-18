@@ -938,7 +938,7 @@ class BoltztrapAnalyzer:
 
         if avg_corr > warn_thr[0]:
             acc_err[0] = True
-        if avg_distance > warn_thr[0]:
+        if avg_distance > warn_thr[1]:
             acc_err[1] = True
 
         bcheck["avg_corr"] = avg_corr
