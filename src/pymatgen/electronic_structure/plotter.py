@@ -956,15 +956,14 @@ class BSPlotterProjected(BSPlotter):
                         }
                     )
             if self._bs.is_spin_polarized:
-                for branch in self._bs.branches:
-                    for band_idx in range(self._nb_bands):
-                        for j in range(branch["start_index"], branch["end_index"] + 1):
-                            proj_br[-1][str(Spin.down)][band_idx].append(
-                                {
-                                    e: {o: proj[Spin.down][band_idx][j][e][o] for o in proj[Spin.down][band_idx][j][e]}
-                                    for e in proj[Spin.down][band_idx][j]
-                                }
-                            )
+                for band_idx in range(self._nb_bands):
+                    for j in range(branch["start_index"], branch["end_index"] + 1):
+                        proj_br[-1][str(Spin.down)][band_idx].append(
+                            {
+                                e: {o: proj[Spin.down][band_idx][j][e][o] for o in proj[Spin.down][band_idx][j][e]}
+                                for e in proj[Spin.down][band_idx][j]
+                            }
+                        )
         return proj_br
 
     def get_projected_plots_dots(

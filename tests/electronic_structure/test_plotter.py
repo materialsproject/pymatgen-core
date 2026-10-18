@@ -908,11 +908,6 @@ class TestBSPlotterProjectedExtra:
                     k_idx = branch["start_index"] + j
                     assert proj_br[br_idx]["1"][band_idx][j][element] == approx(ref[Spin.up][band_idx][k_idx][element])
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="_get_projections_by_branches re-loops over all branches for spin down, so each branch's "
-        "spin-down list holds every k-point starting from k=0",
-    )
     def test_projections_by_branches_spin_down(self, bs_n2):
         plotter = BSPlotterProjected(bs_n2)
         proj_br = plotter._get_projections_by_branches({"N": ["s", "p"]})
