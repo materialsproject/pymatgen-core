@@ -935,12 +935,6 @@ class TestTrajectoryAse(MatSciTest):
         assert_allclose(roundtrip.coords, SI_COORDS)
         assert [frame["energy"] for frame in roundtrip.frame_properties] == [0.0, -1.0, -2.0]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AttributeError,
-        reason="to_ase dereferences atoms.calc, which AseAtomsAdaptor leaves as None when there are no "
-        "final_magmom/charge site properties",
-    )
     def test_to_ase_without_magmoms(self, struct_traj):
         ase_traj = struct_traj.to_ase(ase_traj_file=f"{self.tmp_path}/out.traj")
         assert len(ase_traj) == 3

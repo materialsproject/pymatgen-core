@@ -864,7 +864,7 @@ class Trajectory(MSONable):
 
             # Ensure that `charges` and `magmoms` are not lost from AseAtomsAdaptor
             for k in ("charges", "magmoms"):
-                if k in atoms.calc.implemented_properties or k in atoms.calc.results:
+                if atoms.calc is not None and (k in atoms.calc.implemented_properties or k in atoms.calc.results):
                     props[k] = atoms.calc.get_property(k)
 
             atoms.calc = SinglePointCalculator(atoms=atoms, **props)
