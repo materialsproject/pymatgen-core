@@ -858,7 +858,7 @@ class StructureGraph(MSONable):
             image_labels (bool): if True, label edges with
                 their periodic images (usually only used for debugging,
                 edges to periodic images always appear as dashed lines)
-            color_scheme (str): "VESTA" or "JMOL"
+            color_scheme (str): "VESTA" or "Jmol"
             keep_dot (bool): keep GraphViz .dot file for later visualization
             algo: any graphviz algo, "neato" (for simple graphs)
                 or "fdp" (for more crowded graphs) usually give good outputs
@@ -2508,7 +2508,7 @@ class MoleculeGraph(MSONable):
             image_labels (bool): if True, label edges with
                 their periodic images (usually only used for debugging,
                 edges to periodic images always appear as dashed lines)
-            color_scheme (str): "VESTA" or "JMOL"
+            color_scheme (str): "VESTA" or "Jmol"
             keep_dot (bool): keep GraphViz .dot file for later visualization
             algo: any graphviz algo, "neato" (for simple graphs)
                 or "fdp" (for more crowded graphs) usually give good outputs
