@@ -47,6 +47,6 @@ def tmp_path():
 
 def write_mt_file(tmp_path: Path, fname: str):
     filepath = tmp_path / fname
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write("if you're reading this yell at ben")
     f.close()

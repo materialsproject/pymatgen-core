@@ -399,10 +399,9 @@ def periodic_table_heatmap(
         vmin=min_val - 0.001,
         vmax=max_val + 0.001,
     )
-    cbar = fig.colorbar(heatmap)
-
     # Grey out missing elements in input data
-    cbar.cmap.set_under(blank_color)
+    heatmap.set_cmap(heatmap.get_cmap().with_extremes(under=blank_color))
+    cbar = fig.colorbar(heatmap)
 
     # Set the color bar label and tick marks
     cbar.set_label(cbar_label, rotation=270, labelpad=25, size=cbar_label_size)

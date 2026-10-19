@@ -374,7 +374,7 @@ class TestPackmolSet(MatSciTest):
         )
         pw.write_input(f"{self.tmp_path}/with_constraints")
         assert os.path.isfile(f"{self.tmp_path}/with_constraints/input.in")
-        with open(f"{self.tmp_path}/with_constraints/input.in") as f:
+        with open(f"{self.tmp_path}/with_constraints/input.in", encoding="utf-8") as f:
             inp = f.read()
         assert "  inside sphere 0 0 0 10\n  outside sphere 0 0 0 5" in inp
         pw.run(f"{self.tmp_path}/with_constraints")
@@ -417,7 +417,7 @@ class TestPackmolSet(MatSciTest):
         )
         pw.write_input(f"{self.tmp_path}/with_atoms_constraints")
         assert os.path.isfile(f"{self.tmp_path}/with_atoms_constraints/input.in")
-        with open(f"{self.tmp_path}/with_atoms_constraints/input.in") as f:
+        with open(f"{self.tmp_path}/with_atoms_constraints/input.in", encoding="utf-8") as f:
             inp = f.read()
         assert ("\n  atoms 3\n    inside sphere 0 0 0 5\n  end atoms\n") in inp
         assert ("\n  atoms 1 2\n    outside sphere 0 0 0 5.5\n  end atoms\n") in inp

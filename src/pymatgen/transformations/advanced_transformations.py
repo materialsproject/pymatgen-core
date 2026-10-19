@@ -8,7 +8,7 @@ import warnings
 from fractions import Fraction
 from itertools import groupby, product
 from string import ascii_lowercase
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from joblib import Parallel, delayed
@@ -1128,7 +1128,10 @@ class DopingTransformation(AbstractTransformation):
                     }
                 )
 
-            structs = trafo.apply_transformation(supercell, return_ranked_list=self.max_structures_per_enum)
+            # with return_ranked_list set, apply_transformation returns a list of dicts
+            structs = cast(
+                "list[dict]", trafo.apply_transformation(supercell, return_ranked_list=self.max_structures_per_enum)
+            )
             logger.info(f"{len(structs)} distinct structures")
             all_structures.extend(structs)
         logger.info(f"Total {len(all_structures)} doped structures")

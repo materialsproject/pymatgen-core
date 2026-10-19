@@ -224,7 +224,7 @@ class VolumetricData(MSONable):
             data[k] = self.data[k] + scale_factor * other.data[k]
 
         new = deepcopy(self)
-        new.data = type(self.data)(data, deprecated_keys=getattr(self.data, "_deprecated_keys", None))
+        new.data = _VolumetricDataDict(data, deprecated_keys=getattr(self.data, "_deprecated_keys", None))
         new.data_aug = {}
         new._spin_data = {}
         return new

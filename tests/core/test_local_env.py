@@ -9,7 +9,7 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Element, Lattice, Molecule, Structure
+from pymatgen.core import Element, Lattice, Molecule, Species, Structure
 from pymatgen.core.graphs import MoleculeGraph, StructureGraph
 from pymatgen.core.local_env import (
     CN_OPT_PARAMS,
@@ -32,9 +32,14 @@ from pymatgen.core.local_env import (
     OpenBabelNN,
     ValenceIonicRadiusEvaluator,
     VoronoiNN,
+    _get_default_radius,
+    _get_radius,
+    _handle_disorder,
     cn_opt_params,
     default_op_params,
     get_neighbors_of_site_with_index,
+    get_okeeffe_params,
+    gramschmidt,
     metal_edge_extender,
     on_disorder_options,
     oxygen_edge_extender,
@@ -1481,3 +1486,329 @@ class TestMetalEdgeExtender(MatSciTest):
         # up the six coordination bonds
         short_mol_graph = metal_edge_extender(self.water_cluster_Mg, cutoff=1.5)
         assert len(short_mol_graph.graph.edges) == 6
+
+
+@pytest.fixture
+def nacl() -> Structure:
+    return Structure.from_spacegroup("Fm-3m", Lattice.cubic(5.69), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+
+
+@pytest.fixture
+def cu_fcc() -> Structure:
+    return Structure.from_spacegroup("Fm-3m", Lattice.cubic(3.61), ["Cu"], [[0, 0, 0]])
+
+
+@pytest.fixture
+def methane() -> Molecule:
+    coords = [[0, 0, 0], [0.63, 0.63, 0.63], [-0.63, -0.63, 0.63], [-0.63, 0.63, -0.63], [0.63, -0.63, -0.63]]
+    return Molecule(["C", "H", "H", "H", "H"], coords)
+
+
+@pytest.mark.parametrize(
+    ("nn_cls", "structures_allowed", "molecules_allowed", "extend_structure_molecules"),
+    [
+        (VoronoiNN, True, False, None),
+        (IsayevNN, True, False, None),
+        (JmolNN, True, True, True),
+        (MinimumDistanceNN, True, True, True),
+        (CovalentBondNN, False, True, False),
+        (MinimumOKeeffeNN, True, True, True),
+        (MinimumVIRENN, True, False, None),
+        (BrunnerNNReciprocal, True, False, None),
+        (BrunnerNNRelative, True, False, None),
+        (BrunnerNNReal, True, False, None),
+        (EconNN, True, True, True),
+        (CrystalNN, True, False, None),
+        (CutOffDictNN, True, True, True),
+        (Critic2NN, True, True, True),
+    ],
+)
+def test_nn_capability_properties(nn_cls, structures_allowed, molecules_allowed, extend_structure_molecules):
+    nn = nn_cls()
+    assert nn.structures_allowed is structures_allowed
+    assert nn.molecules_allowed is molecules_allowed
+    if extend_structure_molecules is None:
+        # undefined for classes that do not allow molecules, so the base class raises
+        with pytest.raises(NotImplementedError, match="extend_structures_molecule is not defined"):
+            _ = nn.extend_structure_molecules
+    else:
+        assert nn.extend_structure_molecules is extend_structure_molecules
+    assert repr(nn) == f"{nn_cls.__name__}()"
+
+
+@pytest.mark.parametrize(
+    ("prop", "msg"),
+    [
+        ("structures_allowed", "structures_allowed is not defined"),
+        ("molecules_allowed", "molecules_allowed is not defined"),
+        ("extend_structure_molecules", "extend_structures_molecule is not defined"),
+    ],
+)
+def test_near_neighbors_base_properties_raise(prop, msg):
+    with pytest.raises(NotImplementedError, match=msg):
+        getattr(NearNeighbors(), prop)
+
+
+def test_near_neighbors_eq_hash():
+    assert JmolNN() == JmolNN()
+    assert JmolNN() != JmolNN(tol=0.1)
+    assert JmolNN() != MinimumDistanceNN()
+    assert JmolNN() != "JmolNN"
+    # hash is the number of instance attributes
+    assert hash(NearNeighbors()) == 0
+    assert hash(JmolNN()) == len(JmolNN().__dict__)
+    assert Critic2NN()._last_structure is None
+
+
+def test_get_cn_dict_and_weights(nacl):
+    mdnn = MinimumDistanceNN()
+    assert mdnn.get_cn_dict(nacl, 0) == {"Cl": 6}
+    assert mdnn.get_cn_dict(nacl, 0, use_weights=True) == approx({"Cl": 6.0})
+    assert mdnn.get_weights_of_nn_sites(nacl, 0) == approx([1.0] * 6)
+
+
+def test_nn_shell_info_invalid_shell(nacl):
+    with pytest.raises(ValueError, match="Shell must be positive"):
+        MinimumDistanceNN().get_nn_shell_info(nacl, 0, 0)
+
+
+def test_get_original_site_molecule(methane):
+    mdnn = MinimumDistanceNN()
+    assert mdnn._get_original_site(methane, methane[2]) == 2
+    with pytest.raises(ValueError, match="Site not found in structure"):
+        mdnn._get_original_site(methane, Molecule(["O"], [[5, 5, 5]])[0])
+
+
+def test_get_bonded_structure_decorate(nacl):
+    struct_graph = MinimumDistanceNN().get_bonded_structure(nacl, decorate=True)
+    order_params = struct_graph.structure.site_properties["order_parameters"]
+    assert len(order_params) == len(nacl)
+    assert all(ops["octahedral"] == approx(1.0) for ops in order_params)
+
+
+def test_get_local_order_parameters_unsupported_cn():
+    # isolated dimer has CN=1, for which no optimized order parameters exist
+    dimer = Structure(Lattice.cubic(10), ["H", "H"], [[0, 0, 0], [0.074, 0, 0]])
+    assert MinimumDistanceNN().get_local_order_parameters(dimer, 0) is None
+
+
+def test_voronoi_disordered_neighbors():
+    struct = Structure(Lattice.cubic(3), [{"Fe": 0.5, "Co": 0.5}, "O"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    nn_info = VoronoiNN().get_nn_info(struct, 1)
+    assert len(nn_info) == 14
+    assert {info["site"].species_string for info in nn_info} == {"O", "Fe:0.5, Co:0.5"}
+
+
+@pytest.mark.parametrize("nn_cls", [VoronoiNN, IsayevNN])
+def test_voronoi_get_all_nn_info(nacl, nn_cls):
+    all_nn = nn_cls().get_all_nn_info(nacl)
+    assert len(all_nn) == len(nacl)
+    assert all(len(nns) == 6 for nns in all_nn)
+    assert {info["site"].species_string for info in all_nn[0]} == {"Cl"}
+
+
+def test_covalent_bond_nn_decorate(methane):
+    mol_graph = CovalentBondNN().get_bonded_structure(methane, decorate=True)
+    order_params = mol_graph.molecule.site_properties["order_parameters"]
+    assert order_params[0]["tetrahedral"] == approx(1.0)
+    # H atoms have CN=1, for which no order parameters are defined
+    assert order_params[1:] == [None] * 4
+
+
+def test_covalent_bond_nn_shell_info(methane):
+    shell = CovalentBondNN().get_nn_shell_info(methane, 0, 1)
+    assert len(shell) == 4
+    for info in shell:
+        assert_allclose(info["site"].coords, methane[info["site_index"]].coords)
+        assert info["site"].species == methane[info["site_index"]].species
+
+
+def test_minimum_okeeffe_nn_elemental(cu_fcc, nacl):
+    # sites with Element (not Species) exercise the fallback to species_string
+    assert MinimumOKeeffeNN().get_cn(cu_fcc, 0) == 12
+    assert MinimumOKeeffeNN().get_cn(nacl, 0) == 6
+
+
+def test_get_okeeffe_params():
+    assert get_okeeffe_params("Fe") == {"c": 1.64, "r": 1.16}
+    with pytest.raises(RuntimeError, match="Could not find O'Keeffe parameters for element 'Og'"):
+        get_okeeffe_params("Og")
+
+
+@pytest.mark.parametrize("approach", ["min_dist", "voronoi", "min_OKeeffe", "min_VIRE"])
+def test_get_neighbors_of_site_with_index_approaches(cu_fcc, approach):
+    assert len(get_neighbors_of_site_with_index(cu_fcc, 0, approach=approach)) == 12
+
+
+def test_get_neighbors_of_site_with_index_invalid(cu_fcc):
+    with pytest.raises(RuntimeError, match=r"unsupported neighbor-finding method \(bad\)"):
+        get_neighbors_of_site_with_index(cu_fcc, 0, approach="bad")
+
+
+def test_site_is_of_motif_type_cp(cu_fcc):
+    assert site_is_of_motif_type(cu_fcc, 0) == "cp"
+
+
+def test_gramschmidt():
+    assert_allclose(gramschmidt(np.array([1.0, 1.0, 0.0]), np.array([1.0, 0.0, 0.0])), [0, 1, 0])
+    with pytest.raises(ValueError, match="Zero or negative inner product"):
+        gramschmidt(np.array([1.0, 0.0, 0.0]), np.zeros(3))
+
+
+def test_handle_disorder_edge_cases():
+    struct = Structure(Lattice.cubic(3), [{"Fe": 0.4, "O": 0.4}], [[0, 0, 0]])
+    with pytest.raises(ValueError, match="Unexpected on_disorder = 'bad'"):
+        _handle_disorder(struct, "bad")
+    # no majority species, so take_majority_drop leaves the site untouched
+    dropped = _handle_disorder(struct, "take_majority_drop")
+    assert dropped[0].species == struct[0].species
+    assert dropped is not struct
+
+
+class TestValenceIonicRadiusEvaluatorExtra:
+    def test_metal_atomic_radius(self, cu_fcc):
+        # BVAnalyzer cannot assign valences to a metal, so valences are zero and atomic radii are used
+        evaluator = ValenceIonicRadiusEvaluator(cu_fcc)
+        assert evaluator.valences == {"Cu": 0}
+        assert evaluator.radii == {"Cu": approx(Element("Cu").atomic_radius)}
+        assert evaluator.structure[0].specie == Element("Cu")
+
+    def test_coord_above_tabulated(self):
+        # Voronoi CN in zincblende (16) exceeds the largest tabulated CN, so the largest-CN radius is used
+        zns = Structure.from_spacegroup("F-43m", Lattice.cubic(5.41), ["Zn", "S"], [[0, 0, 0], [0.25, 0.25, 0.25]])
+        evaluator = ValenceIonicRadiusEvaluator(zns)
+        assert evaluator.valences == {"Zn2+": 2, "S2-": -2}
+        assert evaluator.radii == approx({"Zn2+": 1.04, "S2-": 1.7})
+
+    def test_coord_adjacent_to_tabulated(self):
+        # some sites in this hybrid perovskite have a CN one above a tabulated CN, whose radius is then used
+        struct = Structure.from_file(f"{TEST_FILES_DIR}/cif/H6PbCI3N_mp-977013_symmetrized.cif")
+        evaluator = ValenceIonicRadiusEvaluator(struct)
+        assert evaluator.valences == {"H+": 1, "Pb2+": 2, "C2-": -2, "I-": -1, "N3-": -3}
+        assert evaluator.radii == approx({"H+": -0.04, "Pb2+": 1.63, "C2-": 0.3, "I-": 2.06, "N3-": 1.32})
+
+    def test_mixed_metal_noble_gas(self):
+        struct = Structure(Lattice.cubic(3.61), ["Cu", "Ar"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        evaluator = ValenceIonicRadiusEvaluator(struct)
+        assert evaluator.valences == {"Cu": 0, "Ar": 0}
+        assert evaluator.radii == approx({"Cu": 1.35, "Ar": 0.71})
+
+    def test_noble_gas_only(self):
+        ar_fcc = Structure.from_spacegroup("Fm-3m", Lattice.cubic(5.26), ["Ar"], [[0, 0, 0]])
+        evaluator = ValenceIonicRadiusEvaluator(ar_fcc)
+        assert list(evaluator.valences.values()) == [0]
+        # zero valence falls back to the atomic radius
+        assert list(evaluator.radii.values()) == approx([Element("Ar").atomic_radius])
+
+
+class TestLocalStructOrderParamsExtra:
+    def test_invalid_init(self):
+        with pytest.raises(ValueError, match=r"Unknown order parameter type \(bad\)"):
+            LocalStructOrderParams(["bad"])
+        with pytest.raises(ValueError, match="Cutoff radius is zero"):
+            LocalStructOrderParams(["cn"], cutoff=0)
+
+    def test_accessors(self):
+        lsop = LocalStructOrderParams(["cn", "oct"])
+        assert lsop.num_ops == 2
+        assert lsop.get_type(1) == "oct"
+        assert lsop.get_parameters(0) == {"norm": 1}
+        for method in (lsop.get_type, lsop.get_parameters):
+            for index in (-1, 2):
+                with pytest.raises(ValueError, match="out-of-bounds"):
+                    method(index)
+        with pytest.raises(ValueError, match="List of polar and azimuthal angles have to be equal"):
+            lsop.compute_trigonometric_terms([0.1, 0.2], [0.1])
+
+    def test_last_nneigh(self, nacl):
+        lsop = LocalStructOrderParams(["cn"], cutoff=3)
+        assert lsop.last_nneigh == -1
+        lsop.get_order_parameters(nacl, 0)
+        assert lsop.last_nneigh == 6
+
+    @pytest.mark.parametrize(
+        ("kwargs", "msg"),
+        [
+            ({"n": -1}, "Site index smaller zero"),
+            ({"n": 8}, "Site index beyond maximum"),
+            ({"n": 0, "indices_neighs": [8]}, "Neighbor site index beyond maximum"),
+            ({"n": 0, "tol": -1}, "Negative tolerance for weighted solid angle"),
+        ],
+    )
+    def test_get_order_parameters_invalid(self, nacl, kwargs, msg):
+        with pytest.raises(ValueError, match=msg):
+            LocalStructOrderParams(["cn"]).get_order_parameters(nacl, **kwargs)
+
+    def test_voronoi_neighbors_and_target_spec(self, nacl):
+        # negative cutoff means neighbors are determined by VoronoiNN
+        assert LocalStructOrderParams(["cn", "oct"], cutoff=-1).get_order_parameters(nacl, 0) == approx([6.0, 1.0])
+        lsop = LocalStructOrderParams(["cn"], cutoff=4.1)
+        assert lsop.get_order_parameters(nacl, 0) == approx([18.0])
+        assert lsop.get_order_parameters(nacl, 0, target_spec="Cl") == approx([6.0])
+
+    @pytest.mark.parametrize(
+        ("op_type", "expected"),
+        [("oct_legacy", 0.733333334), ("sq_pyr_legacy", 1.0), ("reg_tri", 0.0), ("sq", 1.0)],
+    )
+    def test_legacy_and_geometric_ops(self, nacl, op_type, expected):
+        assert LocalStructOrderParams([op_type], cutoff=3).get_order_parameters(nacl, 0) == approx([expected])
+
+    @pytest.mark.parametrize("op_type", ["cn", "bent", "tet", "T", "pent_plan", "reg_tri"])
+    def test_missing_params_raise(self, nacl, op_type):
+        lsop = LocalStructOrderParams([op_type], cutoff=3)
+        lsop._params[0] = None
+        with pytest.raises(RuntimeError, match="param of idx=0 is None"):
+            lsop.get_order_parameters(nacl, 0)
+
+
+class TestEconNNExtra:
+    def test_fictive_radius_without_oxidation_states(self, nacl):
+        # without oxidation states, default (covalent) radii are used for the fictive radii
+        with pytest.warns(UserWarning, match="No oxidation states specified on sites"):
+            cn = EconNN(use_fictive_radius=True).get_cn(nacl, 0, use_weights=True)
+        assert cn == approx(15.474670087859016)
+
+    def test_fictive_radius_with_oxidation_states(self, nacl):
+        nacl.add_oxidation_state_by_guess()
+        assert EconNN(use_fictive_radius=True).get_cn(nacl, 0, use_weights=True) == approx(6.0)
+
+    def test_cation_anion(self, nacl):
+        nacl.add_oxidation_state_by_guess()
+        assert EconNN(cation_anion=True).get_cn(nacl, 0) == 6
+
+
+class TestCrystalNNExtra:
+    def test_cation_anion_no_targets(self):
+        struct = Structure(Lattice.cubic(3), [Species("Na", 1), Species("K", 1)], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        with pytest.raises(ValueError, match="No valid targets for site within cation_anion constraint"):
+            CrystalNN(cation_anion=True).get_nn_info(struct, 0)
+
+    def test_get_cn_dict(self, nacl):
+        assert CrystalNN().get_cn_dict(nacl, 0) == {"Cl": 6}
+        assert CrystalNN(weighted_cn=True).get_cn_dict(nacl, 0, use_weights=True) == approx({"Cl": 6.0})
+        with pytest.raises(ValueError, match="weighted_cn parameter and use_weights parameter should match"):
+            CrystalNN().get_cn_dict(nacl, 0, use_weights=True)
+
+
+def test_get_radius_helpers(nacl):
+    lattice = Lattice.cubic(4)
+    # fractional oxidation state: linear interpolation between 2+ and 3+ ionic radii
+    fe_site = Structure(lattice, [Species("Fe", 8 / 3)], [[0, 0, 0]])[0]
+    radii = Element("Fe").ionic_radii
+    assert _get_radius(fe_site) == approx(radii[2] / 3 + 2 * radii[3] / 3)
+    # oxidation states without tabulated ionic radii fall back to average cationic/anionic radii
+    fe5_site = Structure(lattice, [Species("Fe", 5)], [[0, 0, 0]])[0]
+    assert _get_radius(fe5_site) == approx(Element("Fe").average_cationic_radius)
+    o1_site = Structure(lattice, [Species("O", -1)], [[0, 0, 0]])[0]
+    assert _get_radius(o1_site) == approx(Element("O").average_anionic_radius)
+    # cationic O has neither a tabulated nor an average cationic radius
+    assert _get_radius(Structure(lattice, [Species("O", 2)], [[0, 0, 0]])[0]) == 0
+    # zero oxidation state: default (covalent) radius
+    o_site = Structure(lattice, [Species("O", 0)], [[0, 0, 0]])[0]
+    assert _get_radius(o_site) == approx(_get_default_radius(o_site)) == approx(0.66)
+    # no oxidation state: warning and zero
+    with pytest.warns(UserWarning, match="No oxidation states specified on sites"):
+        assert _get_radius(nacl[0]) == 0
+    # element without a tabulated covalent radius falls back to the atomic radius
+    es_site = Structure(lattice, ["Es"], [[0, 0, 0]])[0]
+    assert _get_default_radius(es_site) == Element("Es").atomic_radius

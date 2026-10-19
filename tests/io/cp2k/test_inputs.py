@@ -133,7 +133,7 @@ H GTH-PBE-q1 GTH-PBE
         assert pot_file.objects[0] == pot
 
         pot_file_path = self.tmp_path / "potential-file"
-        pot_file_path.write_text(self.pot_hydrogen_str)
+        pot_file_path.write_text(self.pot_hydrogen_str, encoding="utf-8")
         pot_from_file = PotentialFile.from_file(pot_file_path)
         assert pot_file != pot_from_file  # unequal because pot_from_file has filename != None
 
@@ -276,6 +276,6 @@ class TestDataFile(MatSciTest):
     def test_data_file(self):
         # make temp file with BASIS_FILE_STR
         data_file = self.tmp_path / "data-file"
-        data_file.write_text(BASIS_FILE_STR)
+        data_file.write_text(BASIS_FILE_STR, encoding="utf-8")
         with pytest.raises(NotImplementedError):
             DataFile.from_file(data_file)

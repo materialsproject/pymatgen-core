@@ -275,7 +275,7 @@ class BoltztrapRunner(MSONable):
                         ).to("Ry")
                     )
                     a, b, c = kpt.frac_coords
-                    file.write(f"{a:12.8f} {b:12.8f} {c:12.8f}{len(eigs)}\n")
+                    file.write(f"{a:12.8f} {b:12.8f} {c:12.8f} {len(eigs)}\n")
                     file.writelines(f"{sign * float(e):18.8f}\n" for e in eigs)
 
             else:
@@ -419,7 +419,7 @@ class BoltztrapRunner(MSONable):
             for orb_idx, orb in enumerate(Orbital):
                 for site_nb in range(len(self._bs.structure)):
                     if orb_idx < len(self._bs.projections[Spin.up][0][0]):
-                        file.write(f"{kpt_idx},'boltztrap.proj_{site_nb}_{orb.name}old', 'formatted',0\n")
+                        file.write(f"{kpt_idx},'boltztrap.proj_{site_nb}_{orb.name}' 'old', 'formatted',0\n")
                         kpt_idx += 1
 
     def write_intrans(self, output_file) -> None:
@@ -434,12 +434,12 @@ class BoltztrapRunner(MSONable):
             with open(output_file, mode="w", encoding="utf-8") as fout:
                 fout.write("GENE          # use generic interface\n")
                 fout.write(
-                    f"1 0 {set_gap} {Energy(self.scissor, 'eV').to('Ry')}         "
+                    f"1 0 {set_gap} {float(Energy(self.scissor, 'eV').to('Ry'))}         "
                     "# iskip (not presently used) idebug setgap shiftgap \n"
                 )
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} "
-                    f"{Energy(self.energy_span_around_fermi, 'eV').to('Ry')} {self._nelec}.1f     "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} "
+                    f"{float(Energy(self.energy_span_around_fermi, 'eV').to('Ry'))} {self._nelec:.1f}     "
                     f"# Fermilevel (Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
@@ -460,7 +460,7 @@ class BoltztrapRunner(MSONable):
                 fout.write("GENE          # use generic interface\n")
                 fout.write("1 0 0 0.0         # iskip (not presently used) idebug setgap shiftgap \n")
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} 0.1 {self._nelec:6.1f}     # Fermilevel "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} 0.1 {self._nelec:6.1f}     # Fermilevel "
                     "(Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
@@ -481,12 +481,12 @@ class BoltztrapRunner(MSONable):
             with open(output_file, mode="w", encoding="utf-8") as fout:
                 fout.write("GENE          # use generic interface\n")
                 fout.write(
-                    f"1 0 {set_gap} {Energy(self.scissor, 'eV').to('Ry')}         # iskip (not presently used) "
+                    f"1 0 {set_gap} {float(Energy(self.scissor, 'eV').to('Ry'))}         # iskip (not presently used) "
                     "idebug setgap shiftgap \n"
                 )
                 fout.write(
-                    f"0.0 {Energy(self.energy_grid, 'eV').to('Ry')} "
-                    f"{Energy(self.energy_span_around_fermi, 'eV').to('Ry')} {self._nelec:.1f}     "
+                    f"0.0 {float(Energy(self.energy_grid, 'eV').to('Ry'))} "
+                    f"{float(Energy(self.energy_span_around_fermi, 'eV').to('Ry'))} {self._nelec:.1f}     "
                     f"# Fermilevel (Ry),energygrid,energy span around Fermilevel, number of electrons\n"
                 )
                 fout.write("CALC                    # CALC (calculate expansion coeff), NOCALC read from file\n")
@@ -573,7 +573,7 @@ class BoltztrapRunner(MSONable):
         else:
             path_dir = os.path.abspath(os.path.join(path_dir, dir_bz_name))
 
-        os.mkdir(path_dir, exist_ok=True)
+        os.makedirs(path_dir, exist_ok=True)
         if clear_dir:
             for c in os.listdir(path_dir):
                 os.remove(os.path.join(path_dir, c))
@@ -938,7 +938,7 @@ class BoltztrapAnalyzer:
 
         if avg_corr > warn_thr[0]:
             acc_err[0] = True
-        if avg_distance > warn_thr[0]:
+        if avg_distance > warn_thr[1]:
             acc_err[1] = True
 
         bcheck["avg_corr"] = avg_corr
@@ -1594,7 +1594,7 @@ class BoltztrapAnalyzer:
         """
         pdoss: dict[PeriodicSite, dict[Orbital, dict[Spin, ArrayLike]]] = {}
         spin_1 = next(iter(self.dos.densities))
-        spin_2 = next(iter(analyzer_for_second_spin.dos.densities))
+        spin_2 = next(iter(analyzer_for_second_spin.dos.densities)) if analyzer_for_second_spin else spin_1
 
         if analyzer_for_second_spin:
             if not np.all(self.dos.energies == analyzer_for_second_spin.dos.energies):
@@ -1608,11 +1608,13 @@ class BoltztrapAnalyzer:
             if structure[idx] not in pdoss:
                 pdoss[structure[idx]] = {}
             for o in self._dos_partial[s]:
-                if Orbital[o] not in pdoss[structure[idx]]:
-                    pdoss[structure[idx]][Orbital[o]] = {}
-                pdoss[structure[idx]][Orbital[o]][spin_1] = self._dos_partial[s][o]
+                # BoltzTraP names the dx2-y2 orbital "dx2" in its projection files
+                orbital = Orbital["dx2_y2" if o == "dx2" else o]
+                if orbital not in pdoss[structure[idx]]:
+                    pdoss[structure[idx]][orbital] = {}
+                pdoss[structure[idx]][orbital][spin_1] = self._dos_partial[s][o]
                 if analyzer_for_second_spin:
-                    pdoss[structure[idx]][Orbital[o]][spin_2] = analyzer_for_second_spin._dos_partial[s][o]
+                    pdoss[structure[idx]][orbital][spin_2] = analyzer_for_second_spin._dos_partial[s][o]
 
         if analyzer_for_second_spin:
             total_dos = Dos(
@@ -2031,29 +2033,33 @@ class BoltztrapAnalyzer:
             return list(a[:27])
 
         gap = data.get("gap")
-        mu_steps = [float(d) for d in data["mu_steps"]] if "mu_steps" in data else None
+        mu_steps = [float(d) for d in data["mu_steps"]] if data.get("mu_steps") is not None else None
         cond = (
-            {int(d): [_make_float_array(v) for v in data["cond"][d]] for d in data["cond"]} if "cond" in data else None
+            {int(d): [_make_float_array(v) for v in data["cond"][d]] for d in data["cond"]}
+            if data.get("cond") is not None
+            else None
         )
         seebeck = (
             {int(d): [_make_float_array(v) for v in data["seebeck"][d]] for d in data["seebeck"]}
-            if "seebeck" in data
+            if data.get("seebeck") is not None
             else None
         )
         kappa = (
             {int(d): [_make_float_array(v) for v in data["kappa"][d]] for d in data["kappa"]}
-            if "kappa" in data
+            if data.get("kappa") is not None
             else None
         )
         hall = (
-            {int(d): [_make_float_hall(v) for v in data["hall"][d]] for d in data["hall"]} if "hall" in data else None
+            {int(d): [_make_float_hall(v) for v in data["hall"][d]] for d in data["hall"]}
+            if data.get("hall") is not None
+            else None
         )
         doping = (
             {
                 "p": [float(d) for d in data["doping"]["p"]],
                 "n": [float(d) for d in data["doping"]["n"]],
             }
-            if "doping" in data
+            if data.get("doping") is not None
             else None
         )
 
@@ -2062,7 +2068,7 @@ class BoltztrapAnalyzer:
                 "p": {int(d): [float(v) for v in data["mu_doping"]["p"][d]] for d in data["mu_doping"]["p"]},
                 "n": {int(d): [float(v) for v in data["mu_doping"]["n"][d]] for d in data["mu_doping"]["n"]},
             }
-            if "mu_doping" in data
+            if data.get("mu_doping") is not None
             else None
         )
 
@@ -2077,7 +2083,7 @@ class BoltztrapAnalyzer:
                     for d in data["seebeck_doping"]["n"]
                 },
             }
-            if "seebeck_doping" in data
+            if data.get("seebeck_doping") is not None
             else None
         )
 
@@ -2092,7 +2098,7 @@ class BoltztrapAnalyzer:
                     for d in data["cond_doping"]["n"]
                 },
             }
-            if "cond_doping" in data
+            if data.get("cond_doping") is not None
             else None
         )
 
@@ -2107,7 +2113,7 @@ class BoltztrapAnalyzer:
                     for d in data["kappa_doping"]["n"]
                 },
             }
-            if "kappa_doping" in data
+            if data.get("kappa_doping") is not None
             else None
         )
 
@@ -2120,19 +2126,25 @@ class BoltztrapAnalyzer:
                     int(d): [_make_float_hall(v) for v in data["hall_doping"]["n"][d]] for d in data["hall_doping"]["n"]
                 },
             }
-            if "hall_doping" in data
+            if data.get("hall_doping") is not None
             else None
         )
 
-        dos = Dos.from_dict(data["dos"]) if "dos" in data else None
+        dos = Dos.from_dict(data["dos"]) if data.get("dos") is not None else None
         dos_partial = data.get("dos_partial")
-        carrier_conc = data.get("carrier_conc")
+        # JSON turns the integer temperature keys into strings
+        carrier_conc = (
+            {int(temp): conc for temp, conc in data["carrier_conc"].items()}
+            if data.get("carrier_conc") is not None
+            else None
+        )
         vol = data.get("vol")
         warning = data.get("warning")
 
         return cls(
             gap=gap,
             mu_steps=mu_steps,
+            intrans=data.get("intrans"),
             cond=cond,
             seebeck=seebeck,
             kappa=kappa,

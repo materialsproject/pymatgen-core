@@ -147,7 +147,7 @@ class ChargemolAnalysis:
             CHGMOL_BAD_POTCAR_KEYS = ("SHA", "COPYR")
             if any(k in p.data for p in potcar for k in CHGMOL_BAD_POTCAR_KEYS):
                 self._temp_potcar_file = NamedTemporaryFile()  # noqa: SIM115
-                with open(self._temp_potcar_file.name, "w") as f:
+                with open(self._temp_potcar_file.name, "w", encoding="utf-8") as f:
                     f.write(
                         "\n".join(
                             line

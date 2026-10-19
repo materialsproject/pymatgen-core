@@ -207,7 +207,7 @@ class JDFTXInfile(dict, MSONable):
         path_parent = None
         if assign_path_parent:
             path_parent = Path(filename).parents[0]
-        with open(filename) as file:
+        with open(filename, encoding="utf-8") as file:
             return cls.from_str(
                 file.read(),
                 dont_require_structure=dont_require_structure,
@@ -415,7 +415,7 @@ class JDFTXInfile(dict, MSONable):
         Args:
             filename (PathLike): Filename to write to.
         """
-        with open(filename, mode="w") as file:
+        with open(filename, encoding="utf-8", mode="w") as file:
             file.write(str(self))
 
     @classmethod
@@ -1159,7 +1159,7 @@ class JDFTXStructure(MSONable):
             filename (PathLike): Filename to write to.
             **kwargs: Kwargs to pass to JDFTXStructure.get_str.
         """
-        with open(filename, mode="w") as file:
+        with open(filename, encoding="utf-8", mode="w") as file:
             file.write(self.get_str(**kwargs))
 
     def as_dict(self) -> dict:

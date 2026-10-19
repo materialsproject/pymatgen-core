@@ -85,8 +85,11 @@ class TestCritic2Analysis:
 
         structure = Structure.from_file(f"{TEST_DIR}/MoS2.cif")
 
-        self.c2o = Critic2Analysis(structure, reference_stdout)
-        self.c2o_new_format = Critic2Analysis(structure, reference_stdout_new_format)
+        # these tests cover the deprecated stdout parsing path
+        with pytest.warns(DeprecationWarning, match="Parsing critic2 standard output is deprecated"):
+            self.c2o = Critic2Analysis(structure, reference_stdout)
+        with pytest.warns(DeprecationWarning, match="Parsing critic2 standard output is deprecated"):
+            self.c2o_new_format = Critic2Analysis(structure, reference_stdout_new_format)
 
     def test_to_from_dict(self):
         """
@@ -135,7 +138,8 @@ class TestCritic2Analysis:
             "yt",
             "zpsp",
         }
-        self.c2o.from_dict(dct)
+        with pytest.warns(DeprecationWarning, match="Parsing critic2 standard output is deprecated"):
+            self.c2o.from_dict(dct)
 
     def test_graph_output(self):
         sg = self.c2o.structure_graph()

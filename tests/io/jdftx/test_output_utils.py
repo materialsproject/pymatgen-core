@@ -26,7 +26,7 @@ def test_get_start_lines():
         get_start_lines([])
     with pytest.raises(ValueError, match=re.escape("No JDFTx calculations found in file.")):
         get_start_lines(["\n", "\n"])
-    with open(noeigstats_outfile_path) as f:
+    with open(noeigstats_outfile_path, encoding="utf-8") as f:
         outfile_text = list.copy(list(f))
     assert get_start_lines(outfile_text)[0] == 1
     assert len(get_start_lines(outfile_text)) == 1

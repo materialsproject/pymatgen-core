@@ -2645,7 +2645,9 @@ def _get_slsqp_decomp(
 
     # NOTE normalize arrays to avoid calls to fractional_composition
     b /= np.sum(b)
-    A_transpose /= np.sum(A_transpose, axis=0)
+    col_sums = np.sum(A_transpose, axis=0)
+    # entries with no elements in the chemical space keep an all-zero column instead of 0/0 = nan
+    A_transpose = np.divide(A_transpose, col_sums, out=np.zeros_like(A_transpose), where=col_sums > 0)
 
     # Energies of competing entries
     Es = np.array([comp_entry.energy_per_atom for comp_entry in competing_entries])

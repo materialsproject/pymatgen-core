@@ -8,10 +8,12 @@ import re
 import sys
 import types
 import warnings
+from contextlib import contextmanager
 from fractions import Fraction
 from importlib.util import find_spec
 from pathlib import Path
 from shutil import which
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import numpy as np
@@ -39,6 +41,9 @@ from pymatgen.io.cif import CifParser
 from pymatgen.io.vasp.inputs import Poscar
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, MatSciTest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 try:
     from ase.atoms import Atoms
@@ -101,6 +106,20 @@ class TestNeighbor:
         assert_allclose(restored.coords, [1.0, 2.0, 3.0])
         assert restored.nn_distance == approx(1.5)
         assert restored.index == 3
+
+
+@contextmanager
+def _patched_modules(modules: dict[str, types.ModuleType | None]) -> Iterator[None]:
+    """Temporarily replace entries in sys.modules.
+
+    Unlike mock.patch.dict(sys.modules, ...), this restores only the given keys. patch.dict restores the whole
+    dict on exit, which evicts modules first imported inside the block (e.g. ase.optimize during a mocked relax)
+    and makes later imports create duplicate classes.
+    """
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        for name, module in modules.items():
+            monkeypatch.setitem(sys.modules, name, module)
+        yield
 
 
 def _fake_module(name: str, **attrs) -> types.ModuleType:
@@ -1089,7 +1108,7 @@ Direct
 
         # Test import error
         with (
-            mock.patch.dict("sys.modules", {"moyopy": None}),
+            _patched_modules({"moyopy": None}),
             pytest.raises(ImportError, match=re.escape("moyopy is not installed. Run pip install moyopy.")),
         ):
             self.struct.get_symmetry_dataset(backend="moyopy")
@@ -1336,7 +1355,7 @@ Direct
             "pymatgen.ext.matproj": _fake_module("pymatgen.ext.matproj", MPRester=mp_rester),
             "pymatgen.ext.cod": _fake_module("pymatgen.ext.cod", COD=cod),
         }
-        with mock.patch.dict(sys.modules, fake_modules):
+        with _patched_modules(fake_modules):
             assert IStructure.from_id("mp-1", api_key="dummy") is sentinel
             assert IStructure.from_id("1101077", source="COD") is sentinel
         mp_rester.assert_called_once_with(api_key="dummy")
@@ -1900,7 +1919,7 @@ class TestStructure(MatSciTest):
         assert_allclose(self.struct.frac_coords[1], [0.75, 0.5, 0.75], atol=1e-6)
 
         with pytest.raises(IndexError, match="list index out of range"):
-            self.struct.rotate_sites([5], 2.0 * np.pi / 3.0, self.struct[0].coords, to_unit_cell=False)
+            self.struct.rotate_sites([5], 2.0 * np.pi / 3.0, anchor=self.struct[0].coords, to_unit_cell=False)
 
     def test_mul(self):
         self.struct *= [2, 1, 1]
@@ -2669,7 +2688,7 @@ Sites (8)
         elasticity_calc = mock.MagicMock()
         elasticity_calc.return_value.calc.return_value = {"bulk_modulus_vrh": 100.0}
         fake_matcalc = _fake_module("matcalc", ElasticityCalc=elasticity_calc)
-        with mock.patch.dict(sys.modules, {"matcalc": fake_matcalc}):
+        with _patched_modules({"matcalc": fake_matcalc}):
             result = self.struct.calc_property("Elasticity", calculator="my-pes", fmax=0.05)
         assert result == {"bulk_modulus_vrh": 100.0}
         elasticity_calc.assert_called_once_with("my-pes", fmax=0.05)
@@ -2704,7 +2723,7 @@ Sites (8)
     )
     def test_prep_calculator_errors(self, calculator, blocked_modules, err_cls, match):
         with (
-            mock.patch.dict(sys.modules, dict.fromkeys(blocked_modules)),
+            _patched_modules(dict.fromkeys(blocked_modules)),
             pytest.raises(err_cls, match=match),
         ):
             self.cu_structure._prep_calculator(calculator)
@@ -2729,7 +2748,7 @@ Sites (8)
                 "matgl.ext.ase", PESCalculator=pes_calculator, TrajectoryObserver=FakeTrajectoryObserver
             ),
         }
-        with mock.patch.dict(sys.modules, fake_modules):
+        with _patched_modules(fake_modules):
             relaxed, traj = self.cu_structure.relax(calculator="m3gnet", steps=2, return_trajectory=True)
 
         load_model.assert_called_once_with("M3GNet-MP-2021.2.8-PES")
@@ -3110,7 +3129,7 @@ Site: H (-0.5134, 0.8892, -0.3630)"""
 
     def test_from_file_unknown_extension(self):
         path = Path(f"{self.tmp_path}/methane.unknownext")
-        path.write_text("junk")
+        path.write_text("junk", encoding="utf-8")
         with pytest.raises(ValueError, match="Cannot determine file type"):
             IMolecule.from_file(path)
 
@@ -3483,7 +3502,7 @@ class TestMolecule(MatSciTest):
         pytest.importorskip("ase")
         tblite = mock.MagicMock(side_effect=lambda method, **params: EMT())
         fake_modules = {"tblite": _fake_module("tblite"), "tblite.ase": _fake_module("tblite.ase", TBLite=tblite)}
-        with mock.patch.dict(sys.modules, fake_modules):
+        with _patched_modules(fake_modules):
             calculator = self.mol.calculate("gfn2-xtb")
         tblite.assert_called_once_with(method="GFN2-xTB")
         assert isinstance(calculator, EMT)

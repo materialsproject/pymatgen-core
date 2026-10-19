@@ -132,7 +132,8 @@ class TestStructureGraph(MatSciTest):
         with open(stdout_file, encoding="utf-8") as txt_file:
             reference_stdout = txt_file.read()
         self.structure = Structure.from_file(f"{TEST_FILES_DIR}/command_line/critic2/MoS2.cif")
-        c2o = Critic2Analysis(self.structure, reference_stdout)
+        with pytest.warns(DeprecationWarning, match="Parsing critic2 standard output is deprecated"):
+            c2o = Critic2Analysis(self.structure, reference_stdout)
         self.mos2_sg = c2o.structure_graph(include_critical_points=False)
 
         lattice = Lattice.cubic(4.17)

@@ -26,7 +26,7 @@ try:
 
 except ImportError:
     NO_ASE_ERR = PackageNotFoundError("AseAtomsAdaptor requires the ASE package. Use `pip install ase`")
-    encode = decode = FixAtoms = FixCartesian = SinglePointDFTCalculator = Spacegroup = None
+    encode = decode = FixAtoms = FixCartesian = SinglePointDFTCalculator = Spacegroup = None  # type: ignore[assignment,misc]
 
     class Atoms:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):

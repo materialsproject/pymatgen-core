@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from pymatgen.core.composition import Element, Species
     from pymatgen.core.structure import IStructure
     from pymatgen.symmetry.groups import CrystalSystem
+    from pymatgen.symmetry.structure import SymmetrizedStructure
 
 __author__ = "Richard Tran, Wenhao Sun, Zihan Xu, Shyue Ping Ong"
 
@@ -708,13 +709,13 @@ class Slab(Structure):
         2. If not 1, get_equi_sites has multiple nested loops
         """
 
-        def get_equi_sites(slab: Slab, sites: Sequence[SupportsIndex]) -> list[SupportsIndex]:
+        def get_equi_sites(slab: SymmetrizedStructure, sites: Sequence[NDArray]) -> list[int]:
             """
             Get the indices of the equivalent sites of given sites.
 
             Parameters:
-                slab (Slab): The slab structure.
-                sites (Sequence[SupportsIndex]): Original indices of sites.
+                slab (SymmetrizedStructure): The symmetrized slab structure.
+                sites (Sequence[NDArray]): Fractional coordinates of the original sites.
 
             Returns:
                 list[int]: Indices of the equivalent sites.
@@ -741,10 +742,11 @@ class Slab(Structure):
                         continue
                     if slab[i2].frac_coords[2] == slab[i1].frac_coords[2]:
                         continue
-                    # Test site remove to see if it results in symmetric slab
-                    slab = self.copy()
-                    slab.remove_sites([i1, i2])
-                    if slab.is_symmetric():
+                    # Test site remove to see if it results in symmetric slab. Use a separate trial copy so the
+                    # symmetrized slab used for the remaining lookups is not replaced.
+                    trial_slab = self.copy()
+                    trial_slab.remove_sites([i1, i2])
+                    if trial_slab.is_symmetric():
                         equi_sites.append(i2)
                         break
 
@@ -754,7 +756,7 @@ class Slab(Structure):
         slab_copy = SpacegroupAnalyzer(self.copy()).get_symmetrized_structure()
         sites = [slab_copy[i].frac_coords for i in indices]
 
-        equi_sites = get_equi_sites(slab_copy, sites)  # type:ignore[arg-type]
+        equi_sites = get_equi_sites(slab_copy, sites)
 
         # Check if found any equivalent sites
         if len(equi_sites) == len(indices):
@@ -1209,10 +1211,9 @@ class SlabGenerator:
 
         # Correct the scale_factor for LLL, primitivization, c-axis changes
         # Orienting of either lattice must happen after this, not before
-        scale_factor = np.linalg.solve(
-            self.parent.lattice.matrix.T,
-            struct.lattice.matrix.T,
-        ).T
+        scale_factor = np.asarray(
+            np.linalg.solve(self.parent.lattice.matrix.T, struct.lattice.matrix.T).T, dtype=np.float64
+        )
 
         return Slab(
             struct.lattice,
@@ -2303,7 +2304,7 @@ def _is_in_miller_family(
     return any(in_coord_list(miller_list, op.operate(miller_index)) for op in symm_ops)
 
 
-def _index_transformation(transf: NDArray, index: tuple[int, int, int] | NDArray) -> NDArray[int]:
+def _index_transformation(transf: NDArray, index: tuple[int, int, int] | NDArray) -> NDArray[np.int_]:
     """Transforms a given index via transf @ index, while avoiding floats."""
     # Convert the elements of the transformation matrix to integers
     fractions = [Fraction(value).limit_denominator(100) for value in itertools.chain.from_iterable(transf)]

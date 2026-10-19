@@ -63,10 +63,10 @@ class TestTmpDir(MatSciTest):
     def test_creating_files_in_tmp_dir(self):
         """Test that files can be created in the temporary directory."""
         test_file = self.tmp_path / "test_file.txt"
-        test_file.write_text("Hello, pytest!")
+        test_file.write_text("Hello, pytest!", encoding="utf-8")
 
         assert test_file.exists()
-        assert test_file.read_text() == "Hello, pytest!"
+        assert test_file.read_text(encoding="utf-8") == "Hello, pytest!"
 
 
 class TestAssertMSONable(MatSciTest):

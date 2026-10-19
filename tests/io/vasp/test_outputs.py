@@ -3811,7 +3811,9 @@ class TestVasprunEdgeCases(MatSciTest):
 class TestGetAdjustedFermiLevel:
     @staticmethod
     def _load_bs(efermi: float | None = None) -> BandStructureSymmLine:
-        with open(f"{TEST_FILES_DIR}/electronic_structure/bandstructure/CaO_2605_bandstructure.json") as file:
+        with open(
+            f"{TEST_FILES_DIR}/electronic_structure/bandstructure/CaO_2605_bandstructure.json", encoding="utf-8"
+        ) as file:
             dct = json.load(file)
         if efermi is not None:
             dct["efermi"] = efermi

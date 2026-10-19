@@ -224,7 +224,7 @@ class TestElasticTensor(MatSciTest):
     def test_from_independent_strains(self):
         strains = self.toec_dict["strains"]
         stresses = self.toec_dict["stresses"]
-        with pytest.warns(UserWarning, match="No eq state found, returning zero voigt stress") as warns:
+        with pytest.warns(UserWarning, match="No eq state found|Extra strain states in strain-") as warns:
             et = ElasticTensor.from_independent_strains(strains, stresses)
         assert sum("No eq state found" in str(warn) for warn in warns) == 1
         assert sum("Extra strain states in strain-" in str(warn) for warn in warns) == 1

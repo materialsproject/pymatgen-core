@@ -554,7 +554,8 @@ class FermiDos(Dos, MSONable):
         for _ in range(precision):
             fermi_range = np.arange(-nstep, nstep + 1) * step + fermi
             calc_doping = np.array([self.get_doping(fermi_lvl, temperature) for fermi_lvl in fermi_range])
-            relative_error = np.abs(calc_doping / concentration - 1.0)
+            with np.errstate(divide="ignore", invalid="ignore"):  # concentration=0 gives an infinite error
+                relative_error = np.abs(calc_doping / concentration - 1.0)
             fermi = fermi_range[np.argmin(relative_error)]
             step /= 10.0
 

@@ -116,14 +116,16 @@ class ValenceIonicRadiusEvaluator:
             return after if after - skey < skey - before else before
 
         for idx, site in enumerate(self._structure):
-            if isinstance(site.specie, Element):
-                radius = site.specie.atomic_radius
+            # Zero-valence species (e.g. noble gases) have no ionic radius, so use the atomic radius
+            if isinstance(site.specie, Element) or round(site.specie.oxi_state) == 0:
+                element = site.specie if isinstance(site.specie, Element) else site.specie.element
+                radius = element.atomic_radius
                 # Handle elements with no atomic_radius
                 # by using calculated values instead.
                 if radius is None:
-                    radius = site.specie.atomic_radius_calculated
+                    radius = element.atomic_radius_calculated
                 if radius is None:
-                    raise ValueError(f"cannot assign radius to element {site.specie}")
+                    raise ValueError(f"cannot assign radius to element {element}")
                 radii.append(radius)
                 continue
 
@@ -1579,7 +1581,7 @@ class OpenBabelNN(NearNeighbors):
         output = []
         for info in sites:
             orig_site = structure[info["site_index"]]
-            info["site"] = Site(orig_site.species, orig_site._coords, properties=orig_site.properties)
+            info["site"] = Site(orig_site.species, orig_site.coords, properties=orig_site.properties)
             output.append(info)
         return output
 
@@ -1735,7 +1737,7 @@ class CovalentBondNN(NearNeighbors):
         output = []
         for info in sites:
             orig_site = structure[info["site_index"]]
-            info["site"] = Site(orig_site.species, orig_site._coords, properties=orig_site.properties)
+            info["site"] = Site(orig_site.species, orig_site.coords, properties=orig_site.properties)
             output.append(info)
         return output
 
@@ -2418,7 +2420,7 @@ class LocalStructOrderParams:
         """Number of neighbors encountered during the most recent order parameter calculation.
         A value of -1 indicates that no such calculation has yet been performed for this instance.
         """
-        return len(self._last_nneigh)
+        return self._last_nneigh
 
     def compute_trigonometric_terms(self, thetas, phis):
         """Compute trigonometric terms that are required to calculate
@@ -3738,9 +3740,9 @@ class EconNN(NearNeighbors):
         if self.cation_anion and oxi_state is not None:
             # filter out neighbor of like charge (except for neutral sites)
             if oxi_state >= 0:
-                neighbors = [n for n in neighbors if n.oxi_state <= 0]
+                neighbors = [nghbr for nghbr in neighbors if nghbr.specie.oxi_state <= 0]
             elif oxi_state < 0:
-                neighbors = [nghbr for nghbr in neighbors if nghbr.oxi_state >= 0]
+                neighbors = [nghbr for nghbr in neighbors if nghbr.specie.oxi_state >= 0]
 
         if self.use_fictive_radius:
             # calculate fictive ionic radii

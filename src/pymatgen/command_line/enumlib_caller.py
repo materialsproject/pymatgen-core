@@ -91,6 +91,7 @@ def _is_enumlib_jl(enum_cmd: str | None) -> bool:
             [enum_cmd, "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )
