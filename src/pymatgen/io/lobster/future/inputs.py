@@ -26,6 +26,7 @@ from monty.serialization import loadfn
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp import Vasprun
 from pymatgen.io.vasp.inputs import Incar, Kpoints, Potcar
+from pymatgen.symmetry._spglib_compat import call_spglib
 from pymatgen.symmetry.bandstructure import HighSymmKpath
 from pymatgen.util.due import Doi, due
 
@@ -565,7 +566,10 @@ class LobsterIn(UserDict, MSONable):
         # For now, we are setting MAGMOM to zero. (Taken from INCAR class)
         cell = matrix, positions, zs, magmoms
         # TODO: what about this shift?
-        mapping, grid = spglib.get_ir_reciprocal_mesh(mesh, cell, is_shift=[0, 0, 0])  # type:ignore[arg-type]
+        ir_mesh = call_spglib(spglib.get_ir_reciprocal_mesh, mesh, cell, is_shift=[0, 0, 0])  # type:ignore[arg-type]
+        if ir_mesh is None:
+            raise ValueError("spglib failed to generate the irreducible reciprocal mesh")
+        mapping, grid = ir_mesh
 
         # Get the KPOINTS for the grid
         if isym == -1:

@@ -16,7 +16,7 @@ import pandas as pd
 from monty.io import zopen
 from monty.json import MSONable, jsanitize
 
-from pymatgen.core import Molecule
+from pymatgen.core import DummySpecies, Molecule
 from pymatgen.core.graphs import MoleculeGraph
 from pymatgen.core.local_env import OpenBabelNN
 from pymatgen.io.qchem.utils import (
@@ -44,6 +44,16 @@ __version__ = "0.1"
 __maintainer__ = "Samuel Blau"
 __email__ = "samblau1@gmail.com"
 __credits__ = "Gabe Gomes"
+
+
+def _molecule_species(species: list[str]) -> list[str | DummySpecies]:
+    """Species for building a Molecule from Q-Chem's atom labels.
+
+    Q-Chem prints ghost atoms (``@X`` in ``$molecule``) as ``GH``. They carry basis functions but no nuclear
+    charge or electrons, so they become ``DummySpecies("X")`` sites. This keeps the sites in the same order as
+    Q-Chem's per-atom output (geometries, Mulliken charges, etc.).
+    """
+    return [DummySpecies("X") if sp == "GH" else sp for sp in species]
 
 
 class QCOutput(MSONable):
@@ -367,15 +377,12 @@ class QCOutput(MSONable):
                 self.text,
                 {"key": r"\-D3 energy without 3body term =\s*([\d\.\-]+) hartrees"},
             ).get("key")
-            real_d3 = np.zeros(len(temp_d3))
             if temp_d3 is None:
                 self.data["dft_d3"] = None
             elif len(temp_d3) == 1:
                 self.data["dft_d3"] = float(temp_d3[0][0])
             else:
-                for ii, entry in enumerate(temp_d3):
-                    real_d3[ii] = float(entry[0])
-                self.data["dft_d3"] = real_d3
+                self.data["dft_d3"] = np.array([float(entry[0]) for entry in temp_d3])
 
         # Parse the S2 values in the case of an unrestricted calculation
         if self.data.get("unrestricted", []):
@@ -880,7 +887,7 @@ class QCOutput(MSONable):
             self.data["initial_geometry"] = geometry
             if self.data["charge"] is not None and self.data["multiplicity"] is not None:
                 self.data["initial_molecule"] = Molecule(
-                    species=species,
+                    species=_molecule_species(species),
                     coords=geometry,
                     charge=self.data.get("charge"),
                     spin_multiplicity=self.data.get("multiplicity"),
@@ -1333,7 +1340,7 @@ class QCOutput(MSONable):
             self.data["last_geometry"] = geoms[-1]
             if self.data.get("charge") is not None:
                 self.data["molecule_from_last_geometry"] = Molecule(
-                    species=self.data.get("species"),
+                    species=_molecule_species(self.data["species"]),
                     coords=self.data.get("last_geometry"),
                     charge=self.data.get("charge"),
                     spin_multiplicity=self.data.get("multiplicity"),
@@ -1376,7 +1383,7 @@ class QCOutput(MSONable):
                 self.data["optimized_geometries"] = [process_parsed_coords(i) for i in parsed_optimized_geometries]
                 if self.data.get("charge") is not None:
                     self.data["molecule_from_optimized_geometry"] = Molecule(
-                        species=self.data.get("species"),
+                        species=_molecule_species(self.data["species"]),
                         coords=self.data.get("optimized_geometry"),
                         charge=self.data.get("charge"),
                         spin_multiplicity=self.data.get("multiplicity"),
@@ -1384,7 +1391,7 @@ class QCOutput(MSONable):
                     self.data["molecules_from_optimized_geometries"] = []
                     for geom in self.data["optimized_geometries"]:
                         mol = Molecule(
-                            species=self.data.get("species"),
+                            species=_molecule_species(self.data["species"]),
                             coords=geom,
                             charge=self.data.get("charge"),
                             spin_multiplicity=self.data.get("multiplicity"),

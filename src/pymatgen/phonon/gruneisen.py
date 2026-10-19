@@ -20,7 +20,7 @@ try:
     import phonopy
     from phonopy.phonon.dos import TotalDos
 except ImportError:
-    phonopy = TotalDos = None
+    phonopy = TotalDos = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -174,7 +174,7 @@ class GruneisenParameter(MSONable):
         return thermal_cond
 
     @property
-    @requires(phonopy, "This method requires phonopy to be installed")
+    @requires(phonopy is not None, "This method requires phonopy to be installed")
     def tdos(self):
         """The total DOS (re)constructed from the gruneisen.yaml file."""
 

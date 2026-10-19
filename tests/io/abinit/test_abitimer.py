@@ -103,7 +103,7 @@ def _write_scaling_file(path, ncpus):
     cpu_total, wall_total = 8.0 / ncpus, 16.0 / ncpus**0.5
     text = "Some ABINIT output\n" + _timer_block(ncpus, 0, cpu_total, wall_total, sec_lines)
     text += _timer_block(ncpus, "world", cpu_total, wall_total, sec_lines)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return str(path)
 
 
@@ -140,19 +140,21 @@ class TestAbinitTimerParser:
 
     def test_parse_skips_bad_files(self, tmp_path, caplog):
         no_timer = tmp_path / "no_timer.abo"
-        no_timer.write_text("nothing to see here\n")
+        no_timer.write_text("nothing to see here\n", encoding="utf-8")
 
         bad_header = tmp_path / "bad_header.abo"
         # Third line of the block should be empty but contains a section line.
         bad_header.write_text(
             "-<BEGIN_TIMER mpi_nprocs = 1, omp_nthreads = 1, mpi_rank = 0>\n"
             "- cpu_time = 1.0, wall_time = 1.0\n"
-            "- fourwf   0.500 50.0  0.500  50.0  10  -1.00\n"
+            "- fourwf   0.500 50.0  0.500  50.0  10  -1.00\n",
+            encoding="utf-8",
         )
 
         bad_section = tmp_path / "bad_section.abo"
         bad_section.write_text(
-            _timer_block(1, 0, 1.0, 1.0, ["- fourwf   0.500 50.0  0.500  50.0  10  -1.00", "- garbage line"])
+            _timer_block(1, 0, 1.0, 1.0, ["- fourwf   0.500 50.0  0.500  50.0  10  -1.00", "- garbage line"]),
+            encoding="utf-8",
         )
 
         good = abiref_file("mgb2_scf.abo")
@@ -184,8 +186,8 @@ class TestAbinitTimerParser:
         sub.mkdir()
         p1 = _write_scaling_file(tmp_path / "a.abo", 1)
         p2 = _write_scaling_file(sub / "b.abo", 2)
-        (tmp_path / "ignored.txt").write_text("not an abo file")
-        (sub / "empty.abo").write_text("no timer\n")
+        (tmp_path / "ignored.txt").write_text("not an abo file", encoding="utf-8")
+        (sub / "empty.abo").write_text("no timer\n", encoding="utf-8")
 
         parser, paths, ok_files = AbinitTimerParser.walk(top=str(tmp_path), ext=".abo")
         assert isinstance(parser, AbinitTimerParser)
@@ -376,7 +378,7 @@ class TestAbinitTimerMethods:
     def test_to_csv(self, mgb2_timer, tmp_path):
         path = tmp_path / "timer.csv"
         mgb2_timer.to_csv(str(path))
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
         assert lines[0] == "# name wall_time wall_fract cpu_time cpu_fract ncalls gflops"
         assert lines[1] == "fourwf%(pot), 2.212, 21.5, 2.204, 21.6, 8689, -1.0"
         assert len(lines) == 31

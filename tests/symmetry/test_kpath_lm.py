@@ -1,12 +1,156 @@
 from __future__ import annotations
 
+import numpy as np
+import pytest
 from pytest import approx
 
 from pymatgen.core.lattice import Lattice
+from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import Structure
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.symmetry.kpath import KPathLatimerMunro
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
+
+
+def _path_labels(kpath) -> set[str]:
+    return {label for segment in kpath.kpath["path"] for label in segment}
+
+
+class TestKPathLatimerMunroMagnetic:
+    @pytest.fixture
+    def afm_cscl(self):
+        """G-type AFM on a simple-cubic cell: body-center translation is combined with time reversal."""
+        struct = Structure(Lattice.cubic(3), ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        struct.add_site_property("magmom", [[0, 0, 1], [0, 0, -1]])
+        return struct
+
+    def test_type_3_4_afm(self, afm_cscl):
+        kpath = KPathLatimerMunro(afm_cscl, has_magmoms=True)
+        assert kpath.mag_type == "3/4"
+        assert set(kpath.kpath["kpoints"]) == {"a", "c", "d", "e", "g", "Γ"}
+        assert _path_labels(kpath) == set(kpath.kpath["kpoints"])
+        assert kpath.kpath["kpoints"]["Γ"] == approx([0, 0, 0])
+        # vector magmoms given as lists are converted to arrays
+        assert all(isinstance(m, np.ndarray) for m in kpath.structure.site_properties["magmom"])
+
+    def test_scalar_magmoms_default_axis(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [2.0])
+        with pytest.warns(UserWarning, match="Defaulted to z\\+ spinor"):
+            kpath = KPathLatimerMunro(struct, has_magmoms=True)
+        assert kpath.mag_type == "3/4"
+        assert kpath.structure.site_properties["magmom"][0] == approx([0, 0, 2])
+
+    def test_scalar_magmoms_with_axis(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [2.0])
+        z_path = KPathLatimerMunro(struct.copy(), has_magmoms=True, magmom_axis=[0, 0, 1])
+        x_path = KPathLatimerMunro(struct.copy(), has_magmoms=True, magmom_axis=[1, 0, 0])
+        assert x_path.structure.site_properties["magmom"][0] == approx([2, 0, 0])
+        # the spin axis lowers the symmetry differently, giving distinct k-paths
+        assert set(z_path.kpath["kpoints"]) != set(x_path.kpath["kpoints"])
+
+    def test_type_2_all_zero_magmoms(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [np.zeros(3)])
+        kpath = KPathLatimerMunro(struct, has_magmoms=True)
+        assert kpath.mag_type == "2"
+        nonmag = KPathLatimerMunro(Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]]))
+        assert nonmag.mag_type == "0"
+        # grey group: same k-point labels as the non-magnetic path
+        assert set(kpath.kpath["kpoints"]) == set(nonmag.kpath["kpoints"])
+
+    def test_type_1_triclinic(self):
+        struct = Structure(Lattice.from_parameters(3, 4, 5, 80, 85, 95), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [np.array([0.3, 0.2, 1.0])])
+        kpath = KPathLatimerMunro(struct, has_magmoms=True)
+        assert kpath.mag_type == "1"
+        # P-1 with inversion (no time reversal): every segment starts or ends at Gamma
+        assert all("Γ" in segment for segment in kpath.kpath["path"])
+
+    def test_has_magmoms_without_magmom_property(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        with pytest.warns(UserWarning, match="All magnetic moments are being set to zero"):
+            kpath = KPathLatimerMunro(struct, has_magmoms=True)
+        assert kpath.mag_type == "2"
+
+    def test_convert_magmoms_missing_property(self):
+        kpath = KPathLatimerMunro(Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]]))
+        with pytest.warns(UserWarning, match="All magnetic moments are being set to zero"):
+            struct = kpath._convert_all_magmoms_to_vectors([0, 0, 1], axis_specified=False)
+        assert struct.site_properties["magmom"][0] == approx([0, 0, 0])
+
+    def test_magmom_ignored_warning(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [2.0])
+        with pytest.warns(UserWarning, match="has_magmoms is False, but site_properties contains the key magmom"):
+            kpath = KPathLatimerMunro(struct)
+        assert kpath.mag_type == "0"
+        assert "magmom" not in kpath.structure.site_properties
+
+    def test_magmom_ignored_does_not_mutate_input(self):
+        struct = Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]])
+        struct.add_site_property("magmom", [2.0])
+        with pytest.warns(UserWarning, match="has_magmoms is False"):
+            KPathLatimerMunro(struct)
+        assert struct.site_properties["magmom"] == [2.0]
+
+
+class TestKPathLatimerMunroHelpers:
+    @pytest.fixture
+    def kpath(self):
+        return KPathLatimerMunro(Structure(Lattice.cubic(3), ["Fe"], [[0, 0, 0]]))
+
+    def test_reducible_cell_warning(self):
+        struct = Structure(Lattice([[3, 0, 0], [4, 3, 0], [0, 0, 3]]), ["Fe"], [[0, 0, 0]])
+        with pytest.warns(UserWarning, match="not fully reduced"):
+            kpath = KPathLatimerMunro(struct)
+        # primed/duplicate labels get numbered subscripts
+        assert any("_{" in label for label in kpath.kpath["kpoints"])
+
+    @pytest.mark.parametrize(
+        ("pos1", "pos2", "expected"),
+        [
+            ([0.0, 0.5, 0.25], [0.0, 0.5, 0.25], True),
+            ([0.0, 0.5, 0.999999], [0.0, 0.5, 0.0], True),
+            ([1.0, -0.5, 2.25], [0.0, 0.5, 0.25], True),
+            ([0.0, 0.5, 0.3], [0.0, 0.5, 0.0], False),
+            ([0.0, 0.5], [0.0, 0.5, 0.0], False),
+        ],
+    )
+    def test_closewrapped(self, pos1, pos2, expected):
+        assert KPathLatimerMunro._closewrapped(np.array(pos1), np.array(pos2), np.ones(3) * 1e-5) is expected
+
+    def test_closewrapped_does_not_mutate(self):
+        op = SymmOp.from_rotation_and_translation(np.eye(3), [1.25, 0, 0])
+        KPathLatimerMunro._closewrapped(op.translation_vector, np.zeros(3), np.ones(3) * 1e-5)
+        assert op.translation_vector == approx([1.25, 0, 0])
+
+    def test_apply_op_to_magmom(self):
+        magmom = np.array([1.0, 2.0, 3.0])
+        c2z = np.diag([-1, -1, 1])
+        assert KPathLatimerMunro._apply_op_to_magmom(c2z, magmom) == approx([-1, -2, 3])
+        # magnetic moments are axial vectors: inversion leaves them unchanged
+        assert KPathLatimerMunro._apply_op_to_magmom(-np.eye(3), magmom) == approx(magmom)
+        mirror_z = np.diag([1, 1, -1])
+        assert KPathLatimerMunro._apply_op_to_magmom(mirror_z, magmom) == approx([-1, -2, 3])
+
+    def test_get_coset_factor(self, kpath):
+        identity = SymmOp.from_rotation_and_translation(np.eye(3), [0, 0, 0])
+        inversion = SymmOp.from_rotation_and_translation(-np.eye(3), [0, 0, 0])
+        assert kpath._get_coset_factor([identity, inversion], [identity]) == inversion
+        assert kpath._get_coset_factor([identity], [identity]) == "No coset factor found."
+        # candidate whose product with H lands back in H is rejected
+        c2z = SymmOp.from_rotation_and_translation(np.diag([-1, -1, 1]), [0, 0, 0])
+        assert kpath._get_coset_factor([identity, c2z], [c2z]) == "No coset factor found."
+
+    def test_magnetic_symmetry_operations(self, kpath):
+        struct = Structure(Lattice.cubic(3), ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        struct.add_site_property("magmom", [np.array([0, 0, 1]), np.array([0, 0, -1])])
+        identity = SymmOp.from_rotation_and_translation(np.eye(3), [0, 0, 0])
+        body_center = SymmOp.from_rotation_and_translation(np.eye(3), [0.5, 0.5, 0.5])
+        ops = kpath._get_magnetic_symmetry_operations(struct, [identity, body_center], atol=1e-5)
+        assert [op.time_reversal for op in ops] == [1, -1]
 
 
 class TestKPathLatimerMunro(MatSciTest):

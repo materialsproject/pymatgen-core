@@ -9,6 +9,7 @@ from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core.periodic_table import DummySpecies
 from pymatgen.core.structure import Molecule
 from pymatgen.io.qchem.outputs import (
     QCOutput,
@@ -258,6 +259,62 @@ MULTI_JOB_OUT_NAMES = {
     "new_qchem_files/isosvp_water.qcout",
     "new_qchem_files/isosvp_dielst10.qcout",
 }
+
+
+# NBO-heavy outputs that take >20 s each to parse and already have dedicated tests below
+SLOW_OUT_NAMES = {"new_qchem_files/3C.qout", "new_qchem_files/hyper.qout"}
+
+
+def _assert_matches_reference(parsed, ref, path="data"):
+    """Recursively compare parsed QCOutput data against the JSON reference.
+
+    JSON round-tripping turns integer dict keys into strings and tuples into lists,
+    so keys are compared via str() and sequences are compared element-wise.
+    """
+    if isinstance(ref, dict):
+        assert isinstance(parsed, dict), path
+        assert {str(key) for key in parsed} == {str(key) for key in ref}, path
+        ref_by_str = {str(key): val for key, val in ref.items()}
+        for key, val in parsed.items():
+            _assert_matches_reference(val, ref_by_str[str(key)], f"{path}[{key!r}]")
+    elif isinstance(ref, list | tuple | np.ndarray) and not isinstance(ref, str):
+        assert len(parsed) == len(ref), path
+        try:
+            assert_allclose(np.asarray(parsed, dtype=float), np.asarray(ref, dtype=float), atol=1e-6, err_msg=path)
+        except (ValueError, TypeError):
+            for idx, (sub_parsed, sub_ref) in enumerate(zip(parsed, ref, strict=True)):
+                _assert_matches_reference(sub_parsed, sub_ref, f"{path}[{idx}]")
+    elif isinstance(ref, float):
+        assert parsed == approx(ref, nan_ok=True), path
+    elif isinstance(ref, Molecule):
+        assert parsed == ref, path
+    else:
+        assert parsed == ref, path
+
+
+@pytest.mark.parametrize("filename", sorted(SINGLE_JOB_OUT_NAMES - SLOW_OUT_NAMES))
+def test_single_job_matches_reference(filename):
+    data = QCOutput(f"{TEST_DIR}/{filename}").data
+    ref = SINGLE_JOB_DICT[filename]
+    for key, ref_val in ref.items():
+        if key == "structure_change":  # requires OpenBabel
+            continue
+        _assert_matches_reference(data.get(key), ref_val, key)
+
+
+@pytest.mark.parametrize("filename", sorted(MULTI_JOB_OUT_NAMES))
+def test_multi_job_matches_reference(filename, tmp_path):
+    local_file = tmp_path / filename.split("/")[-1]
+    shutil.copy(f"{TEST_DIR}/{filename}", local_file)
+    outputs = QCOutput.multiple_outputs_from_file(str(local_file), keep_sub_files=False)
+    refs = MULTI_JOB_DICT[filename]
+    assert len(outputs) == len(refs)
+    for idx, (output, ref) in enumerate(zip(outputs, refs, strict=True)):
+        assert not (tmp_path / f"{local_file.name}.{idx}").exists()
+        for key, ref_val in ref.items():
+            if key == "structure_change":
+                continue
+            _assert_matches_reference(output.data.get(key), ref_val, f"{filename}[{idx}].{key}")
 
 
 class TestQCOutput(MatSciTest):
@@ -589,3 +646,427 @@ def test_prev_orbital_coeffs(tmp_path):
     orbital_coeffs = orbital_coeffs_parser(tmp_path / "53.0")
     assert len(orbital_coeffs) == 360400
     assert orbital_coeffs.all()
+
+
+def test_multiple_outputs_raises_on_single_init():
+    with pytest.raises(ValueError, match="multiple calculation outputs found"):
+        QCOutput(f"{NEW_QCHEM_TEST_DIR}/VCGenSCFMan.qcout")
+
+
+def test_multiple_outputs_keep_sub_files(tmp_path):
+    local_file = tmp_path / "VCGenSCFMan.qcout"
+    shutil.copy(f"{NEW_QCHEM_TEST_DIR}/VCGenSCFMan.qcout", local_file)
+    outputs = QCOutput.multiple_outputs_from_file(str(local_file))
+    assert len(outputs) == 2
+    assert (tmp_path / "VCGenSCFMan.qcout.0").is_file()
+    assert (tmp_path / "VCGenSCFMan.qcout.1").is_file()
+
+    first, second = (out.data for out in outputs)
+    assert first["version"] == "4"
+    assert first["optimization"] == [[]]
+    assert first["multiplicity"] == 2
+    assert first["unrestricted"] == [[]]
+    assert first["warnings"]["spin_contamination"] == approx(6.751978901)
+    assert first["energy_trajectory"] == []
+    assert first["errors"] == ["unknown_error"]
+    # The trailing chunk contains no Q-Chem banner
+    assert second["errors"] == ["never_called_qchem"]
+    assert second["charge"] is None
+    assert second["multiplicity"] == 1
+
+
+def test_homo_lumo_nan_values(tmp_path):
+    local_file = tmp_path / "homo_lumo_nan_values.qcout"
+    shutil.copy(f"{TEST_DIR}/homo_lumo_nan_values.qcout", local_file)
+    opt, freq = (out.data for out in QCOutput.multiple_outputs_from_file(str(local_file), keep_sub_files=False))
+    assert opt["errors"] == ["hessian_eigenvalue_error"]
+    assert opt["final_energy"] == approx(-510.8010083182)
+    assert_allclose(opt["energy_trajectory"], [-510.79683337, -510.79918813, -510.80081782, -510.80100832])
+    assert opt["warnings"]["inaccurate_integrated_density"].shape == (4, 3)
+    assert opt["warnings"]["inaccurate_integrated_density"][-1] == approx([85, 0, -100])
+    assert_allclose(opt["warnings"]["spin_contamination"], [0.0362, 0.0405, 0.048, 0.0506])
+    assert freq["frequency_job"] == [[]]
+    assert freq["errors"] == ["SCF_failed_to_converge"]
+
+
+def test_switch_to_cartesian():
+    data = QCOutput(f"{NEW_QCHEM_TEST_DIR}/switch_to_cartesian.qout").data
+    assert data["version"] == "6"
+    assert data["new_optimizer"] == [[]]
+    assert data["warnings"]["switch_to_cartesian"] is True
+    assert data["errors"] == []
+    assert data["completion"] == [[]]
+    assert data["walltime"] == approx(46670.86)
+    assert data["cputime"] == approx(919896.27)
+    assert data["charge"] == 1
+    assert data["multiplicity"] == 2
+    assert len(data["species"]) == 46
+    assert data["final_energy"] == approx(-1721.691878905881)
+    assert len(data["energy_trajectory"]) == len(data["norm_of_stepsize"]) == 81
+    assert data["norm_of_stepsize"][0] == approx(0.702538)
+    assert data["energy_trajectory"][-1] == approx(-1721.691879, abs=1e-6)
+    assert data["S2"][-1] == approx(0.755902, abs=1e-6)
+    assert data["solvent_method"] == "PCM"
+    assert data["solvent_data"]["PCM_dielectric"] == approx(3.0)
+    assert len(data["solvent_data"]["g_electrostatic"]) == 81
+    assert data["solvent_data"]["g_electrostatic"][0] == approx(-0.042089, abs=1e-6)
+    assert np.shape(data["pcm_gradients"]) == np.shape(data["gradients"])
+    assert_allclose(data["optimized_geometry"], data["last_geometry"])
+    assert len(data["molecule_from_optimized_geometry"]) == 46
+    assert len(data["RESP"]) == 81
+
+
+def test_chelpg_single_point():
+    data = QCOutput(f"{TEST_DIR}/chelpg_charges.qcout").data
+    assert data["version"] == "unknown"
+    assert data["single_point_job"] == [[]]
+    assert data["point_group"] == "C1"
+    assert len(data["species"]) == 31
+    assert data["final_energy"] == approx(-895.7443105914)
+    assert data["SCF_energy_in_the_final_basis_set"] == approx(-895.7443105914)
+    assert data["walltime"] == approx(34.99)
+    assert data["dipoles"]["total"] == approx(1.3169)
+    assert data["dipoles"]["dipole"] == approx([-0.5894, -1.1773, -0.0288])
+    assert data["multipoles"]["quadrupole"]["XX"] == approx(-96.9702)
+    assert data["multipoles"]["octopole"]["XXX"] == approx(-149.6523)
+    assert len(data["Mulliken"][0]) == 31
+    assert data["errors"] == []
+
+
+def test_hirshfeld_population():
+    data = QCOutput(f"{TEST_DIR}/hirshfeld_population.qcout").data
+    assert data["version"] == "4"
+    assert data["point_group"] == "Cs"
+    assert data["species"] == ["O", "H", "H"]
+    assert data["unrestricted"] == [[]]
+    assert data["final_energy"] == approx(-76.4086658117)
+    assert data["dipoles"]["total"] == approx(2.0786)
+    assert data["walltime"] == approx(1.33)
+
+
+@pytest.mark.parametrize(
+    ("filename", "is_opt"),
+    [("scf_no_message_fail.qcout", False), ("scf_opt_no_message_fail.qcout", True)],
+)
+def test_scf_fail_no_message(filename, is_opt):
+    data = QCOutput(f"{TEST_DIR}/{filename}").data
+    assert data["errors"] == ["unknown_error"]
+    assert data["completion"] is None
+    assert data["mem_total"] == 1100
+    assert data["charge"] == -1
+    assert data["multiplicity"] == 2
+    assert data["point_group"] == "Ci"
+    assert data["warnings"]["inaccurate_integrated_density"][0] == approx([49, 48.000992, -2.038792])
+    assert data["SCF"] == []
+    assert data["final_energy"] is None
+    assert (data["optimization"] == [[]]) is is_opt
+    assert (data["single_point_job"] == [[]]) is not is_opt
+
+
+def test_opt_fail_no_message():
+    data = QCOutput(f"{TEST_DIR}/opt_fail_no_message.qcout").data
+    assert data["errors"] == ["unknown_error"]
+    assert data["charge"] == -1
+    assert data["final_energy"] == approx(-741.6069065075)
+    assert_allclose(
+        data["energy_trajectory"], [-741.597154, -741.605806, -741.606859, -741.6069, -741.606907], atol=1e-6
+    )
+    assert len(data["geometries"]) == len(data["gradients"]) == 5
+    assert len(data["SCF_energy_in_the_final_basis_set"]) == 6
+    assert_allclose(data["S2"], [0.7593, 0.7612, 0.7618, 0.7619, 0.7619, 0.7619])
+    assert_allclose(data["warnings"]["spin_contamination"], [0.0093, 0.0112, 0.0118, 0.0119, 0.0119, 0.0119])
+    assert data["optimized_geometry"] is None
+
+
+def test_gmd_scf():
+    data = QCOutput(f"{TEST_DIR}/gmd_scf.qcout").data
+    assert data["errors"] == ["unknown_error"]
+    assert data["mem_total"] == 5000
+    assert data["charge"] == 1
+    assert data["multiplicity"] == 2
+    assert data["species"][:4] == ["Mg", "N", "N", "Si"]
+    assert data["final_energy"] == approx(-1944.956901148)
+    assert data["S2"] == approx(0.7522)
+    assert data["energy_trajectory"] == approx([-1944.956901148])
+    assert data["warnings"]["inaccurate_integrated_density"][0] == approx([189, 190.007387, 0.533009])
+
+
+def test_freq_ordinal_not_in_range():
+    data = QCOutput(f"{TEST_DIR}/ordinal_not_in_range.qcout.gz").data
+    assert data["multiple_outputs"] is None
+    assert data["version"] == "4"
+    assert data["frequency_job"] == [[]]
+    assert data["mem_total"] == 1600
+    assert data["cpscf_nseg"] == 16
+    assert data["ZPE"] == approx(106.877)
+    assert data["trans_enthalpy"] == approx(0.889)
+    assert data["vib_enthalpy"] == approx(110.862)
+    assert data["gas_constant"] == approx(0.592)
+    assert data["vib_entropy"] == approx(25.103)
+    assert data["total_enthalpy"] == approx(113.232)
+    assert data["total_entropy"] == approx(96.054)
+    n_modes = 3 * 21 - 6
+    assert len(data["frequencies"]) == len(data["IR_intens"]) == len(data["IR_active"]) == n_modes
+    assert data["frequencies"][0] == approx(24.1)
+    assert data["frequencies"][-1] == approx(3283.55)
+    assert data["IR_intens"][1] == approx(5.866)
+    assert data["trans_dip"].shape == (n_modes, 3)
+    assert data["frequency_mode_vectors"].shape == (n_modes, 21, 3)
+    assert data["frequency_mode_vectors"][0, 0] == approx([-0.002, -0.129, -0.078])
+    assert data["raman_intens"] is None
+    assert "frequency_length_inconsistency" not in data["warnings"]
+
+
+@pytest.mark.parametrize(
+    ("filename", "n_ghosts", "real_formula"),
+    [("ghost_atoms.qcout", 3, "H4 C1"), ("MgBF4_b_overalpped.qcout", 1, "Mg1 B1 F3")],  # codespell:ignore overalpped
+)
+def test_ghost_atoms(filename, n_ghosts, real_formula):
+    data = QCOutput(f"{TEST_DIR}/{filename}").data
+    # data["species"] keeps Q-Chem's labels; ghost atoms are printed as "GH" and listed first in these inputs
+    assert data["species"][:n_ghosts] == ["GH"] * n_ghosts
+    assert "GH" not in data["species"][n_ghosts:]
+
+    # In the Molecule, ghost atoms are DummySpecies("X") sites in the same order and at the same positions
+    mol = data["initial_molecule"]
+    assert len(mol) == len(data["species"])
+    assert [site.species_string for site in mol[:n_ghosts]] == ["X0+"] * n_ghosts
+    assert all(isinstance(site.specie, DummySpecies) for site in mol[:n_ghosts])
+    assert_allclose(mol.cart_coords, data["initial_geometry"])
+    # Ghost atoms carry no electrons, so the charge and multiplicity of the real atoms are kept
+    assert mol.composition.formula == f"X{n_ghosts} {real_formula}"
+    assert (mol.charge, mol.spin_multiplicity) == (data["charge"], data["multiplicity"])
+
+    # Q-Chem prints a Mulliken charge for every site, ghosts included, so per-atom data lines up with the sites
+    assert len(data["Mulliken"][-1]) == len(mol)
+
+
+def test_as_dict():
+    qc_out = QCOutput(f"{TEST_DIR}/hf.qcout")
+    dct = qc_out.as_dict()
+    assert dct["filename"] == qc_out.filename
+    assert dct["text"] == qc_out.text
+    assert dct["data"]["final_energy"] == approx(qc_out.data["final_energy"])
+    assert isinstance(dct["data"]["initial_geometry"], list)
+
+
+QCHEM_BANNER = "Welcome to Q-Chem\n"
+COMPLETION = "Thank you very much for using Q-Chem.  Have a nice day.\n"
+
+
+def _write_and_parse(tmp_path, text: str) -> dict:
+    out_file = tmp_path / "mol.qout"
+    out_file.write_text(text, encoding="utf-8")
+    return QCOutput(str(out_file)).data
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_error"),
+    [
+        ("Coordinates do not transform within specified threshold\n", "failed_to_transform_coords"),
+        ("The Q-Chem input file has failed to pass inspection\n", "input_file_error"),
+        ("Error opening input stream\n", "failed_to_read_input"),
+        ("FileMan error: End of file reached prematurely\n", "premature_end_FileMan_error"),
+        ("need to increase the array of NLebdevPts\n", "NLebdevPts"),
+        ("method not available\n", "method_not_available"),
+        ("Could not find $molecule section in ParseQInput\n", "read_molecule_error"),
+        ("No banner here\n", "never_called_qchem"),
+        (
+            QCHEM_BANNER + "***ERROR*** Hessian Appears to have all zero or negative eigenvalues\n",
+            "hessian_eigenvalue_error",
+        ),
+        (QCHEM_BANNER + "FlexNet Licensing error\n", "licensing_error"),
+        (QCHEM_BANNER + "Unable to validate license\n", "licensing_error"),
+        (QCHEM_BANNER + "Could not open driver file in ReadDriverFromDisk\n", "driver_error"),
+        (QCHEM_BANNER + "Basis not supported for the above atom\n", "basis_not_supported"),
+        (QCHEM_BANNER + "Unable to find relaxed density\n", "failed_cpscf"),
+        (QCHEM_BANNER + "Out of Iterations- IterZ\n", "failed_cpscf"),
+        (QCHEM_BANNER + "RUN_NBO6 (rem variable) is not correct\n", "bad_old_nbo6_rem"),
+        (QCHEM_BANNER + "NBO_EXTERNAL (rem variable) is not correct\n", "bad_new_nbo_external_rem"),
+        (
+            QCHEM_BANNER + "gen_scfman_exception:  GDM:: Zero or negative preconditioner scaling factor\n",
+            "gdm_neg_precon_error",
+        ),
+        (QCHEM_BANNER + "too many atoms in ESPChgFit\n", "esp_chg_fit_error"),
+        (QCHEM_BANNER + "Please use larger MEM_STATIC\n", "mem_static_too_small"),
+        (QCHEM_BANNER + "Please increase MEM_STATIC\n", "mem_static_too_small"),
+        (QCHEM_BANNER + "Please increase MEM_TOTAL\n", "mem_total_too_small"),
+        (QCHEM_BANNER + "Computing fast CPCM-SWIG hessian \n", "probably_out_of_memory"),
+        (QCHEM_BANNER + "Roots Converged\n", "probably_out_of_memory"),
+        (QCHEM_BANNER + "1 failed line searches.  Resetting\n" * 11, "SCF_failed_to_converge"),
+        (QCHEM_BANNER + "1 failed line searches.  Resetting\n" * 3, "unknown_error"),
+    ],
+)
+def test_completion_errors(tmp_path, text, expected_error):
+    data = _write_and_parse(tmp_path, text)
+    assert data["completion"] is None
+    assert data["errors"] == [expected_error]
+
+
+@pytest.mark.parametrize(
+    ("text", "warning"),
+    [
+        ("Intel MKL ERROR: Parameter 4 was incorrect\n", "mkl"),
+        ("Inconsistent size for SCF MO coefficient file\n", "inconsistent_size"),
+        (
+            "***ERROR*** Angle 1 2 3 is near-linear\n But No atom available to define colinear bend\n",
+            "colinear_bend",
+        ),
+        ("***ERROR*** Unable to Diagonalize B*B(t) in <MakeNIC>\n", "diagonalizing_BBt"),
+        ("Starting finite difference calculation for IDERIV\n", "missing_analytical_derivates"),
+    ],
+)
+def test_general_warnings(tmp_path, text, warning):
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + text)
+    assert data["warnings"][warning] is True
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_smd_unrecognized_solvent(tmp_path, completed):
+    text = QCHEM_BANNER + "solvent_method = smd\n Solvent: foo\n Unrecognized solvent\n"
+    if completed:
+        text += COMPLETION
+    data = _write_and_parse(tmp_path, text)
+    assert data["solvent_method"] == "SMD"
+    assert data["solvent_data"]["SMD_solvent"] == "foo"
+    if completed:
+        assert data["warnings"]["unrecognized_solvent"] is True
+        assert "unrecognized_solvent" not in data["errors"]
+    else:
+        assert data["errors"] == ["unrecognized_solvent"]
+    assert "questionable_SMD_parsing" not in data["warnings"]
+
+
+def test_smd_two_solvents_and_questionable_parsing(tmp_path):
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + "solvent_method smd\n Solvent: water\n Solvent: ethanol\n")
+    assert data["warnings"]["SMD_two_solvents"] == "water and ethanol"
+    assert data["solvent_data"]["SMD_solvent"] == "water"
+
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + "solvent_method smd\n Solvent: water\n solvent for which\n")
+    assert data["warnings"]["questionable_SMD_parsing"] is True
+    assert "SMD_two_solvents" not in data["warnings"]
+
+
+def test_dft_d3(tmp_path):
+    d3_line = " -D3 energy without 3body term = {} hartrees\n"
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + "dft_d = d3\n" + d3_line.format("-0.0123"))
+    assert data["using_dft_d3"] == [[]]
+    assert data["dft_d3"] == approx(-0.0123)
+
+    data = _write_and_parse(
+        tmp_path, QCHEM_BANNER + "dft_d = d3\n" + d3_line.format("-0.0123") + d3_line.format("-0.0125")
+    )
+    assert_allclose(data["dft_d3"], [-0.0123, -0.0125])
+
+
+def test_dft_d3_missing_energy(tmp_path):
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + "dft_d = d3\n")
+    assert data["dft_d3"] is None
+
+
+@pytest.mark.parametrize(
+    ("trigger", "none_keys"),
+    [
+        (
+            "Start with Direct-Coupling Calculation",
+            [f"direct_coupling_{key}_Hartree" for key in ("Hif", "Sif", "Hii", "Sii", "Hff", "Sff")]
+            + ["direct_coupling_eV"],
+        ),
+        ("POD based on the RSCF Fock matrix", ["pod_coupling_eV"]),
+        ("FODFT(2n)@DA for ET", ["fodft_had_eV", "fodft_hda_eV", "fodft_coupling_eV"]),  # codespell:ignore hda
+        (
+            "CCMAN2: suite of methods based on coupled cluster",
+            [
+                "hf_scf_energy",
+                "mp2_energy",
+                "ccsd_correlation_energy",
+                "ccsd_total_energy",
+                "ccsd(t)_correlation_energy",
+                "ccsd(t)_total_energy",
+            ],
+        ),
+        (
+            "ALMO(MSDFT2) method for electronic coupling",
+            [
+                "almo_coupling_states",
+                "almo_diabat_energies_Hartree",
+                "almo_adiabat_energies_Hartree",
+                "almo_hamiltonian",
+                "almo_overlap_matrix",
+                "almo_s2_matrix",
+                "almo_diabat_basis_coeff",
+                "almo_h_coupling_matrix",
+                "almo_coupling_eV",
+            ],
+        ),
+        (
+            "CDFT Becke Populations",
+            ["cdft_becke_excess_electrons", "cdft_becke_population", "cdft_becke_net_spin"],
+        ),
+    ],
+)
+def test_truncated_coupling_sections(tmp_path, trigger, none_keys):
+    """Jobs that die right after announcing a method should yield None rather than crash."""
+    data = _write_and_parse(tmp_path, f"{QCHEM_BANNER}{trigger}\n")
+    for key in none_keys:
+        assert key in data, key
+        assert data[key] is None, key
+
+
+def test_initial_geometry_without_point_group(tmp_path):
+    header = (
+        "$molecule\n0 1\nH 0.0 0.0 0.0\nH 0.0 0.0 0.74\n$end\n"
+        "             Standard Nuclear Orientation (Angstroms)\n"
+        "    I     Atom           X                Y                Z\n"
+        " ----------------------------------------------------------------\n"
+    )
+    footer = (
+        " ----------------------------------------------------------------\n Nuclear Repulsion Energy =  0.7 hartrees\n"
+    )
+    rows = "    1      H       0.0000000000     0.0000000000     0.0000000000\n"
+    rows += "    2      H       0.0000000000     0.0000000000     0.7400000000\n"
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + header + rows + footer)
+    assert data["species"] == ["H", "H"]
+    assert data["point_group"] is None
+    assert data["initial_geometry"][1] == approx([0, 0, 0.74])
+    assert data["initial_molecule"].charge == 0
+    assert data["initial_molecule"].spin_multiplicity == 1
+
+    # Header printed but no parsable atoms table
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + " Nuclear Repulsion Energy =  0.7 hartrees\n")
+    assert data["species"] is None
+    assert data["initial_geometry"] is None
+    assert data["initial_molecule"] is None
+    assert data["point_group"] is None
+
+
+def test_multiple_thresh_warnings(tmp_path):
+    block = (
+        "\nscfman.C::WARNING energy changes are now smaller than effective accuracy.\n"
+        "scfman.C::    calculation will continue, but THRESH should be increased\n"
+        "scfman.C::    or SCF_CONVERGENCE decreased. \n"
+        "scfman.C::    effective_thresh = {}\n"
+    )
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + block.format("1.2e-10"))
+    assert data["warnings"]["thresh"] == approx(1.2e-10)
+    data = _write_and_parse(tmp_path, QCHEM_BANNER + block.format("1.2e-10") + block.format("3.4e-11"))
+    assert_allclose(data["warnings"]["thresh"], [1.2e-10, 3.4e-11])
+
+
+def _opt_constraint_text(value: float, constraint: float) -> str:
+    return (
+        QCHEM_BANNER + "$opt\nCONSTRAINT\ntors 1 2 3 4 0.0\nENDCONSTRAINT\n$end\n"
+        "Constraints and their Current Values\n Value Constraint\n"
+        f" Dihedral: 1 2 3 4 {value} {constraint}\n"
+    )
+
+
+def test_opt_constraint(tmp_path):
+    data = _write_and_parse(tmp_path, _opt_constraint_text(180.0, -180.0))
+    assert data["opt_constraint"] == ["Dihedral", "1", "2", "3", "4", "180.0", "-180.0"]
+
+    with pytest.raises(ValueError, match="should be the same"):
+        _write_and_parse(tmp_path, _opt_constraint_text(90.0, 80.0))
+
+    with pytest.raises(ValueError, match="can only differ by a sign"):
+        _write_and_parse(tmp_path, _opt_constraint_text(90.0, -90.0))

@@ -17,6 +17,7 @@ from monty.dev import requires
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.operations import MagSymmOp, SymmOp
+from pymatgen.symmetry._spglib_compat import call_spglib, ignore_spglib_error_handling_warning
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, cite_conventional_cell_algo
 
 try:
@@ -931,14 +932,18 @@ class KPathSeek(KPathBase):
 
         cell = (self._latt.matrix, positions, numbers)
 
-        spg_struct = spglib.standardize_cell(
+        spg_struct = call_spglib(
+            spglib.standardize_cell,
             cell,  # type: ignore[arg-type]
             to_primitive=False,
             no_idealize=True,
             symprec=symprec,  # type: ignore[arg-type]
         )
+        if spg_struct is None:
+            raise ValueError("spglib failed to standardize the cell")
 
-        spath_dat = get_path(spg_struct, system_is_tri, "hpkot", atol, symprec, angle_tolerance)
+        with ignore_spglib_error_handling_warning():  # seekpath calls spglib with the old error handling
+            spath_dat = get_path(spg_struct, system_is_tri, "hpkot", atol, symprec, angle_tolerance)
 
         self._tmat = self._trans_sc_to_Hin(spath_dat["bravais_lattice_extended"])
         self._rec_lattice = Lattice(spath_dat["reciprocal_primitive_lattice"])
@@ -1114,7 +1119,8 @@ class KPathLatimerMunro(KPathBase):
 
         if has_magmoms:
             grey_struct = self._structure.copy()
-            grey_struct.remove_site_property("magmom")
+            if "magmom" in grey_struct.site_properties:
+                grey_struct.remove_site_property("magmom")
             sga = SpacegroupAnalyzer(grey_struct, symprec=symprec, angle_tolerance=angle_tolerance)
             grey_ops = sga.get_symmetry_operations()
             self._structure = self._convert_all_magmoms_to_vectors(magmom_axis, axis_specified)
@@ -1165,6 +1171,8 @@ class KPathLatimerMunro(KPathBase):
                     "This property will be removed and could result in different symmetry operations.",
                     stacklevel=2,
                 )
+                # work on a copy so the caller's structure keeps its magmoms
+                self._structure = self._structure.copy()
                 self._structure.remove_site_property("magmom")
             sga = SpacegroupAnalyzer(self._structure)
             ops = sga.get_symmetry_operations()
@@ -1748,8 +1756,9 @@ class KPathLatimerMunro(KPathBase):
 
     @staticmethod
     def _closewrapped(pos1, pos2, tolerance):
-        pos1 %= 1.0
-        pos2 %= 1.0
+        # wrap copies; callers pass views such as SymmOp.translation_vector
+        pos1 = np.mod(pos1, 1.0)
+        pos2 = np.mod(pos2, 1.0)
 
         if len(pos1) != len(pos2):
             return False

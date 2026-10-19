@@ -250,7 +250,10 @@ class TestCifIO(MatSciTest):
         assert set(sym_structure.labels) == {"O1", "Li1"}
 
     def test_no_sym_ops(self):
-        with open(f"{TEST_FILES_DIR}/cif/Li2O.cif") as fin, open("test.cif", "w") as fout:
+        with (
+            open(f"{TEST_FILES_DIR}/cif/Li2O.cif", encoding="utf-8") as fin,
+            open("test.cif", "w", encoding="utf-8") as fout,
+        ):
             for line_num, line in enumerate(fin, start=1):
                 # Skip "_symmetry_equiv_pos_as_xyz", "_symmetry_space_group_name_H-M"
                 # and "_symmetry_Int_Tables_number" sections such that

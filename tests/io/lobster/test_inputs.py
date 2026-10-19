@@ -54,7 +54,7 @@ class TestLobsterin(MatSciTest):
         float_dup_file.append("cohpstartenergy -15.0")
 
         float_tmp_file = self.tmp_path / "tmp_lobster_in_float"
-        float_tmp_file.write_text("\n".join(float_dup_file))
+        float_tmp_file.write_text("\n".join(float_dup_file), encoding="utf-8")
 
         with pytest.raises(ValueError, match="Same keyword cohpstartenergy twice!"):
             _ = Lobsterin.from_file(float_tmp_file)
@@ -64,7 +64,7 @@ class TestLobsterin(MatSciTest):
         bool_dup_file.append("skipdos")
 
         bool_tmp_file = self.tmp_path / "tmp_lobster_in_bool"
-        bool_tmp_file.write_text("\n".join(bool_dup_file))
+        bool_tmp_file.write_text("\n".join(bool_dup_file), encoding="utf-8")
 
         _ = Lobsterin.from_file(bool_tmp_file)  # no error should be raised
 
@@ -293,7 +293,7 @@ class TestLobsterin(MatSciTest):
         lobsterin_content.replace("skipcohp", "skipCOHP")
 
         tmp_file_path = self.tmp_path / "tmp_lobster_in"
-        tmp_file_path.write_text(lobsterin_content)
+        tmp_file_path.write_text(lobsterin_content, encoding="utf-8")
 
         lobsterin_diff_case = Lobsterin.from_file(tmp_file_path)
         assert self.Lobsterin.diff(lobsterin_diff_case)["Different"] == {}

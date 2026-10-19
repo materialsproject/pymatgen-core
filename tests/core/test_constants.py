@@ -73,6 +73,6 @@ def test_no_scipy_constants_on_import_path() -> None:
         "    f'scipy.constants leaked: {sorted(m for m in sys.modules if m.startswith(\"scipy\"))!r}'; "
         "print('OK')"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8", check=False)
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout

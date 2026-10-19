@@ -272,7 +272,7 @@ def test_jdftxstructure():
     # Double checking I got the column/row order right
     assert_same_value(struct.structure.lattice, newstruct.structure.lattice)
     assert struct.natoms == 16
-    with open(ex_infile2_fname) as f:
+    with open(ex_infile2_fname, encoding="utf-8") as f:
         lines = list.copy(list(f))
     # Test different ways of creating a JDFTXStructure object create the same object if data is the same
     data = "\n".join(lines)

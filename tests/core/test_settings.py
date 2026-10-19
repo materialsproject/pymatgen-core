@@ -52,7 +52,7 @@ def test_load_settings(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
 
 def test_env_var_pmg_config_file(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     custom_config_file = tmp_path / "custom_config.yaml"
-    custom_config_file.write_text("PMG_CUSTOM_SETTING: custom_value")
+    custom_config_file.write_text("PMG_CUSTOM_SETTING: custom_value", encoding="utf-8")
 
     with monkeypatch.context() as ctx:
         ctx.setenv("PMG_CONFIG_FILE", str(custom_config_file))

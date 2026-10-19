@@ -29,6 +29,7 @@ import spglib
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import Molecule, PeriodicSite, Structure
+from pymatgen.symmetry._spglib_compat import call_spglib
 from pymatgen.symmetry.structure import SymmetrizedStructure
 from pymatgen.util.coord import find_in_coord_list, pbc_diff
 from pymatgen.util.due import Doi, due
@@ -76,7 +77,7 @@ def _get_symmetry_dataset(cell, symprec, angle_tolerance):
     expensive.
     """
     try:
-        dataset = spglib.get_symmetry_dataset(cell, symprec=symprec, angle_tolerance=angle_tolerance)
+        dataset = call_spglib(spglib.get_symmetry_dataset, cell, symprec=symprec, angle_tolerance=angle_tolerance)
         if dataset is None:
             raise SymmetryUndeterminedError("Unable to determine symmetry")
     except spglib._spglib.SpglibCppError as e:
@@ -315,7 +316,7 @@ class SpacegroupAnalyzer:
         with warnings.catch_warnings():
             # TODO: get DeprecationWarning: Use get_magnetic_symmetry() for cell with magnetic moments.
             warnings.filterwarnings("ignore", message="Use get_magnetic_symmetry", category=DeprecationWarning)
-            dct = spglib.get_symmetry(self._cell, symprec=self._symprec, angle_tolerance=self._angle_tol)
+            dct = call_spglib(spglib.get_symmetry, self._cell, symprec=self._symprec, angle_tolerance=self._angle_tol)
 
         if dct is None:
             symprec = self._symprec
@@ -414,7 +415,7 @@ class SpacegroupAnalyzer:
             Refined structure.
         """
         # Atomic positions have to be specified by scaled positions for spglib.
-        cell = spglib.refine_cell(self._cell, self._symprec, self._angle_tol)
+        cell = call_spglib(spglib.refine_cell, self._cell, self._symprec, self._angle_tol)
         if cell is None or len(cell) != 3:
             raise ValueError("Failed to refine cell")
         lattice, scaled_positions, numbers = cell
@@ -446,7 +447,7 @@ class SpacegroupAnalyzer:
             as a Structure object. If no primitive cell is found, None is
             returned.
         """
-        cell = spglib.find_primitive(self._cell, symprec=self._symprec)
+        cell = call_spglib(spglib.find_primitive, self._cell, symprec=self._symprec)
         if cell is None or len(cell) != 3:
             raise ValueError("Failed to find primitive cell")
         lattice, scaled_positions, numbers = cell
@@ -486,7 +487,12 @@ class SpacegroupAnalyzer:
             in fractional coordinates
         """
         shift = np.array([1 if i else 0 for i in is_shift])
-        mapping, grid = spglib.get_ir_reciprocal_mesh(np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec)
+        ir_mesh = call_spglib(
+            spglib.get_ir_reciprocal_mesh, np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec
+        )
+        if ir_mesh is None:
+            raise ValueError("spglib failed to generate the irreducible reciprocal mesh")
+        mapping, grid = ir_mesh
 
         results = []
         for idx, count in zip(*np.unique(mapping, return_counts=True), strict=True):
@@ -513,7 +519,12 @@ class SpacegroupAnalyzer:
             that maps all the reducible kpoints from to irreducible ones.
         """
         shift = np.array([1 if i else 0 for i in is_shift])
-        mapping, grid = spglib.get_ir_reciprocal_mesh(np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec)
+        ir_mesh = call_spglib(
+            spglib.get_ir_reciprocal_mesh, np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec
+        )
+        if ir_mesh is None:
+            raise ValueError("spglib failed to generate the irreducible reciprocal mesh")
+        mapping, grid = ir_mesh
 
         grid_fractional_coords = (grid + shift * (0.5, 0.5, 0.5)) / mesh
 
@@ -1012,7 +1023,12 @@ class SpacegroupAnalyzer:
                 mesh.append(int(max(m)))
                 shift.append(1)
 
-        mapping, grid = spglib.get_ir_reciprocal_mesh(np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec)
+        ir_mesh = call_spglib(
+            spglib.get_ir_reciprocal_mesh, np.array(mesh), self._cell, is_shift=shift, symprec=self._symprec
+        )
+        if ir_mesh is None:
+            raise ValueError("spglib failed to generate the irreducible reciprocal mesh")
+        mapping, grid = ir_mesh
         mapping = list(mapping)  # type:ignore[assignment]
         grid = (np.array(grid) + np.array(shift) * (0.5, 0.5, 0.5)) / mesh
         weights = []
@@ -1118,7 +1134,8 @@ class PointGroupAnalyzer:
             # of the system. This mitigates the problem of choosing a proper
             # comparison tolerance for the eigenvalues.
             inertia_tensor /= total_inertia
-            eigvals, eigvecs = np.linalg.eig(inertia_tensor)
+            # The inertia tensor is real symmetric, so use eigh (eig returns complex arrays on NumPy >= 2.5)
+            eigvals, eigvecs = np.linalg.eigh(inertia_tensor)
             self.principal_axes = eigvecs.T
             self.eigvals = eigvals
             v1, v2, v3 = eigvals
@@ -1664,8 +1681,8 @@ def cluster_sites(
     for idx in range(len(mol)):
         clustered_dists[f_cluster[idx]].append(dists[idx])
     avg_dist = {key: np.mean(val) for key, val in clustered_dists.items()}
-    clustered_sites = defaultdict(list)
-    origin_site = None
+    clustered_sites: defaultdict[tuple, list[int | Site]] = defaultdict(list)
+    origin_site: int | Site | None = None
     for idx, site in enumerate(mol):
         if avg_dist[f_cluster[idx]] < tol:
             origin_site = idx if give_only_index else site

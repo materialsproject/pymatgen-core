@@ -246,8 +246,9 @@ class TestPeriodicSite(MatSciTest):
 
         site = PeriodicSite("Fe", [0.25, 0.35, 0.45], self.lattice)
 
-        # Assignment via attribute syntax must land in .properties
-        site.magmom = 5
+        # Assignment via attribute syntax must land in .properties (deprecated, but still supported)
+        with pytest.warns(DeprecationWarning, match="Setting attribute magmom on PeriodicSite is deprecated"):
+            site.magmom = 5
         assert site.properties["magmom"] == 5, "magmom should be stored in site.properties, not as a bare attribute"
 
         # Round-trip through from_sites must preserve it
@@ -262,8 +263,9 @@ class TestPeriodicSite(MatSciTest):
             ["Cr", "Fe"],
             [[0, 0, 0], [0.5, 0.5, 0.5]],
         )
-        struct.sites[0].magmom = -5
-        struct.sites[1].magmom = 5
+        for site, magmom in zip(struct.sites, (-5, 5), strict=True):
+            with pytest.warns(DeprecationWarning, match="Setting attribute magmom on PeriodicSite is deprecated"):
+                site.magmom = magmom
         sorted_struct = struct.get_sorted_structure()
         assert all("magmom" in site.properties for site in sorted_struct.sites), (
             "magmom lost on one or more sites after get_sorted_structure"

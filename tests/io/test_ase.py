@@ -225,7 +225,8 @@ def test_get_structure_dyn(select_dyn):
         coords=((0, 0, 0), (0.5, 0.5, 0.5)),
         site_properties={"selective_dynamics": select_dyn},
     )
-    structure.sites[0].selective_dynamics = select_dyn
+    with pytest.warns(DeprecationWarning, match="Setting attribute selective_dynamics on PeriodicSite is deprecated"):
+        structure.sites[0].selective_dynamics = select_dyn
 
     # mostly testing that this call doesn't raise
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)

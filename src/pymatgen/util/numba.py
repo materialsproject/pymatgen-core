@@ -10,10 +10,10 @@ try:
     from numba import jit, njit
 except ImportError:
 
-    def njit(func):
+    def njit(func):  # type: ignore[no-redef]
         """Replacement for numba.njit when numba is not installed that does nothing."""
         return func
 
-    def jit(func):
+    def jit(func):  # type: ignore[no-redef]
         """Replacement for numba.jit when numba is not installed that does nothing."""
         return func
