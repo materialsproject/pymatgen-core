@@ -2808,14 +2808,13 @@ class MoleculeGraph(MSONable):
                 strings, will not count number of occurrences of bonds
         """
         if self.molecule != other.molecule and strict:
-            return ValueError("Meaningless to compare MoleculeGraphs if corresponding Molecules are different.")
+            raise ValueError("Meaningless to compare MoleculeGraphs if corresponding Molecules are different.")
 
         if strict:
-            # sort for consistent node indices
-            # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
-            mapping = {tuple(site.frac_coords): self.molecule.index(site) for site in other.molecule}
+            # sort for consistent node indices, using Cartesian coords as a convenient key
+            mapping = {tuple(site.coords): self.molecule.index(site) for site in other.molecule}
             other_sorted = copy.copy(other)
-            other_sorted.sort(key=lambda site: mapping[tuple(site.frac_coords)])
+            other_sorted.sort(key=lambda site: mapping[tuple(site.coords)])
 
             edges = {(u, v, data.get("to_jimage", (0, 0, 0))) for u, v, data in self.graph.edges(keys=False, data=True)}
 
@@ -2830,18 +2829,17 @@ class MoleculeGraph(MSONable):
             }
 
             edges_other = {
-                (str(other.structure[u].specie), str(other.structure[v].specie))
-                for u, v in other.graph.edges(keys=False)
+                (str(other.molecule[u].specie), str(other.molecule[v].specie)) for u, v in other.graph.edges(keys=False)
             }
 
         if len(edges) == 0 and len(edges_other) == 0:
-            jaccard_dist = 0  # by definition
+            jaccard_dist = 0.0  # by definition
         else:
-            jaccard_dist = 1 - len(edges ^ edges_other) / len(edges | edges_other)
+            jaccard_dist = 1.0 - len(edges & edges_other) / len(edges | edges_other)
 
         return {
             "self": edges - edges_other,
             "other": edges_other - edges,
-            "both": edges ^ edges_other,
+            "both": edges & edges_other,
             "dist": jaccard_dist,
         }

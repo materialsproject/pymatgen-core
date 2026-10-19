@@ -1408,26 +1408,15 @@ class TestMoleculeGraph:
         other_species.nodes[2]["specie"] = "F"
         assert not _isomorphic(graph, other_species)
 
-    @pytest.mark.xfail(strict=True, reason="MoleculeGraph.diff returns, rather than raises, a ValueError")
     def test_diff_different_molecules(self):
         with pytest.raises(ValueError, match="Meaningless to compare MoleculeGraphs"):
             self.ethylene.diff(self.butadiene)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AttributeError,
-        reason="MoleculeGraph.diff(strict=True) uses Site.frac_coords, which non-periodic sites lack",
-    )
     def test_diff_strict(self):
         diff = self.ethylene.diff(copy.deepcopy(self.ethylene))
         assert diff["self"] == diff["other"] == set()
         assert diff["dist"] == approx(0.0)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AttributeError,
-        reason="MoleculeGraph.diff(strict=False) reads other.structure instead of other.molecule",
-    )
     def test_diff_non_strict(self):
         diff = self.ethylene.diff(self.butadiene, strict=False)
         assert diff["self"] == set()
