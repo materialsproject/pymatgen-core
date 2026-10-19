@@ -7,7 +7,7 @@ import logging
 import os.path
 import subprocess
 import warnings
-from collections import defaultdict
+from collections import Counter, defaultdict
 from itertools import combinations
 from operator import itemgetter
 from shutil import which
@@ -1510,8 +1510,9 @@ class StructureGraph(MSONable):
             return n1["specie"] == n2["specie"]
 
         def edge_match(e1, e2):
+            # edge data of the multigraph subgraphs is keyed by edge key, so compare the weights of all parallel edges
             if use_weights:
-                return e1["weight"] == e2["weight"]
+                return Counter(d.get("weight") for d in e1.values()) == Counter(d.get("weight") for d in e2.values())
             return True
 
         # prune duplicate subgraphs

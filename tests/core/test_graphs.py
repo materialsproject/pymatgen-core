@@ -692,11 +692,6 @@ from    to  to_image
         with pytest.raises(RuntimeError, match="Supercell spacegroup is not None"):
             sg.get_subgraphs_as_molecules()
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=KeyError,
-        reason="use_weights edge_match indexes MultiDiGraph edge-data dicts (keyed by edge key) with 'weight'",
-    )
     def test_get_subgraphs_as_molecules_use_weights(self):
         struct = Structure.from_file(f"{TEST_FILES_DIR}/cif/H6PbCI3N_mp-977013_symmetrized.cif")
         struct_graph = StructureGraph.from_local_env_strategy(struct, MinimumDistanceNN(), weights=True)
