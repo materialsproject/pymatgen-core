@@ -11,6 +11,7 @@ from pymatgen.core import Composition, DummySpecies, Element, Lattice, Species, 
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.io.cif import CifBlock, CifParser, CifWriter
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.symmetry.structure import SymmetrizedStructure
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, MatSciTest
 
@@ -544,6 +545,20 @@ loop_
         writer = CifWriter(struct, symprec=0.1, angle_tolerance=2)
         dct = next(iter(writer.cif_file.data.values()))
         assert dct["_symmetry_Int_Tables_number"] == 62
+
+    def test_symmetry_matches_refined_structure(self, monkeypatch):
+        # Refining can raise the symmetry found at the same symprec (issue #193). The space group
+        # symbol and number must describe the refined structure that is written, as the symmetry
+        # operations do. Stand in for such a refinement with a fixed higher-symmetry result.
+        struct = Structure(Lattice.orthorhombic(3, 4, 5), ["Na"], [[0, 0, 0]])
+        refined = Structure(Lattice.cubic(3), ["Na"], [[0, 0, 0]])
+        monkeypatch.setattr(SpacegroupAnalyzer, "get_refined_structure", lambda *_args, **_kwargs: refined.copy())
+
+        writer = CifWriter(struct, symprec=0.01)
+        dct = next(iter(writer.cif_file.data.values()))
+        assert dct["_symmetry_Int_Tables_number"] == 221
+        assert dct["_symmetry_space_group_name_H-M"] == "Pm-3m"
+        assert len(dct["_symmetry_equiv_pos_as_xyz"]) == 48
 
     def test_disordered(self):
         si = Element("Si")

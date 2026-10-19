@@ -1606,15 +1606,20 @@ class CifWriter:
         spacegroup: tuple[str, int] = ("P 1", 1)
         if symprec is not None:
             spg_analyzer = SpacegroupAnalyzer(struct, symprec, angle_tolerance=angle_tolerance)
-            spacegroup = (
-                spg_analyzer.get_space_group_symbol(),
-                spg_analyzer.get_space_group_number(),
-            )
 
             if refine_struct:
                 # Need the refined structure when using symprec. This converts
                 # primitive to conventional structures, the standard for CIF.
                 struct = spg_analyzer.get_refined_structure()
+                # Symmetrizing can raise the symmetry found at the same tolerance, so re-analyze
+                # the refined structure. The space group, symmetry operations and asymmetric unit
+                # written below then all describe the structure that is actually written.
+                spg_analyzer = SpacegroupAnalyzer(struct, symprec, angle_tolerance=angle_tolerance)
+
+            spacegroup = (
+                spg_analyzer.get_space_group_symbol(),
+                spg_analyzer.get_space_group_number(),
+            )
 
         lattice = struct.lattice
         comp = struct.composition
@@ -1638,9 +1643,8 @@ class CifWriter:
             blocks["_symmetry_equiv_pos_as_xyz"] = ["x, y, z"]
 
         else:
-            spg_analyzer = SpacegroupAnalyzer(struct, symprec)
             symm_ops: list[SymmOp] = []
-            for op in spg_analyzer.get_symmetry_operations():
+            for op in spg_analyzer.get_symmetry_operations():  # type: ignore[reportPossiblyUnboundVariable]
                 v = op.translation_vector
                 symm_ops.append(SymmOp.from_rotation_and_translation(op.rotation_matrix, v))
 
