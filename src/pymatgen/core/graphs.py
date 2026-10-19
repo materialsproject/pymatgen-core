@@ -152,11 +152,13 @@ class StructureGraph(MSONable):
             graph_data (dict): Dictionary containing graph information. Not intended to be
                 constructed manually see as_dict method for format.
         """
+        self.structure: Structure
         if isinstance(structure, StructureGraph):
             # just make a copy from input
             graph_data = structure.as_dict()["graphs"]
-
-        self.structure = structure
+            self.structure = structure.structure.copy()
+        else:
+            self.structure = structure
         self.graph = nx.readwrite.json_graph.adjacency_graph(graph_data)
 
         # tidy up edge attr dicts, reading to/from JSON duplicates information
@@ -1580,8 +1582,9 @@ class MoleculeGraph(MSONable):
         if isinstance(molecule, MoleculeGraph):
             # just make a copy from input
             graph_data = molecule.as_dict()["graphs"]
-
-        self.molecule = molecule
+            self.molecule = molecule.molecule.copy()
+        else:
+            self.molecule = molecule
         self.graph = nx.readwrite.json_graph.adjacency_graph(graph_data)
 
         # tidy up edge attr dicts, reading to/from JSON duplicates

@@ -555,10 +555,6 @@ from    to  to_image
         with pytest.raises(ValueError, match="Please specify units associated with your edge weights"):
             StructureGraph.from_empty_graph(self.bcc, edge_weight_name="bond_length")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="StructureGraph(StructureGraph) copies graph data but stores the input graph as .structure",
-    )
     def test_init_from_structure_graph(self):
         sg_copy = StructureGraph(self.mos2_sg)
         assert isinstance(sg_copy.structure, Structure)
@@ -1258,11 +1254,6 @@ class TestMoleculeGraph:
         with pytest.raises(ValueError, match="Please specify units associated with your edge weights"):
             MoleculeGraph.from_empty_graph(self.ethylene.molecule, edge_weight_name="strength")
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=TypeError,
-        reason="MoleculeGraph(MoleculeGraph) stores the input graph as .molecule, which is not subscriptable",
-    )
     def test_init_from_molecule_graph(self):
         mg_copy = MoleculeGraph(self.ethylene)
         assert mg_copy == self.ethylene
