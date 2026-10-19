@@ -895,33 +895,18 @@ class TestTrajectoryAse(MatSciTest):
         assert traj[1][1].coords[2] == pytest.approx(3.1 / 2.5)
         assert [frame["energy"] for frame in traj.frame_properties] == [-1.0, -2.0]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="from_ase infers constant_lattice via `np.all(np.abs(diff)) < tol`, which is True "
-        "whenever any lattice element difference is zero",
-    )
     def test_from_ase_infer_variable_lattice(self):
         filename = f"{self.tmp_path}/si.traj"
         _write_ase_traj(filename, pbc=True)
         traj = Trajectory.from_ase(filename)
         assert traj.constant_lattice is False
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AttributeError,
-        reason="from_ase with constant_lattice=None accesses .lattice on Molecules for non-PBC trajectories",
-    )
     def test_from_ase_molecule_infer_lattice(self):
         filename = f"{self.tmp_path}/co.traj"
         _write_ase_traj(filename, pbc=False)
         traj = Trajectory.from_ase(filename, additional_fields=None)
         assert traj.lattice is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=ValueError,
-        reason="from_ase passes an empty frame_properties list when atoms have no calculator",
-    )
     def test_from_ase_without_calculator(self):
         filename = f"{self.tmp_path}/si.traj"
         _write_ase_traj(filename, pbc=True, calc=False)

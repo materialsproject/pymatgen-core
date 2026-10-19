@@ -795,19 +795,21 @@ class Trajectory(MSONable):
 
                 frame_properties.append(props)
 
-        if constant_lattice is None:
-            constant_lattice = all(
-                np.all(np.abs(ref_struct.lattice.matrix - structures[j].lattice.matrix)) < lattice_match_tol
-                for i, ref_struct in enumerate(structures)
-                for j in range(i + 1, len(structures))
-            )
-
+        # Frames without a calculator have no properties to store
+        frame_props = frame_properties or None
         if is_pbc:
-            return cls.from_structures(structures, constant_lattice=constant_lattice, frame_properties=frame_properties)
+            # Molecules have no lattice, so constant_lattice is only inferred for periodic trajectories
+            if constant_lattice is None:
+                constant_lattice = all(
+                    np.all(np.abs(ref_struct.lattice.matrix - structures[j].lattice.matrix) < lattice_match_tol)
+                    for i, ref_struct in enumerate(structures)
+                    for j in range(i + 1, len(structures))
+                )
+            return cls.from_structures(structures, constant_lattice=constant_lattice, frame_properties=frame_props)
         return cls.from_molecules(
             structures,  # type:ignore[arg-type]
             constant_lattice=constant_lattice,
-            frame_properties=frame_properties,
+            frame_properties=frame_props,
         )
 
     def to_ase(
