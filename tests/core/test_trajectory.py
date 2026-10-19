@@ -822,10 +822,6 @@ class TestTrajectoryMethods(MatSciTest):
         with pytest.raises(ValueError, match="Expect file to be one of"):
             Trajectory.from_file(f"{self.tmp_path}/POSCAR")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="from_file matches 'vasprun*.xml*' against the full resolved path, so vasprun files never match",
-    )
     def test_from_file_vasprun(self):
         traj = Trajectory.from_file(f"{VASP_OUT_DIR}/vasprun.etest1.xml.gz")
         assert len(traj) > 0

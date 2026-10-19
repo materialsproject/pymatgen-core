@@ -566,19 +566,21 @@ class Trajectory(MSONable):
             Trajectory: containing the structures or molecules in the file.
         """
         filename = str(Path(filename).expanduser().resolve())
+        # Match patterns against the file name only; "vasprun*.xml*" can never match a full path
+        basename = Path(filename).name
         structures = []
 
-        if fnmatch(filename, "*XDATCAR*"):
+        if fnmatch(basename, "*XDATCAR*"):
             from pymatgen.io.vasp.outputs import Xdatcar
 
             structures = Xdatcar(filename).structures
 
-        elif fnmatch(filename, "vasprun*.xml*"):
+        elif fnmatch(basename, "vasprun*.xml*"):
             from pymatgen.io.vasp.outputs import Vasprun
 
             structures = Vasprun(filename).structures
 
-        elif fnmatch(filename, "*.traj"):
+        elif fnmatch(basename, "*.traj"):
             if NO_ASE_ERR is None:
                 return cls.from_ase(  # type:ignore[return-value]
                     filename,
@@ -588,7 +590,7 @@ class Trajectory(MSONable):
                 )
             raise ImportError("ASE is required to read .traj files. pip install ase")
 
-        elif fnmatch(filename, "*.json*"):
+        elif fnmatch(basename, "*.json*"):
             from monty.serialization import loadfn
 
             return loadfn(filename, **kwargs)
