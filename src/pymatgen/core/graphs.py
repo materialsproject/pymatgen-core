@@ -2516,8 +2516,6 @@ class MoleculeGraph(MSONable):
         if not which(algo):
             raise RuntimeError("StructureGraph graph drawing requires GraphViz binaries to be in the path.")
 
-        from pymatgen.vis.structure_vtk import EL_COLORS
-
         # Developer note: NetworkX also has methods for drawing
         # graphs using matplotlib, these also work here. However,
         # a dedicated tool like GraphViz allows for much easier
@@ -2559,7 +2557,7 @@ class MoleculeGraph(MSONable):
         # add display options for edges
         for u, v, k, d in g.edges(keys=True, data=True):
             # retrieve from/to images, set as origin if not defined
-            to_image = d["to_jimage"] if "to_image" in d else (0, 0, 0)
+            to_image = d.get("to_jimage", (0, 0, 0))
 
             # set edge style
             d["style"] = "solid"

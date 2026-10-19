@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import copy
 import re
-import sys
-import types
 import warnings
 from glob import glob
 from pathlib import Path
@@ -1427,11 +1425,6 @@ class TestMoleculeGraph:
         with pytest.raises(RuntimeError, match="requires GraphViz binaries to be in the path"):
             self.ethylene.draw_graph_to_file("ethylene.pdf")
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=ModuleNotFoundError,
-        reason="MoleculeGraph.draw_graph_to_file imports pymatgen.vis.structure_vtk, absent from pymatgen-core",
-    )
     def test_draw_graph_to_file(self, fake_graphviz, tmp_path):
         self.ethylene.draw_graph_to_file(f"{tmp_path}/ethylene.pdf", node_labels=True)
         (graph,) = fake_graphviz["graphs"]
@@ -1439,11 +1432,6 @@ class TestMoleculeGraph:
         assert graph.number_of_edges() == 5
 
     def test_draw_graph_to_file_styling(self, fake_graphviz, monkeypatch, tmp_path):
-        # Provide the color table that draw_graph_to_file imports from the (umbrella-only) vis package
-        vis_stub = types.ModuleType("pymatgen.vis.structure_vtk")
-        vis_stub.EL_COLORS = EL_COLORS
-        monkeypatch.setitem(sys.modules, "pymatgen.vis.structure_vtk", vis_stub)
-
         filename = f"{tmp_path}/ethylene.svg"
         self.ethylene.draw_graph_to_file(
             filename,
