@@ -709,11 +709,6 @@ class TestTrajectoryMethods(MatSciTest):
         with pytest.raises(IndexError, match=re.escape("index=[5] out of range, trajectory only has 3 frames")):
             struct_traj[[0, 5]]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="__getitem__ filters bad list indices with `idx > len(self)` instead of `>=`, "
-        "so index == len(self) is reported as index=[]",
-    )
     def test_list_index_equal_to_length_message(self, struct_traj):
         with pytest.raises(IndexError, match=re.escape("index=[3] out of range")):
             struct_traj[[0, 3]]

@@ -249,7 +249,7 @@ class Trajectory(MSONable):
                 selected = [idx for idx in frames if idx < len(self)]
 
                 if len(selected) < len(frames):
-                    bad_frames = [idx for idx in frames if idx > len(self)]
+                    bad_frames = [idx for idx in frames if idx >= len(self)]
                     raise IndexError(f"index={bad_frames} out of range, trajectory only has {len(self)} frames")
 
             coords = self.coords[selected]
