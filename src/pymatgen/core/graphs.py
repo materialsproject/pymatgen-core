@@ -2029,9 +2029,7 @@ class MoleculeGraph(MSONable):
 
             # Site properties must be present for all atoms in the molecule
             # in order to be used for Molecule instantiation
-            for k, v in properties.items():
-                if len(v) != len(species):
-                    del properties[k]
+            properties = {key: val for key, val in properties.items() if len(val) == len(species)}
 
             new_mol = Molecule(species, coords, charge=charge, site_properties=properties)
             graph_data = json_graph.adjacency_data(new_graph)

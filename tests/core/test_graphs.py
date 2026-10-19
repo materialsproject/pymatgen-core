@@ -1329,11 +1329,6 @@ class TestMoleculeGraph:
         assert frag_ch.molecule.charge == 1
         assert frag_he.molecule.charge == 0
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=RuntimeError,
-        reason="get_disconnected_fragments deletes from the properties dict while iterating over it",
-    )
     def test_get_disconnected_fragments_partial_site_properties(self):
         mol = Molecule(["C", "H", "He"], [[0, 0, 0], [1.09, 0, 0], [5, 5, 5]])
         mol.insert(3, "H", [-1.09, 0, 0], properties={"magmom": 1.0})
