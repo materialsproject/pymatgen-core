@@ -948,7 +948,7 @@ class StructureGraph(MSONable):
         # optionally hide unconnected nodes,
         # these can appear when removing periodic edges
         if hide_unconnected_nodes:
-            g = g.subgraph([n for n in g.degree() if g.degree()[n] != 0])
+            g = g.subgraph([node for node, degree in g.degree() if degree != 0])
 
         # optionally highlight differences with another graph
         if diff:
@@ -2600,7 +2600,7 @@ class MoleculeGraph(MSONable):
         # optionally hide unconnected nodes,
         # these can appear when removing periodic edges
         if hide_unconnected_nodes:
-            g = g.subgraph([n for n in g.degree() if g.degree()[n] != 0])
+            g = g.subgraph([node for node, degree in g.degree() if degree != 0])
 
         # optionally highlight differences with another graph
         if diff:

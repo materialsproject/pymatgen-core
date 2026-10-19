@@ -774,11 +774,6 @@ from    to  to_image
         with pytest.raises(RuntimeError, match="fdp exited with return code 1"):
             self.mos2_sg.draw_graph_to_file(f"{self.tmp_path}/MoS2.pdf")
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=KeyError,
-        reason="hide_unconnected_nodes iterates (node, degree) tuples from g.degree() and indexes with them",
-    )
     def test_draw_graph_to_file_hide_unconnected_nodes(self, fake_graphviz):
         structure = Structure(Lattice.cubic(5), ["H", "He", "Li"], [[0, 0, 0], [0.5, 0.5, 0.5], [0, 0.5, 0]])
         sg = StructureGraph.from_empty_graph(structure)
