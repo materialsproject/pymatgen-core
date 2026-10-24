@@ -497,10 +497,13 @@ class SpaceGroup(SymmetryGroup):
             list[array]: Orbit for point.
         """
         orbit: list[np.ndarray] = []
-        for o in self.symmetry_ops:
+        symm_ops = self.symmetry_ops
+        found = np.empty((len(symm_ops), 3))
+        for o in symm_ops:
             pp = o.operate(p)
             pp = np.mod(np.round(pp, decimals=10), 1)
-            if not in_array_list(orbit, pp, tol=tol):
+            if not in_fractional_array_list(found[: len(orbit)], pp, tol=tol):
+                found[len(orbit)] = pp
                 orbit.append(pp)
         return orbit
 
@@ -521,10 +524,14 @@ class SpaceGroup(SymmetryGroup):
         orbit: list[np.ndarray] = [np.array(p, dtype=float)]
         identity = SymmOp.from_rotation_and_translation(np.eye(3), np.zeros(3))
         generators: list[SymmOp] = [identity]
-        for o in self.symmetry_ops:
+        symm_ops = self.symmetry_ops
+        found = np.empty((len(symm_ops) + 1, 3))
+        found[0] = orbit[0]
+        for o in symm_ops:
             pp = o.operate(p)
             pp = np.mod(np.round(pp, decimals=10), 1)
-            if not in_array_list(orbit, pp, tol=tol):
+            if not in_fractional_array_list(found[: len(orbit)], pp, tol=tol):
+                found[len(orbit)] = pp
                 orbit.append(pp)
                 generators.append(o)
         return orbit, generators
@@ -739,3 +746,27 @@ def in_array_list(array_list: list[np.ndarray] | np.ndarray, arr: np.ndarray, to
     if not tol:
         return any(np.all(array_list == arr[None, :], axes))
     return any(np.sum(np.abs(array_list - arr[None, :]), axes) < tol)
+
+
+def in_fractional_array_list(array_list: np.ndarray, arr: np.ndarray, tol: float = 1e-5) -> bool:
+    """Like `in_array_list`, for fractional coordinates.
+
+    Two coordinates that differ by almost a full lattice vector, such as
+    0.999999 and 0.0, are the same point of the unit cell. The distance used
+    is therefore the L1 norm of the per-axis minimum image difference.
+
+    Args:
+        array_list (array): An (n, 3) array of fractional coordinates.
+        arr (array): The fractional coordinates to look for.
+        tol (float): The tolerance. Defaults to 1e-5. If 0, an exact match is done.
+
+    Returns:
+        bool: True if arr is in array_list.
+    """
+    if len(array_list) == 0:
+        return False
+    diff = np.abs(array_list - arr[None, :])
+    if not tol:
+        return bool(np.any(np.all(diff == 0, axis=1)))
+    diff %= 1
+    return bool(np.any(np.sum(np.minimum(diff, 1 - diff), axis=1) < tol))

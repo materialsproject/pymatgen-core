@@ -171,6 +171,13 @@ x+1/2, y, z, -1
                 pp_msg = pp_msg[np.lexsort(np.transpose(pp_msg)[::-1])]
                 assert_allclose(pp_sg, pp_msg)
 
+    def test_get_orbit_identifies_lattice_images(self):
+        msg = MagneticSpaceGroup("Fm-3m")
+        orbit, magmoms = msg.get_orbit([0.0, 0.5, 0.999999], 0)
+        images = [q for q in orbit if abs(q[0]) < 1e-8 and abs(q[1] - 0.5) < 1e-8]
+        assert len(images) == 1
+        assert len(orbit) == len(magmoms)
+
     def test_str(self):
         msg = MagneticSpaceGroup([4, 11])
 
