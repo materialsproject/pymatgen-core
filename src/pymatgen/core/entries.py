@@ -671,9 +671,9 @@ class ComputedEntry(Entry):
         return ComputedEntry(
             composition=self.composition,
             energy=self.uncorrected_energy,
-            energy_adjustments=self.energy_adjustments,
-            parameters=self.parameters,
-            data=self.data,
+            energy_adjustments=self.energy_adjustments.copy(),
+            parameters=self.parameters.copy(),
+            data=self.data.copy(),
             entry_id=self.entry_id,
         )
 
@@ -816,9 +816,9 @@ class ComputedStructureEntry(ComputedEntry):
             structure=self.structure.copy(),
             energy=self.uncorrected_energy,
             composition=self.composition,
-            energy_adjustments=self.energy_adjustments,
-            parameters=self.parameters,
-            data=self.data,
+            energy_adjustments=self.energy_adjustments.copy(),
+            parameters=self.parameters.copy(),
+            data=self.data.copy(),
             entry_id=self.entry_id,
         )
 

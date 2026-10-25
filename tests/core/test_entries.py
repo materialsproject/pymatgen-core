@@ -262,6 +262,22 @@ class TestComputedEntry:
             assert entry == copy
             assert str(entry) == str(copy)
 
+        # editing the copy leaves the original unchanged:
+        entry = ComputedEntry(
+            "Fe2O3",
+            2.3,
+            energy_adjustments=[ConstantEnergyAdjustment(-1)],
+            parameters={"run_type": "GGA"},
+            data={"oxide_type": "oxide"},
+        )
+        copy = entry.copy()
+        copy.energy_adjustments.append(ConstantEnergyAdjustment(-2))
+        copy.parameters["run_type"] = "r2SCAN"
+        copy.data["oxide_type"] = "peroxide"
+        assert entry.energy == approx(1.3)
+        assert entry.parameters == {"run_type": "GGA"}
+        assert entry.data == {"oxide_type": "oxide"}
+
     def test_from_dict_null_fields(self):
         ce_dict = self.entry.as_dict()
         for k in (
@@ -450,6 +466,22 @@ class TestComputedStructureEntry:
         assert copy is not self.entry
         assert copy.structure is not self.entry.structure
         assert str(copy) == str(self.entry)
+
+        # editing the copy leaves the original unchanged:
+        entry = ComputedStructureEntry(
+            self.entry.structure,
+            -10,
+            energy_adjustments=[ConstantEnergyAdjustment(-1)],
+            parameters={"run_type": "GGA"},
+            data={"oxide_type": "oxide"},
+        )
+        copy = entry.copy()
+        copy.energy_adjustments.append(ConstantEnergyAdjustment(-2))
+        copy.parameters["run_type"] = "r2SCAN"
+        copy.data["oxide_type"] = "peroxide"
+        assert entry.energy == approx(-11)
+        assert entry.parameters == {"run_type": "GGA"}
+        assert entry.data == {"oxide_type": "oxide"}
 
     def test_eq(self):
         copy1 = self.entry.copy()
