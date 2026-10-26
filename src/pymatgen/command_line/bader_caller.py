@@ -45,6 +45,17 @@ __status__ = "Beta"
 __date__ = "4/5/13"
 
 
+def _sort_matching_paths(paths: list[str], name: str) -> list[str]:
+    """Sort the glob matches for a VASP file, best match first.
+
+    The file itself or a compressed copy of it comes first, so CHGCAR is used
+    over a CHGCAR.json.gz in the same folder. Other matches keep the reverse
+    order, which gives 'static' over 'relax2' over 'relax'.
+    """
+    exact_names = {name} | {f"{name}{ext}" for ext in (".gz", ".bz2", ".xz", ".lzma", ".z", ".Z")}
+    return sorted(paths, key=lambda path: (Path(path).name in exact_names, path), reverse=True)
+
+
 class BaderAnalysis:
     """Perform Bader charge analysis for Cube files or VASP outputs.
 
@@ -379,7 +390,7 @@ class BaderAnalysis:
                 # have suffixes 'static', 'relax', 'relax2', etc. and this would give
                 # 'static' over 'relax2' over 'relax' however, better to use 'suffix'
                 # kwarg to avoid this!
-                paths.sort(reverse=True)
+                paths = _sort_matching_paths(paths, name_pattern.rstrip("*"))
                 if len(paths) > 1:
                     warnings.warn(f"Multiple files detected, using {paths[0]}", stacklevel=2)
                 filepath = paths[0]
@@ -443,8 +454,8 @@ def bader_analysis_from_path(path: str, suffix: str = "") -> dict[str, Any]:
             # they likely have suffixes 'static', 'relax', 'relax2', etc.
             # and this would give 'static' over 'relax2' over 'relax'
             # however, better to use 'suffix' kwarg to avoid this!
-            paths.sort(reverse=True)
-            warnings.warn(f"Multiple files detected, using {Path(path).name}", stacklevel=2)
+            paths = _sort_matching_paths(paths, f"{filename}{suffix}")
+            warnings.warn(f"Multiple files detected, using {Path(paths[0]).name}", stacklevel=2)
         return paths[0]
 
     chgcar_path = _get_filepath("CHGCAR", "Could not find CHGCAR!")

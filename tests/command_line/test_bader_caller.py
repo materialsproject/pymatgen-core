@@ -8,7 +8,8 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.command_line.bader_caller import BaderAnalysis, bader_analysis_from_path
+from pymatgen.command_line import bader_caller
+from pymatgen.command_line.bader_caller import BaderAnalysis, _sort_matching_paths, bader_analysis_from_path
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/command_line/bader"
@@ -21,6 +22,30 @@ def test_parse_atomic_densities_deprecation(parse_atomic_densities):
         pytest.raises(ValueError, match="You must provide either a Cube file or a CHGCAR"),
     ):
         BaderAnalysis(bader_path="bader", parse_atomic_densities=parse_atomic_densities)
+
+
+def test_sort_matching_paths():
+    paths = ["d/CHGCAR.json.gz", "d/CHGCAR", "d/CHGCAR.gz", "d/CHGCAR.relax2.gz", "d/CHGCAR.static.gz"]
+    assert _sort_matching_paths(paths, "CHGCAR") == [
+        "d/CHGCAR.gz",
+        "d/CHGCAR",
+        "d/CHGCAR.static.gz",
+        "d/CHGCAR.relax2.gz",
+        "d/CHGCAR.json.gz",
+    ]
+    # Without an exact match, keep the old reverse order
+    assert _sort_matching_paths(paths[3:], "CHGCAR")[0] == "d/CHGCAR.static.gz"
+
+
+def test_bader_analysis_from_path_skips_other_matches(tmp_path, monkeypatch):
+    # A CHGCAR.json.gz next to the CHGCAR (as in the MP download of #4089) must not be read as a CHGCAR
+    shutil.copy(f"{TEST_DIR}/CHGCAR.gz", tmp_path / "CHGCAR.gz")
+    (tmp_path / "CHGCAR.json.gz").write_bytes(b"not a CHGCAR")
+    monkeypatch.setattr(bader_caller, "bader_analysis_from_objects", lambda chgcar, *args: chgcar)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        chgcar = bader_analysis_from_path(str(tmp_path))
+    assert len(chgcar.structure) == 14
 
 
 @pytest.mark.skipif(not shutil.which("bader"), reason="bader executable not present")
