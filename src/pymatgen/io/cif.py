@@ -1570,7 +1570,7 @@ def str2float(text: str | list[str]) -> float:
 
 def _clean_species(sp: Element | Species | DummySpecies) -> str:
     """Returns a cleaned species string for CIF writing, stripping spin and formatting oxidation state.
-    
+
     Keeps all explicit oxidation states except 0 for `DummySpecies`.
     """
     oxi = getattr(sp, "oxi_state", None)
@@ -1674,8 +1674,7 @@ class CifWriter:
 
         try:
             symbol_to_oxi_num = {
-                _clean_species(el): getattr(el, "oxi_state", 0.0) or 0.0
-                for el in sorted(comp.elements)
+                _clean_species(el): getattr(el, "oxi_state", 0.0) or 0.0 for el in sorted(comp.elements)
             }
             blocks["_atom_type_symbol"] = list(symbol_to_oxi_num.keys())
             blocks["_atom_type_oxidation_number"] = list(symbol_to_oxi_num.values())
