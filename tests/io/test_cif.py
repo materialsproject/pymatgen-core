@@ -1057,6 +1057,7 @@ Si1 Si 0 0 0 1 0.0
         cif_str = str(writer)
         block = CifBlock.from_str(cif_str)
         assert block.data["_atom_site_type_symbol"] == ["X"]
+
     def test_cif_thirds(self):
         """Test cif sanitization idealizing sites at 1/3 and 2/3 with PBC."""
         # Initialize 21 hydrogen sites at [0, 1/3, 2/3] + PBC
