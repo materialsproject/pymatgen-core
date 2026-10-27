@@ -823,3 +823,179 @@ class TestBoltztrapRunner:
         assert dct["doping"] == [1e19]
         assert dct["symprec"] == approx(1e-3)
         assert BandStructure.from_dict(dct["bs"]).nb_bands == cu2o_bs.nb_bands
+
+
+class TestBoltztrapRunnerRun:
+    """Cover BoltztrapRunner.run() by mocking out the x_trans/BoltzTraP binary."""
+
+    def _patch(self, monkeypatch, *, write_outputtrans=True, out_text="Calc type: BOLTZ\nNormal\n"):
+        class _FakeProc:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def wait(self):
+                return 0
+
+            def communicate(self):
+                return [bytes(out_text, "utf-8")]
+
+        calls = []
+
+        def fake_popen(args, *a, **k):
+            calls.append(args)
+            if write_outputtrans:
+                # run() chdirs into the boltztrap subdir, so the fake binary writes
+                # its outputtrans in the current directory (as the real one would).
+                with open("boltztrap.outputtrans", mode="w", encoding="utf-8") as fh:
+                    fh.write(out_text)
+            return _FakeProc()
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        return calls
+
+    def test_run_converges_no_convergence(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        calls = self._patch(monkeypatch)
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        result = runner.run(path_dir=str(tmp_path), convergence=False)
+        assert Path(result).name == "boltztrap"
+        assert len(calls) == 1
+        assert "x_trans" in calls[0]
+
+    def test_run_bands_spin_polarized_warns(self, make_runner, spin_bs, tmp_path, monkeypatch, caplog):
+        # BANDS on a spin-polarized structure logs a reminder that spins are not separated.
+        calls = self._patch(monkeypatch, out_text="Calc type: BANDS\nNormal\n")
+        runner = make_runner(spin_bs, 10, run_type="BANDS", spin=-1)
+        with caplog.at_level("WARNING"):
+            runner.run(path_dir=str(tmp_path), convergence=False)
+        assert "separated" in caplog.text
+        assert len(calls) == 1
+
+    def test_run_spin_polarized_appends_so_flag(self, make_runner, spin_bs, tmp_path, monkeypatch):
+        calls = self._patch(monkeypatch, out_text="Calc type: BOLTZ\nNormal\n")
+        runner = make_runner(spin_bs, 10, run_type="BOLTZ", spin=-1)
+        runner.run(path_dir=str(tmp_path), convergence=False)
+        # the binary is invoked with the -so flag for spin-polarized structures
+        assert "-so" in calls[0]
+
+    def test_run_temp_dir(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        # path_dir=None -> a fresh temp directory is created and returned
+        self._patch(monkeypatch)
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        result = runner.run(path_dir=None, convergence=False)
+        assert Path(result).name == "boltztrap"
+        assert (Path(result) / "boltztrap.intrans").is_file()
+
+    def test_run_clear_dir(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        out_dir = tmp_path / "boltztrap"
+        out_dir.mkdir()
+        stale = out_dir / "stale.txt"
+        stale.write_text("x", encoding="utf-8")
+        self._patch(monkeypatch)
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        runner.run(path_dir=str(tmp_path), convergence=False, clear_dir=True)
+        assert not stale.exists()
+
+    def test_run_option_unknown_raises(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        self._patch(monkeypatch, out_text="WARNING Option unknown here\n")
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        with pytest.raises(BoltztrapError, match="DOS mode needs a custom version"):
+            runner.run(path_dir=str(tmp_path), convergence=False)
+
+    def test_run_factorization_error_raises(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        # a fake BoltzTraP whose stdout reports a factorization error must abort the run
+        self._patch(monkeypatch, write_outputtrans=False, out_text="error in factorization\n")
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        with pytest.raises(BoltztrapError, match="error in factorization"):
+            runner.run(path_dir=str(tmp_path), convergence=False)
+
+    def test_run_warning_line_captured(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        # a WARNING (without "Option unknown") is captured as a convergence warning and
+        # the run eventually gives up (lpfac exceeds max_lpfac, egrid shrinks, not converged).
+        self._patch(monkeypatch, out_text="WARNING: something did not converge\n")
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        runner.lpfac = 1
+        with pytest.raises(BoltztrapError, match="Doping convergence not reached"):
+            runner.run(path_dir=str(tmp_path), convergence=False, max_lpfac=5, min_egrid=0.0001)
+
+    def test_run_fermi_not_found(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        self._patch(monkeypatch, out_text="Error - Fermi level was not found\n")
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        runner.lpfac = 1
+        with pytest.raises(BoltztrapError, match="Doping convergence not reached"):
+            runner.run(path_dir=str(tmp_path), convergence=False, max_lpfac=5, min_egrid=0.0001)
+
+    def test_run_dos_spin_none_sets_one(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        # a non-spin-polarized DOS/FERMI run with spin=None defaults spin to 1
+        self._patch(monkeypatch, out_text="Calc type: DOS\nNormal\n")
+        runner = make_runner(cu2o_bs, 10, run_type="DOS", spin=None)
+        result = runner.run(path_dir=str(tmp_path), convergence=False)
+        assert runner.spin == 1
+        assert Path(result).name == "boltztrap"
+
+    def test_run_timeout_outer(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        self._patch(monkeypatch)
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        runner.timeout = 0
+        runner.start_time = 0
+        import pymatgen.electronic_structure.boltztrap as bt
+
+        monkeypatch.setattr(bt.time, "perf_counter", lambda: 1e9)
+        with pytest.raises(BoltztrapError, match="no doping convergence after timeout"):
+            runner.run(path_dir=str(tmp_path), convergence=False)
+
+    def test_run_timeout_inner(self, make_runner, cu2o_bs, tmp_path, monkeypatch):
+        self._patch(monkeypatch)
+        runner = make_runner(cu2o_bs, 10, run_type="BOLTZ")
+        runner.timeout = 1
+        runner.start_time = 0
+        import pymatgen.electronic_structure.boltztrap as bt
+
+        calls = {"n": 0}
+
+        def clock():
+            calls["n"] += 1
+            return 0.0 if calls["n"] == 1 else 1e9
+
+        monkeypatch.setattr(bt.time, "perf_counter", clock)
+        with pytest.raises(BoltztrapError, match="no doping convergence after timeout"):
+            runner.run(path_dir=str(tmp_path), convergence=False, max_lpfac=10000)
+
+
+class TestBoltztrapEffMassCoverage:
+    """Cover the doping_levels=False effective-mass / complexity branches via the fdint fallback."""
+
+    @classmethod
+    def setup_class(cls):
+        cls.bz = BoltztrapAnalyzer.from_files(f"{TEST_DIR}/transp/")
+
+    def test_get_seebeck_eff_mass_no_fdint(self, fdk_module):
+        tensor = self.bz.get_seebeck_eff_mass(output="tensor", doping_levels=False, temp=300)
+        assert len(tensor) > 0
+        assert len(tensor[3]) == 3
+        average = self.bz.get_seebeck_eff_mass(output="average", doping_levels=False, temp=300)
+        assert len(average) == len(tensor)
+        # doping_levels=True path
+        assert set(self.bz.get_seebeck_eff_mass(output="average", doping_levels=True, temp=300)) == {"n", "p"}
+
+    def test_get_complexity_factor_no_fdint(self, fdk_module):
+        tensor = self.bz.get_complexity_factor(output="tensor", doping_levels=False, temp=300)
+        assert len(tensor) > 0
+        assert len(tensor[3]) == 3
+        average = self.bz.get_complexity_factor(output="average", doping_levels=False, temp=300)
+        assert len(average) == len(tensor)
+        assert set(self.bz.get_complexity_factor(output="average", doping_levels=True, temp=300)) == {"n", "p"}
+
+
+class TestParseOutputtransWarning:
+    """Cover the WARNING branch of parse_outputtrans with a crafted output."""
+
+    def test_warning(self, tmp_path):
+        output = tmp_path / "boltztrap.outputtrans"
+        output.write_text("Calc type: BOLTZ\nWARNING: something happened\n", encoding="utf-8")
+        run_type, warning, *_ = BoltztrapAnalyzer.parse_outputtrans(str(tmp_path))
+        assert run_type == "BOLTZ"
+        assert warning is not None
+        assert "WARNING" in warning
