@@ -2179,12 +2179,18 @@ class SQSTransformation(AbstractTransformation):
         to_return = [{"structure": struct, "objective_function": struct.objective_function} for struct in structs]
 
         for dct in to_return:
-            # delete temporary objective_function attribute
-            del dct["structure"].objective_function
+            # delete the temporary objective_function attribute added above to
+            # carry the value through grouping/sorting. Guard with hasattr: when
+            # remove_duplicate_structures is False a structure object can appear
+            # in several entries of to_return, and the unguarded `del` would
+            # crash on the redundant second delete (AttributeError).
+            struct = dct["structure"]
+            if hasattr(struct, "objective_function"):
+                del struct.objective_function
 
             # reduce structure
             if reduction_algo:
-                dct["structure"] = dct["structure"].get_reduced_structure(reduction_algo=reduction_algo)
+                dct["structure"] = struct.get_reduced_structure(reduction_algo=reduction_algo)
 
         # because bools are subclasses of ints, cannot just check that returned_ranked_list is int
         if isinstance(return_ranked_list, int) and not isinstance(return_ranked_list, bool):

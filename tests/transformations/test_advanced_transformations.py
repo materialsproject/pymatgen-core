@@ -9,6 +9,7 @@ from monty.serialization import loadfn
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
+import pymatgen.transformations.advanced_transformations as advanced
 from pymatgen.core import Lattice, Molecule, Species, Structure
 from pymatgen.core.energy_models import IsingModel, SymmetryModel
 from pymatgen.core.interface import GrainBoundaryGenerator
@@ -888,3 +889,270 @@ class TestMonteCarloRattleTransformation(MatSciTest):
         mcrt = MonteCarloRattleTransformation(0.01, 2, seed=1)
         s_trans2 = mcrt.apply_transformation(struct)
         assert_allclose(s_trans.cart_coords, s_trans2.cart_coords)
+
+
+# -----------------------------------------------------------------------------
+# Coverage improvements for externally-gated / edge-case branches in
+# advanced_transformations.py. These exercise pure-Python paths (error
+# handling, helper methods, and SQS post-processing) that do not require
+# the external enumlib/mcsqs/hiphive binaries; see AGENTS.md.
+# -----------------------------------------------------------------------------
+DISORDERED = Structure(
+    Lattice.cubic(4.0),
+    [{"Fe": 0.5, "Ni": 0.5}],
+    [[0.0, 0.0, 0.0]],
+)
+
+
+class _FakeSqs:
+    """Minimal stand-in for mcsqs's Sqs object so the SQS post-processing
+    helper can be exercised without the external ATAT binary."""
+
+    def __init__(self, share: bool = False, objective: float = 4.0):
+        self.bestsqs = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+        s1 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+        s3 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.25, 0.5, 0.5]])
+        if share:
+            # the SAME structure object appears twice in allsqs -> exercise the
+            # cleanup-on-shared-objects path that _get_unique_best_sqs_structs must
+            # tolerate
+            self.allsqs = [
+                {"structure": s1, "objective_function": 5.0},
+                {"structure": s1, "objective_function": 5.0},
+                {"structure": s3, "objective_function": objective},
+            ]
+        else:
+            s1 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+            s3 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.25, 0.5, 0.5]])
+            self.allsqs = [
+                {"structure": s1, "objective_function": 5.0},
+                {"structure": s3, "objective_function": objective},
+            ]
+        self.objective_function = objective
+
+
+class _FakeSqsNonFloat:
+    """A parallel Sqs object where one candidate carries a non-float objective
+    function (e.g. an error string); used to exercise the sort fallback in
+    ``_get_unique_best_sqs_structs``."""
+
+    @staticmethod
+    def _make():
+        obj = _FakeSqsNonFloat()
+        s1 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+        s2 = Structure(Lattice.cubic(4.0), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.25, 0.5, 0.5]])
+        obj.bestsqs = Structure(Lattice.cubic(4.0), ["Fe"], [[0.0, 0.0, 0.0]])
+        obj.objective_function = 3.0
+        obj.allsqs = [
+            {"structure": s1, "objective_function": "err"},
+            {"structure": s2, "objective_function": 3.0},
+        ]
+        return obj
+
+
+class TestMagOrderParameterConstraintExtra:
+    def test_site_constraint_name_required_when_site_constraints_given(self):
+        with pytest.raises(ValueError, match="Specify the name of the site constraint"):
+            MagOrderParameterConstraint(0.5, site_constraints=[6, 8])
+
+    def test_site_constraints_required_when_name_given(self):
+        with pytest.raises(ValueError, match="Please specify some site constraints"):
+            MagOrderParameterConstraint(0.5, site_constraint_name="cn")
+
+    @pytest.mark.parametrize("op", [1.5, 2.0, -0.1])
+    def test_order_parameter_out_of_bounds(self, op):
+        with pytest.raises(ValueError, match="Order parameter must lie between 0 and 1"):
+            MagOrderParameterConstraint(op)
+
+    def test_non_standard_order_parameter_warns(self):
+        with pytest.warns(UserWarning, match="non-standard order parameter"):
+            MagOrderParameterConstraint(0.3, species_constraints="Fe")
+
+    def test_serialization_roundtrip(self):
+        c = MagOrderParameterConstraint(
+            0.5,
+            species_constraints=["Fe", "Ni"],
+            site_constraint_name="cn",
+            site_constraints=[4, 6],
+        )
+        c2 = MagOrderParameterConstraint.from_dict(c.as_dict())
+        assert c2.order_parameter == approx(0.5)
+        assert c2.species_constraints == ["Fe", "Ni"]
+        assert c2.site_constraint_name == "cn"
+        assert c2.site_constraints == [4, 6]
+
+    def test_satisfies_constraint(self):
+        struct = Structure(Lattice.cubic(4.0), ["Fe", "O"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+        struct.add_site_property("cn", [6, 8])
+        constraint = MagOrderParameterConstraint(
+            0.5,
+            species_constraints="Fe",
+            site_constraint_name="cn",
+            site_constraints=[6],
+        )
+        assert constraint.satisfies_constraint(struct.sites[0]) is True
+        assert constraint.satisfies_constraint(struct.sites[1]) is False
+        assert constraint.satisfies_constraint(DISORDERED.sites[0]) is False
+        assert MagOrderParameterConstraint(0.5, species_constraints="Ni").satisfies_constraint(struct.sites[0]) is False
+
+
+class TestChargeBalanceTransformationExtra:
+    def test_repr(self):
+        assert "O2-" in repr(ChargeBalanceTransformation("O2-"))
+
+    def test_addition_not_supported(self):
+        # a positively charged structure with a negatively charged balance
+        # specie would require *adding* it, which is not supported yet.
+        struct = Structure(
+            Lattice.cubic(4.0),
+            ["Al3+", "Al3+", "O2-"],
+            [[0.0, 0.0, 0.0], [0.25, 0.25, 0.25], [0.5, 0.5, 0.5]],
+        )
+        assert struct.charge > 0
+        with pytest.raises(ValueError, match="addition of specie not yet supported"):
+            ChargeBalanceTransformation("O2-").apply_transformation(struct.copy())
+
+
+class TestDisorderOrderedTransformationExtra:
+    def test_disordered_input_raises(self):
+        with pytest.raises(ValueError, match="disordered structures only"):
+            DisorderOrderedTransformation().apply_transformation(DISORDERED)
+
+    def test_no_partition_returns_none(self):
+        struct = Structure(Lattice.cubic(4.0), ["Fe", "Fe", "Fe"], [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.0, 0.5, 0.0]])
+        assert DisorderOrderedTransformation().apply_transformation(struct) is None
+        # returns None regardless of return_ranked_list
+        assert DisorderOrderedTransformation().apply_transformation(struct, return_ranked_list=5) is None
+
+    def test_return_ranked_list_truncates(self):
+        struct = Structure(
+            Lattice.cubic(4.0),
+            ["Fe", "Ni", "O"],
+            [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25]],
+        )
+        res = DisorderOrderedTransformation().apply_transformation(struct, return_ranked_list=2)
+        assert len(res) == 2
+        single = DisorderOrderedTransformation().apply_transformation(struct)
+        assert isinstance(single, Structure)
+
+
+class TestFindCodopantExtra:
+    def test_happy_path(self):
+        codop = find_codopant(Species("Ti", 4), 4, allowed_elements=["Ti", "Zr"])
+        assert codop.oxi_state == 4
+
+    def test_target_without_ionic_radius_raises(self):
+        # N7+ has no tabulated ionic radius
+        with pytest.raises(ValueError, match="has no ionic radius"):
+            find_codopant(Species("N", 7), 2)
+
+    def test_no_candidates_raises(self):
+        # H has no known ionic radius at oxidation state +4
+        with pytest.raises(ValueError, match="No species found with oxidation state"):
+            find_codopant(Species("Fe", 2), 4, allowed_elements=["H"])
+
+
+class TestCubicSupercellTransformationExtra:
+    def test_orthorhombic_requires_max_length(self):
+        st = CubicSupercellTransformation(allow_orthorhombic=True)
+        with pytest.raises(AttributeError, match="max_length is required"):
+            st.apply_transformation(Structure(Lattice.cubic(4.0), ["Fe"], [[0.0, 0.0, 0.0]]))
+
+    def test_force_diagonal(self):
+        st = CubicSupercellTransformation(force_diagonal=True, min_length=10.0)
+        out = st.apply_transformation(Structure(Lattice.cubic(4.0), ["Fe"], [[0.0, 0.0, 0.0]]))
+        # ceil(10 / 4.0) = 3, so the diagonal of the transformation matrix is 3x3x3
+        assert np.all(np.diag(st.transformation_matrix) == np.ceil(10.0 / 4.0))
+        assert int(st.transformation_matrix[0, 0] ** 3) == len(out)
+
+    def test_check_constraints(self):
+        st = CubicSupercellTransformation(min_length=10.0, max_atoms=10)
+        vecs = np.array([[10.0, 0, 0], [0, 10.0, 0], [0, 0, 10.0]])
+        supercell = Structure(Lattice(vecs), ["Fe", "Ni"], [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]])
+        assert st.check_constraints(vecs, 1, supercell) is True
+        # number of atoms beyond max_atoms fails the constraint
+        assert st.check_constraints(vecs, 1000, supercell) is False
+
+    def test_round_and_make_arr_singular_handles_zero_row_and_column(self):
+        arr_zrow = np.array([[0.3, 0.3, 0.3], [1.0, 0.6, 0.6], [0.7, 0.7, 0.7]])
+        out_row = advanced._round_and_make_arr_singular(arr_zrow)
+        assert out_row.any(axis=1).all()
+        arr_zcol = np.array([[1.0, 0.3, 0.3], [1.0, 0.3, 0.3], [1.0, 0.3, 0.3]])
+        out_col = advanced._round_and_make_arr_singular(arr_zcol)
+        assert out_col.any(axis=0).all()
+
+
+class TestSQSTransformationHelpers:
+    def test_cluster_estimate(self):
+        clusters = SQSTransformation._sqs_cluster_estimate(DISORDERED, {2: 1, 3: 1})
+        assert set(clusters) == {2, 3}
+        assert all(isinstance(v, float) and v > 0 for v in clusters.values())
+
+    def test_disordered_substructure(self):
+        sub = SQSTransformation._get_disordered_substructure(DISORDERED)
+        assert len(sub) == 1
+        assert not sub.sites[0].is_ordered
+
+    def test_max_neighbor_distance(self):
+        assert SQSTransformation._get_max_neighbor_distance(DISORDERED, 1) > 0
+
+    def test_apply_validation(self):
+        sqs1 = SQSTransformation(scaling=2, sqs_method="mcsqs")
+        with pytest.raises(ValueError, match="has no instances"):
+            sqs1.apply_transformation(DISORDERED, return_ranked_list=5)
+        sqs2 = SQSTransformation(scaling=2, sqs_method="mcsqs", instances=3)
+        with pytest.raises(ValueError, match="cannot be greater than"):
+            sqs2.apply_transformation(DISORDERED, return_ranked_list=10)
+
+    def test_unique_best_sqs_structs(self):
+        res = SQSTransformation._get_unique_best_sqs_structs(
+            _FakeSqs(),
+            best_only=True,
+            return_ranked_list=100,
+            remove_duplicate_structures=True,
+            reduction_algo=False,
+        )
+        assert len(res) == 1
+        assert approx(res[0]["objective_function"]) == 4.0
+
+    def test_unique_best_sqs_structs_non_best_and_non_float(self):
+        res = SQSTransformation._get_unique_best_sqs_structs(
+            _FakeSqsNonFloat._make(),
+            best_only=False,
+            return_ranked_list=10,
+            remove_duplicate_structures=False,
+            reduction_algo=False,
+        )
+        assert len(res) == 2
+
+    def test_unique_best_sqs_structs_with_reduction(self):
+        res = SQSTransformation._get_unique_best_sqs_structs(
+            _FakeSqs(),
+            best_only=True,
+            return_ranked_list=100,
+            remove_duplicate_structures=True,
+            reduction_algo="LLL",
+        )
+        assert res
+        assert isinstance(res[0]["structure"], Structure)
+
+    def test_unique_best_sqs_structs_shared_structure_repeats(self):
+        """Regression test for a crash when the same Structure object is reused
+        across several entries of ``allsqs`` with ``remove_duplicate_structures=False``.
+
+        Previously the cleanup loop ran an unguarded ``del`` on the temporary
+        ``objective_function`` attribute, which raised ``AttributeError`` on the
+        second occurrence of the shared structure object.
+        """
+        res = SQSTransformation._get_unique_best_sqs_structs(
+            _FakeSqs(share=True),
+            best_only=False,
+            return_ranked_list=100,
+            remove_duplicate_structures=False,
+            reduction_algo=False,
+        )
+        # 3 candidates, two of them the very same Structure object
+        assert len(res) == 3
+        # the temporary attribute must have been cleaned up
+        for dct in res:
+            assert not hasattr(dct["structure"], "objective_function")
