@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.testing import assert_allclose
 from plotly.graph_objects import Figure
-from pytest import approx
+from pytest import approx, raises, warns
 
 from pymatgen.analysis.chempot_diagram import (
     ChemicalPotentialDiagram,
@@ -11,7 +11,8 @@ from pymatgen.analysis.chempot_diagram import (
     get_centroid_2d,
     simple_pca,
 )
-from pymatgen.core.composition import Element
+from pymatgen.analysis.phase_diagram import PDEntry
+from pymatgen.core.composition import Composition, Element
 from pymatgen.core.entries import EntrySet
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -320,3 +321,78 @@ class TestChemicalPotentialDiagram(MatSciTest):
 
         assert max(filter(bool, fig_2d.data[0].y)) == approx(-4.2582781)
         assert max(filter(bool, fig_2d_formal.data[0].y)) == approx(0)
+
+    def test_error_too_few_elements(self):
+        """A single-element diagram is rejected."""
+        with raises(ValueError, match="2 or more elements"):
+            ChemicalPotentialDiagram(entries=[PDEntry(Composition("Fe"), -1.0)])
+
+    def test_properties(self):
+        """The exposed properties return the documented structures."""
+        c = self.cpd_binary
+        assert isinstance(c.entry_dict, dict)
+        assert set(c.entry_dict) == set(c._entry_dict)
+        assert c.hyperplanes.shape[0] > 0
+        assert len(c.hyperplane_entries) == c.hyperplanes.shape[0]
+        assert c.hyperplane_entries[0].energy_per_atom is not None
+        assert c.chemical_system == "Fe-O"
+        assert repr(c) == "ChemicalPotentialDiagram for Fe-O with 217 entries"
+
+    def test_lims_with_limits(self):
+        """Explicit per-element limits override the default lower bound."""
+        el = {Element("Fe"), Element("O")}
+        binary = [entry for entry in self.entries if set(entry.elements) <= el]
+        limited = ChemicalPotentialDiagram(
+            entries=binary,
+            limits={Element("Fe"): (-10.0, 0.0), Element("O"): (-10.0, 0.0)},
+            default_min_limit=-25.0,
+            formal_chempots=False,
+        )
+        assert limited.lims == approx(np.array([[-10.0, 0.0], [-10.0, 0.0]]))
+
+    def test_quaternary_get_plot(self):
+        """A 4+ element diagram defaults to the first three axes when plotted."""
+        entries = [
+            PDEntry(Composition("Li"), -1.0),
+            PDEntry(Composition("Fe"), -6.6),
+            PDEntry(Composition("O"), -4.4),
+            PDEntry(Composition("Mn"), -1.0),
+            PDEntry(Composition("LiFeMnO"), -20.0),
+        ]
+        cq = ChemicalPotentialDiagram(entries=entries, default_min_limit=-25.0, formal_chempots=False)
+        assert cq.dim == 4
+        fig = cq.get_plot()
+        assert isinstance(fig, Figure)
+
+    def test_get_plot_element_padding_zero(self):
+        """element_padding=0 skips the padding rescale in the 2D and 3D plots."""
+        fig_2d = self.cpd_binary.get_plot(element_padding=0)
+        assert isinstance(fig_2d, Figure)
+
+        fig_3d = self.cpd_ternary.get_plot(element_padding=0)
+        assert isinstance(fig_3d, Figure)
+        assert fig_3d.data[0].type == "scatter3d"
+
+    def test_get_plot_formulas_to_draw(self):
+        """formulas_to_draw with formula_colors=None falls back to the default colorset."""
+        fig = self.cpd_ternary.get_plot(
+            formulas_to_draw=["FeO"],
+            formula_colors=None,
+            draw_formula_meshes=True,
+            draw_formula_lines=True,
+            element_padding=0,
+        )
+        assert isinstance(fig, Figure)
+        names = [str(d.name) for d in fig.data]
+        assert "FeO (mesh)" in names
+        assert "FeO (lines)" in names
+
+    def test_get_plot_formula_not_found(self):
+        """A formula to draw that is not a domain raises a UserWarning."""
+        with warns(UserWarning, match="not found"):
+            self.cpd_ternary.get_plot(
+                formulas_to_draw=["Li4FeO4"],
+                draw_formula_meshes=False,
+                draw_formula_lines=False,
+                element_padding=0,
+            )
