@@ -1176,7 +1176,7 @@ class DftSet(Cp2kInput):
         if not self.check("force_eval/properties"):
             self["FORCE_EVAL"].insert(Section("PROPERTIES"))
         if not self.check("force_eval/properties/linres"):
-            self["FORCE_EVAL"]["PROPERTIES"].insert("LINRES")
+            self["FORCE_EVAL"]["PROPERTIES"].insert(Section("LINRES"))
         self["FORCE_EVAL"]["PROPERTIES"]["LINRES"].insert(Section("POLAR", **kwargs))
 
     def activate_hyperfine(self) -> None:
