@@ -647,6 +647,69 @@ class TestParseFunctions:
         assert tdos.efermi == approx(-0.247583 * Ha_to_eV + 1e-6)
         assert_allclose(tdos.densities[Spin.up], [1, 0, 0, 0.18690139 * 3 + 0.14643195 * 2 + 0.14643194])
 
+    def test_parse_mo_eigenvalues_unocc_not_converged(self, tmp_path):
+        """A non-converged unoccupied subspace triggers a warning and still parses."""
+        lines = Path(f"{TEST_DIR}/cp2k.out").read_text().split("\n")
+        out = []
+        i = 0
+        injected = 0
+        while i < len(lines):
+            out.append(lines[i])
+            if " Lowest eigenvalues of the unoccupied subspace spin" in lines[i] and injected < 2:
+                out.append(lines[i + 1])  # the dashes
+                out.append(" WARNING : did not converge")
+                out.append(" A")
+                out.append(" B")
+                i += 2
+                injected += 1
+                continue
+            i += 1
+        out_path = tmp_path / "cp2k_nonconv.out"
+        out_path.write_text("\n".join(out), encoding="utf-8")
+        assert injected == 2
+
+        result = Cp2kOutput(str(out_path), auto_load=False)
+        with pytest.warns(UserWarning, match="did NOT converge"):
+            result.parse_mo_eigenvalues()
+        ev = result.data["eigenvalues"][-1]
+        assert len(ev["unoccupied"][Spin.up]) > 0
+        assert result.vbm is not None
+        assert result.cbm is not None
+
+    def test_parse_mo_eigenvalues_convergence_line_skipped(self, tmp_path):
+        """A 'convergence' warning (not 'did not converge') in the unoccupied block is skipped."""
+        lines = Path(f"{TEST_DIR}/cp2k.out").read_text().split("\n")
+        out = []
+        i = 0
+        injected = 0
+        while i < len(lines):
+            out.append(lines[i])
+            if " Lowest eigenvalues of the unoccupied subspace spin            1" in lines[i] and injected == 0:
+                out.append(lines[i + 1])  # dashes
+                out.append(" SCF: convergence not yet met")
+                i += 2
+                injected += 1
+                continue
+            i += 1
+        out_path = tmp_path / "cp2k_convergence.out"
+        out_path.write_text("\n".join(out), encoding="utf-8")
+        assert injected == 1
+        result = Cp2kOutput(str(out_path), auto_load=False)
+        result.parse_mo_eigenvalues()
+        assert len(result.data["eigenvalues"]) > 0
+
+    def test_parse_mo_eigenvalues_no_subspace(self, tmp_path):
+        """If the output has no eigenvalue subspace section, parse is a no-op."""
+        lines = Path(f"{TEST_DIR}/cp2k.out").read_text().splitlines()
+        kept = [ln for ln in lines if "subspace spin" not in ln and "Fermi Energy" not in ln]
+        out_path = tmp_path / "cp2k_no_ev.out"
+        out_path.write_text("\n".join(kept), encoding="utf-8")
+        result = Cp2kOutput(str(out_path), auto_load=False)
+        result.parse_mo_eigenvalues()
+        assert result.data["eigenvalues"] == []
+        assert result.cbm is None
+        assert result.vbm is None
+
     def test_parse_pdos_spin_and_labels(self, tmp_path):
         labels = ["p", "d", "f", "f-3", "f-2", "f-1", "f0", "f+1", "f+2", "f+3"]
         header = "#     MO Eigenvalue [a.u.]      Occupation" + "".join(f"{lbl:>18}" for lbl in labels)
