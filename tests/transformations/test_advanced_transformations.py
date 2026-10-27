@@ -1135,3 +1135,24 @@ class TestSQSTransformationHelpers:
         )
         assert res
         assert isinstance(res[0]["structure"], Structure)
+
+    def test_unique_best_sqs_structs_shared_structure_repeats(self):
+        """Regression test for a crash when the same Structure object is reused
+        across several entries of ``allsqs`` with ``remove_duplicate_structures=False``.
+
+        Previously the cleanup loop ran an unguarded ``del`` on the temporary
+        ``objective_function`` attribute, which raised ``AttributeError`` on the
+        second occurrence of the shared structure object.
+        """
+        res = SQSTransformation._get_unique_best_sqs_structs(
+            _FakeSqs(share=True),
+            best_only=False,
+            return_ranked_list=100,
+            remove_duplicate_structures=False,
+            reduction_algo=False,
+        )
+        # 3 candidates, two of them the very same Structure object
+        assert len(res) == 3
+        # the temporary attribute must have been cleaned up
+        for dct in res:
+            assert not hasattr(dct["structure"], "objective_function")
