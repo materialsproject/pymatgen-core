@@ -10,6 +10,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
 import pymatgen.transformations.advanced_transformations as advanced
+from pymatgen.command_line.enumlib_caller import _is_enumlib_jl
 from pymatgen.core import Lattice, Molecule, Species, Structure
 from pymatgen.core.energy_models import IsingModel, SymmetryModel
 from pymatgen.core.interface import GrainBoundaryGenerator
@@ -493,7 +494,15 @@ class TestMagOrderingTransformation(MatSciTest):
 
 @pytest.mark.skipif(not enumlib_present, reason="enum_lib not present.")
 class TestDopingTransformation(MatSciTest):
-    def test_apply_transformation(self):
+    # Enumlib.jl derives a spurious symmetry op for this non-primitive 1x2x3
+    # supercell and aborts with a dset-match error.
+    @pytest.mark.xfail(
+        _is_enumlib_jl(enum_cmd),
+        reason="https://github.com/glwhart/Enumlib.jl/issues/4",
+        raises=ValueError,
+        strict=True,
+    )
+    def test_apply_transformation_supercell(self):
         structure = MatSciTest.get_structure("LiFePO4")
         spga = SpacegroupAnalyzer(structure, 0.1)
         structure = spga.get_refined_structure()
@@ -501,6 +510,10 @@ class TestDopingTransformation(MatSciTest):
         ss = trafo.apply_transformation(structure, 100)
         assert len(ss) == 1
 
+    def test_apply_transformation(self):
+        structure = MatSciTest.get_structure("LiFePO4")
+        spga = SpacegroupAnalyzer(structure, 0.1)
+        structure = spga.get_refined_structure()
         trafo = DopingTransformation("Al3+", min_length=15, ionic_radius_tol=0.1)
         ss = trafo.apply_transformation(structure, 100)
         assert len(ss) == 0
