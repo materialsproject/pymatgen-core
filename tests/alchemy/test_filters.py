@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from monty.json import MontyDecoder
 
 from pymatgen.alchemy.filters import (
@@ -105,3 +106,80 @@ class TestRemoveExistingFilter:
             self._struct_list[-1],
             transmuter.transformed_structures[-1].final_structure,
         )
+
+
+class TestContainSpecieRepr:
+    def test_repr(self):
+        f = ContainsSpecieFilter(["Si4+"], strict_compare=True, AND=False, exclude=True)
+        s = repr(f)
+        assert "ContainsSpecieFilter" in s
+        assert "strict_compare = True" in s
+        assert "exclude = True" in s
+
+
+class TestChargeBalanceFilter:
+    def test_filter(self):
+        from pymatgen.alchemy.filters import ChargeBalanceFilter
+        from pymatgen.core import Lattice
+
+        lattice = Lattice.cubic(4.0)
+        # neutral structure: LiFePO4 is charge-balanced
+        neutral = MatSciTest.get_structure("LiFePO4")
+        f = ChargeBalanceFilter()
+        assert f.test(neutral) is True
+        # a composition with a genuine net charge fails
+        charged = Structure(
+            lattice,
+            [Species("Si4+"), Species("O2-")],
+            [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]],
+        )
+        assert f.test(charged) is False
+
+
+class TestSpeciesMaxDistFilter:
+    def test_filter(self):
+        from pymatgen.alchemy.filters import SpeciesMaxDistFilter
+
+        struct = MatSciTest.get_structure("LiFePO4")
+        f = SpeciesMaxDistFilter("Li", "Fe", max_dist=50.0)
+        assert f.test(struct) is True
+
+
+class TestRemoveDuplicatesFilterExtra:
+    def test_typeerror(self):
+        with pytest.raises(TypeError, match="must be a dict"):
+            RemoveDuplicatesFilter(structure_matcher=42)  # type: ignore[arg-type]
+
+    def test_from_dict_structure_matcher(self):
+        f = RemoveDuplicatesFilter(structure_matcher=StructureMatcher().as_dict())
+        assert isinstance(f.structure_matcher, StructureMatcher)
+
+    def test_symprec_filter(self):
+        struct = MatSciTest.get_structure("LiFePO4")
+        f = RemoveDuplicatesFilter(symprec=1e-4)
+        assert f.test(struct) is True
+
+
+class TestRemoveExistingFilterExtra:
+    def test_from_dict_structure_matcher(self):
+        struct = MatSciTest.get_structure("LiFePO4")
+        f = RemoveExistingFilter([struct], structure_matcher=StructureMatcher().as_dict())
+        assert isinstance(f.structure_matcher, StructureMatcher)
+
+    def test_symprec_reject_duplicate(self):
+        struct = MatSciTest.get_structure("LiFePO4")
+        f = RemoveExistingFilter([struct], symprec=1e-4)
+        assert f.test(struct) is False
+        # a similar-structure with identical space group and similar lattice should also be filtered
+        dup = struct.copy()
+        assert f.test(dup) is False
+
+
+class TestRemoveDuplicatesFilterSymprec:
+    def test_symprec(self):
+        struct = MatSciTest.get_structure("LiFePO4")
+        f = RemoveDuplicatesFilter(symprec=1e-4)
+        first = f.test(struct)
+        second = f.test(struct.copy())
+        assert first is True
+        assert second is False

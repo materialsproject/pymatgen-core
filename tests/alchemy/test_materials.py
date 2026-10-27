@@ -130,3 +130,78 @@ class TestTransformedStructure(MatSciTest):
         t_struct = TransformedStructure.from_snl(struct_nl).to_snl([("notwill", "notwill@test.com")])
         assert t_struct.history == [hist]
         assert t_struct.authors == [("notwill", "notwill@test.com")]
+
+    def test_init_single_transformation(self):
+        # A single AbstractTransformation passed as ``transformations`` is unwrapped to a list.
+        ts = TransformedStructure(self.structure, SubstitutionTransformation({"Li": "Na"}))
+        assert ts.final_structure.reduced_formula == "NaFePO4"
+        assert len(ts.history) == 1
+
+    def test_undo_last_change_no_input_structure(self):
+        # ``undo_last_change`` raises IndexError if the last history entry has no input_structure.
+        t = TransformedStructure(self.structure)
+        t.history.append({"@class": "SomeFilter", "output_parameters": {}})
+        with pytest.raises(IndexError, match="has no input_structure"):
+            t.undo_last_change()
+
+    def test_redo_next_change(self):
+        t = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])
+        t.undo_last_change()
+        t.redo_next_change()
+        assert t.final_structure.reduced_formula == "NaFePO4"
+
+    def test_extend_transformations(self):
+        t = TransformedStructure(self.structure)
+        t.extend_transformations(
+            [
+                SubstitutionTransformation({"Li": "Na"}),
+                SubstitutionTransformation({"Fe": "Mn"}),
+            ]
+        )
+        assert t.final_structure.reduced_formula == "NaMnPO4"
+        assert len(t.history) == 2
+
+    def test_str(self):
+        ts = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])
+        s = str(ts)
+        assert "Current structure" in s
+        assert "NaFePO4" in s
+
+    def test_was_modified(self):
+        ts = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])
+        assert ts.was_modified is True
+        # A transform whose target isn't present must not change the structure.
+        ts2 = TransformedStructure(
+            self.structure,
+            [SubstitutionTransformation({"Au": "Pt"})],
+        )
+        assert ts2.was_modified is False
+
+    def test_write_vasp_input(self, tmp_path):
+        SETTINGS["PMG_VASP_PSP_DIR"] = FAKE_POTCAR_DIR
+
+        ts = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])
+        outdir = tmp_path / "vasp"
+        ts.write_vasp_input(MPRelaxSet, output_dir=str(outdir))
+        # VASP input files should be present
+        inputs = outdir / "INCAR"
+        assert inputs.exists()
+
+    def test_from_cif_str_uploaded(self, tmp_path):
+        # ``from_cif_str`` sets source to "uploaded cif" when the CIF has no ``_database_code_ICSD``.
+        struct = MatSciTest.get_structure("LiFePO4")
+        from pymatgen.io.cif import CifWriter
+
+        fpath = tmp_path / "test.cif"
+        CifWriter(struct).write_file(str(fpath))
+        cif = fpath.read_text()
+        t = TransformedStructure.from_cif_str(cif)
+        assert t.history[-1]["source"] == "uploaded cif"
+        assert t.final_structure.formula == struct.formula
+
+    @pytest.mark.filterwarnings("ignore::pymatgen.io.vasp.inputs.BadPoscarWarning")
+    def test_from_poscar_str_vasp4_raises(self):
+        # ``from_poscar_str`` rejects VASP4 POSCARs (no element symbols).
+        vasp4 = "comment\n1.0\n3.0 0.0 0.0\n0.0 3.0 0.0\n0.0 0.0 3.0\n1\nDirect\n0.0 0.0 0.0"
+        with pytest.raises(ValueError, match="proper VASP5"):
+            TransformedStructure.from_poscar_str(vasp4)
