@@ -717,7 +717,10 @@ class TestSpecies(MatSciTest):
     def test_symbol_oxi_state_str(self, symbol_oxi, expected_element, expected_oxi_state):
         species = Species(symbol_oxi)
         assert species._el.symbol == expected_element
-        assert species._oxi_state == approx(expected_oxi_state, rel=1.0e-6)
+        if expected_oxi_state is None:
+            assert species._oxi_state is None
+        else:
+            assert species._oxi_state == approx(expected_oxi_state, rel=1.0e-6)
 
     def test_symbol_oxi_state_str_raises(self):
         symbol = "Fe2.5f2123+"  # invalid oxidation state

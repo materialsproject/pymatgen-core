@@ -918,8 +918,12 @@ class TestOutcar:
             {"p": 3.365, "s": 1.582, "d": 0.0, "tot": 4.947},
         )
 
-        assert outcar.magnetization == approx(expected_mag, abs=1e-5), "Wrong magnetization read from Outcar"
-        assert outcar.charge == approx(expected_chg, abs=1e-5), "Wrong charge read from Outcar"
+        assert len(outcar.magnetization) == len(expected_mag)
+        for mag, exp in zip(outcar.magnetization, expected_mag, strict=True):
+            assert mag == approx(exp, abs=1e-5), "Wrong magnetization read from Outcar"
+        assert len(outcar.charge) == len(expected_chg)
+        for chg, exp in zip(outcar.charge, expected_chg, strict=True):
+            assert chg == approx(exp, abs=1e-5), "Wrong charge read from Outcar"
         assert not outcar.is_stopped
         assert outcar.run_stats == {
             "System time (sec)": 0.938,
@@ -1215,8 +1219,10 @@ class TestOutcar:
         expected_mag = ({"p": 0.0, "s": 0.0, "d": 0.0, "tot": 0.0},)
         expected_chg = ({"p": 0.343, "s": 0.425, "d": 0.0, "tot": 0.768},)
 
-        assert outcar.magnetization == approx(expected_mag)
-        assert outcar.charge == approx(expected_chg)
+        assert len(outcar.magnetization) == len(expected_mag)
+        assert outcar.magnetization[0] == approx(expected_mag[0])
+        assert len(outcar.charge) == len(expected_chg)
+        assert outcar.charge[0] == approx(expected_chg[0])
         assert not outcar.is_stopped
         assert outcar.run_stats == {
             "System time (sec)": 0.592,
