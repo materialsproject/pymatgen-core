@@ -329,8 +329,11 @@ class TestMagOrderingTransformation(MatSciTest):
         trans = MagOrderingTransformation({"Ni": 5})
         all_structs = trans.apply_transformation(self.NiO.get_primitive_structure(), return_ranked_list=10)
 
-        assert_allclose(self.NiO_AFM_111.lattice.parameters, all_structs[0]["structure"].lattice.parameters)
-        assert_allclose(self.NiO_AFM_001.lattice.parameters, all_structs[1]["structure"].lattice.parameters)
+        # Compare lattices up to a change of basis: the supercell vectors
+        # enumlib returns are not unique (e.g. Enumlib.jl gives gamma=120 where
+        # the Fortran enumlib gave the equivalent gamma=60).
+        assert self.NiO_AFM_111.lattice.find_mapping(all_structs[0]["structure"].lattice) is not None
+        assert self.NiO_AFM_001.lattice.find_mapping(all_structs[1]["structure"].lattice) is not None
 
     def test_ferrimagnetic(self):
         trans = MagOrderingTransformation({"Fe": 5}, order_parameter=0.75, max_cell_size=1)
