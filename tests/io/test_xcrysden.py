@@ -154,6 +154,337 @@ PRIMCOORD
                 labels=["only one label"],
             )
 
+    # --- to_str error paths ---
+
+    def test_to_str_no_structure_raises(self):
+        xsf = XSF()
+        with pytest.raises(ValueError, match="Cannot write XSF without a structure"):
+            xsf.to_str()
+
+    def test_to_str_xsfgrid_bad_shape(self):
+        # XSFGrid data must be 3D or 4D — bad shape raises
+        xsf = XSF(self.struct.copy())
+        xsf.grids["bad"] = XSFGrid(
+            data=np.ones((2, 2, 2, 2, 2)),  # 5D — too many dims
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        with pytest.raises(ValueError, match="XSFGrid data must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfgrid_bad_lattice_shape(self):
+        # XSFGrid lattice must be (2,3) or (3,3)
+        xsf = XSF(self.struct.copy())
+        xsf.grids["bad"] = XSFGrid(
+            data=np.ones((1, 2, 2)),
+            lattice=np.ones((2, 2)),  # wrong shape
+            origin=np.zeros(3),
+        )
+        with pytest.raises(ValueError, match="XSFGrid lattice must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfgrid_bad_origin_shape(self):
+        # XSFGrid origin must be (3,)
+        xsf = XSF(self.struct.copy())
+        xsf.grids["bad"] = XSFGrid(
+            data=np.ones((1, 2, 2)),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(2),
+        )
+        with pytest.raises(ValueError, match="XSFGrid origin must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfgrid_bad_labels_length(self):
+        # XSFGrid.__post_init__ rejects mismatched labels at construction time
+        with pytest.raises(ValueError, match="XSFGrid labels must be empty or match"):
+            XSFGrid(data=np.ones((2, 2, 2)), lattice=np.eye(2, 3), origin=np.zeros(3), labels=["only_one"])
+
+    def test_to_str_xslband_bad_data_shape(self):
+        # XSFBand data must be 4D (n_bands, nx, ny, nz); a 3D array raises
+        # when actually written (need fermi_energy to reach the write path)
+        xsf = XSF(self.struct.copy())
+        xsf.fermi_energy = 5.0
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf.bands["bad"] = XSFBand(
+            data=np.ones((2, 2, 2)),  # 3D not 4D
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        with pytest.raises(ValueError, match="XSFBand data must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfband_bad_lattice_shape(self):
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf = XSF(self.struct.copy())
+        xsf.fermi_energy = 5.0
+        xsf.bands["bad"] = XSFBand(
+            data=np.ones((1, 2, 2, 2)),
+            lattice=np.ones((2, 2)),  # wrong shape
+            origin=np.zeros(3),
+        )
+        with pytest.raises(ValueError, match="XSFBand lattice must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfband_bad_origin_shape(self):
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf = XSF(self.struct.copy())
+        xsf.fermi_energy = 5.0
+        xsf.bands["bad"] = XSFBand(
+            data=np.ones((1, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(2),
+        )
+        with pytest.raises(ValueError, match="XSFBand origin must have shape"):
+            xsf.to_str()
+
+    def test_to_str_xsfband_bands_without_fermi_energy(self):
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf = XSF(self.struct.copy())
+        xsf.bands["band"] = XSFBand(
+            data=np.ones((1, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        # no fermi_energy → should raise
+        with pytest.raises(ValueError, match="Fermi energy"):
+            xsf.to_str()
+
+    def test_to_str_with_conventional_lattice(self):
+        xsf = XSF(self.struct.copy())
+        xsf.conventional_lattice = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        s = xsf.to_str()
+        assert "CONVVEC" in s
+
+    def test_to_str_conventional_lattice_bad_shape(self):
+        xsf = XSF(self.struct.copy())
+        xsf.conventional_lattice = np.ones((2, 3))  # wrong shape
+        with pytest.raises(ValueError, match="conventional_lattice must have shape"):
+            xsf.to_str()
+
+    def test_to_str_forces_wrong_shape(self):
+        xsf = XSF(self.struct.copy())
+        xsf.forces = np.zeros((3, 3))  # should be (n_sites, 3)
+        with pytest.raises(ValueError, match="Forces must have shape"):
+            xsf.to_str()
+
+    def test_to_str_partial_vect_property(self):
+        struct = self.struct.copy()
+        # Add vect to only one site → partial vect → ValueError
+        struct.add_site_property("vect", [np.zeros(3), [0.5] * 3])
+        # Actually that's 2 entries — need to make one of the 2 sites not have vect
+        # Use a 3-site structure to get partial
+        struct3 = Structure(
+            [[3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 3.0]],
+            ["Si", "Si", "Si"],
+            [[0, 0, 0], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25]],
+        )
+        struct3.add_site_property("vect", [np.zeros(3), np.zeros(3), np.zeros(3)])
+        # Remove vect from one site
+        struct3.sites[1].properties.pop("vect")
+        xsf = XSF(struct3)
+        with pytest.raises(ValueError, match="must be present on every site"):
+            xsf.to_str()
+
+    def test_to_str_structure_kind_unsupported(self):
+        xsf = XSF(self.struct.copy())
+        xsf.kind = "QUANTUM"  # not in {POLYMER, SLAB, CRYSTAL}
+        with pytest.raises(ValueError, match="Unsupported XSF structure kind"):
+            xsf.to_str()
+
+    # --- write_file ---
+
+    def test_write_file(self):
+        xsf = XSF(self.struct.copy())
+        out_path = self.tmp_path / "test.xsf"
+        xsf.write_file(str(out_path))
+        assert out_path.is_file()
+        content = out_path.read_text()
+        assert "CRYSTAL" in content
+
+    # --- XSFBand / XSFGrid properties ---
+
+    def test_xsfband_shape_property(self):
+        band = XSFBand(data=np.ones((2, 3, 4, 5)), lattice=np.eye(3), origin=np.zeros(3))
+        assert band.shape == (2, 3, 4, 5)
+        assert band.ndim == 3  # ndim = data.ndim - 1 = 4 - 1 = 3
+
+    def test_xsfgrid_shape_property(self):
+        grid = XSFGrid(data=np.ones((1, 4, 4)), lattice=np.eye(2, 3), origin=np.zeros(3))
+        assert grid.shape == (1, 4, 4)
+        assert grid.ndim == 2  # ndim = data.ndim - 1 = 3 - 1 = 2
+
+    # --- xsfbands with default UNKBAND labels ---
+
+    def test_to_str_xsfband_default_unklabels(self):
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf = XSF(self.struct.copy())
+        xsf.fermi_energy = 5.0
+        xsf.bands["main"] = XSFBand(
+            data=np.ones((3, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        s = xsf.to_str()
+        assert "UNKBAND0" in s
+        assert "UNKBAND2" in s
+
+    def test_to_str_xsfgrid_default_unklabels(self):
+        xsf = XSF(self.struct.copy())
+        xsf.grids["grid"] = XSFGrid(
+            data=np.ones((3, 4, 4)),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(3),
+        )
+        s = xsf.to_str()
+        assert "UNKGRID0" in s
+        assert "UNKGRID2" in s
+
+    # --- AnimatedXSF ---
+
+    def test_animated_xsf_not_implemented(self):
+        from pymatgen.io.xcrysden import AnimatedXSF
+
+        axsf = AnimatedXSF()
+        assert len(axsf) == 0
+        with pytest.raises(NotImplementedError, match=r"not implemented"):
+            AnimatedXSF.from_str("whatever")
+        with pytest.raises(NotImplementedError, match=r"not implemented"):
+            axsf.as_trajectory()
+
+    def test_structure_properties_empty(self):
+        xsf = XSF(self.struct.copy())
+        props = xsf.structure_properties()
+        # No grids → empty properties dict
+        assert isinstance(props, dict)
+
+    def test_lattice_property_none_for_molecule(self):
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 1]])
+        xsf = XSF(mol)
+        assert xsf.lattice is None
+
+    def test_lattice_property_structure(self):
+        xsf = XSF(self.struct)
+        assert xsf.lattice is not None
+        assert xsf.lattice.a == self.lattice[0][0]
+
+    # --- parse_file edge cases ---
+
+    def test_parse_file_animssteps_static_raises(self):
+        # ANIMSTEPS keyword in a static XSF should raise
+        test_str = "CRYSTAL\nANIMSTEPS 2\nPRIMVEC\n1 0 0\n0 1 0\n0 0 1\nPRIMCOORD 1 1\nSi 0 0 0\n"
+        with pytest.raises(ValueError, match="ANIMSTEPS"):
+            XSF.from_str(test_str)
+
+    def test_write_file_atom_symbol(self):
+        xsf = XSF(self.struct.copy())
+        out_path = self.tmp_path / "test_atomic_number.xsf"
+        xsf.write_file(str(out_path), atom_symbol=False)
+        content = out_path.read_text()
+        assert "CRYSTAL" in content
+
+    def test_to_str_with_grid_comment(self):
+        xsf = XSF(self.struct.copy())
+        xsf.grids["rho"] = XSFGrid(
+            data=np.ones((1, 3, 3)),
+            lattice=np.eye(2, 3),
+            origin=np.zeros(3),
+            comment="electron density",
+        )
+        s = xsf.to_str()
+        assert "electron density" in s
+
+    def test_to_str_with_band_comment(self):
+        from pymatgen.io.xcrysden import XSFBand
+
+        xsf = XSF(self.struct.copy())
+        xsf.fermi_energy = 5.0
+        xsf.bands["bands"] = XSFBand(
+            data=np.ones((1, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+            comment="band energies",
+        )
+        s = xsf.to_str()
+        assert "band energies" in s
+
+    def test_to_str_with_xsf_comment_empty_line(self):
+        # Empty lines in the comment should be skipped (not written)
+        xsf = XSF(self.struct.copy(), comment="header\n\n\nbody")
+        s = xsf.to_str()
+        # "header" written, empty lines skipped, "body" written
+        assert "header" in s
+        assert "body" in s
+        # The empty line between them is NOT in the output
+        lines = s.split("\n")
+        # "header" appears but there should not be a double-empty line
+        assert lines.count("") < 2
+
+    def test_to_str_xsfgrid_data_4d_not_5d(self):
+        # XSFGrid supports 3D and 4D grids; 5D raises ValueError in to_str
+        xsf = XSF(self.struct.copy())
+        xsf.grids["bad"] = XSFGrid(
+            data=np.ones((2, 2, 2, 2, 2)),
+            lattice=np.eye(3),
+            origin=np.zeros(3),
+        )
+        with pytest.raises(ValueError, match="XSFGrid data must have shape") as exc_info:
+            xsf.to_str()
+        assert "not have shape" in str(exc_info.value) or "XSFGrid data" in str(exc_info.value)
+
+    def test_parser_primcoord_in_molecule_raises(self):
+        # PRIMCOORD after a PRIMVEC in a MOLECULE section → ValueError
+        # MOLECULE sets kind="molecule", which causes the PERIODIC check to fire
+        from io import BytesIO
+
+        test_str = b"MOLECULE\nPRIMVEC\n 1 0 0\n 0 1 0\n 0 0 1\nPRIMCOORD\n1 1\nH 0 0 0\n"
+        with pytest.raises(ValueError, match="PRIMCOORD is only valid in periodic"):
+            XSF.parse_file(BytesIO(test_str))
+
+    def test_parser_atoms_in_crystal_raises(self):
+        # ATOMS keyword inside a CRYSTAL section → "ATOMS is only valid in MOLECULE"
+        from io import BytesIO
+
+        test_str = b"CRYSTAL\nPRIMVEC\n 1 0 0\n 0 1 0\n 0 0 1\nATOMS\n1 0\nH 0 0 0\n"
+        with pytest.raises(ValueError, match="ATOMS is only valid in MOLECULE"):
+            XSF.parse_file(BytesIO(test_str))
+
+    def test_parser_unsupported_keyword_raises(self):
+        # An unsupported keyword at the top level should raise ValueError
+        test_str = "CRYSTAL\nPRIMVEC\n1 0 0\n0 1 0\n0 0 1\nBAD_KEYWORD\nPRIMCOORD 1 1\nH 0 0 0\n"
+        with pytest.raises(ValueError, match="Unsupported or misplaced XSF keyword"):
+            XSF.from_str(test_str)
+
+    def test_animated_xsf_getitem_int_and_slice(self):
+        # AnimatedXSF __getitem__ with int and slice
+        struct_str = [
+            ("CRYSTAL\nPRIMVEC\n 1 0 0\n 0 1 0\n 0 0 1\nPRIMCOORD\n1 1\nH 0 0 0\n"),
+            ("CRYSTAL\nPRIMVEC\n 1 0 0\n 0 1 0\n 0 0 1\nPRIMCOORD\n1 1\nH 0.5 0 0\n"),
+        ]
+        xsfs = [XSF.from_str(s) for s in struct_str if s.strip()]
+        from pymatgen.io.xcrysden import AnimatedXSF
+
+        axsf = AnimatedXSF()
+        axsf.data = xsfs
+
+        # int indexing
+        result = axsf[0]
+        assert result is xsfs[0]
+
+        # slice indexing returns a new AnimatedXSF
+        axsf_slice = axsf[0:1]
+        assert len(axsf_slice) == 1
+
     def test_to_str_roundtrip_with_forces_grid_and_band(self):
         xsf = XSF(self.struct.copy())
         xsf.forces = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
