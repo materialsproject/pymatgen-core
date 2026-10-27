@@ -274,10 +274,10 @@ class BasisSetReader:
         """The number of nlm orbitals for the basis set."""
         n_nlm_orbs = 0
 
-        data_tmp = self.data
-        data_tmp.pop("lmax")
-        data_tmp.pop("n_nlo")
-        data_tmp.pop("preamble")
+        data_tmp = dict(self.data)
+        data_tmp.pop("lmax", None)
+        data_tmp.pop("n_nlo", None)
+        data_tmp.pop("preamble", None)
 
         for l_zeta_ng in data_tmp:
             n_l = l_zeta_ng.split("_")[0]
@@ -845,8 +845,7 @@ class BSEOutput:
     @staticmethod
     def _parse_job(output):
         BSE_exitons_patt = re.compile(
-            r"^exiton \s+ (\d+)  : \s+  ([\d.]+) \( \s+ ([-\d.]+) \) \s+ \| .*  ",
-            re.VERBOSE,
+            r"^exiton\s+(\d+)\s*:\s*([\d.]+)\s*\(\s*([-\d.]+)\s*\)\s*\|",
         )
 
         end_patt = re.compile(r"\s*program returned normally\s*")
