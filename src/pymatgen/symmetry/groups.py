@@ -294,7 +294,7 @@ class SpaceGroup(SymmetryGroup):
     """A SpaceGroup.
 
     Attributes:
-        symbol (str): Full International or Hermann-Mauguin Symbol.
+        symbol (str): Hermann-Mauguin symbol, abbreviated for standard settings.
         int_number (int): International number.
         generators (list): List of generator matrices. Note that 4x4 matrices are used for Space Groups.
         order (int): Order of Space Group.
@@ -415,6 +415,11 @@ class SpaceGroup(SymmetryGroup):
 
             self._symmetry_ops = None
 
+        for short_symbol, full_symbol in SpaceGroup.abbrev_sg_mapping.items():
+            if self.symbol == full_symbol:
+                self.symbol = short_symbol
+                break
+
     def _generate_full_symmetry_ops(self) -> np.ndarray:
         symm_ops = np.array(self.generators)
         for op in symm_ops:
@@ -453,7 +458,7 @@ class SpaceGroup(SymmetryGroup):
         int_number = None
         if int_symbol in SpaceGroup.abbrev_sg_mapping:
             symbols.append(SpaceGroup.abbrev_sg_mapping[int_symbol])
-            int_number = SpaceGroup.sg_encoding[int_symbol]["int_number"]
+            int_number = SpaceGroup.sg_encoding[SpaceGroup.abbrev_sg_mapping[int_symbol]]["int_number"]
 
         elif int_symbol in SpaceGroup.full_sg_mapping:
             symbols.append(SpaceGroup.full_sg_mapping[int_symbol])
