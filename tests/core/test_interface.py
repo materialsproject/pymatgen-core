@@ -63,6 +63,13 @@ class TestGrainBoundary(MatSciTest):
         )
         assert_allclose(Cu_GB1_copy.lattice.matrix, self.Cu_GB1.lattice.matrix)
 
+        init_coords = self.Cu_GB1.init_cell.frac_coords.copy()
+        oriented_coords = self.Cu_GB1.oriented_unit_cell.frac_coords.copy()
+        Cu_GB1_copy.init_cell.translate_sites([0], [0.1, 0.0, 0.0], frac_coords=True)
+        Cu_GB1_copy.oriented_unit_cell.translate_sites([0], [0.1, 0.0, 0.0], frac_coords=True)
+        assert_allclose(self.Cu_GB1.init_cell.frac_coords, init_coords)
+        assert_allclose(self.Cu_GB1.oriented_unit_cell.frac_coords, oriented_coords)
+
     def test_sigma(self):
         assert self.Cu_GB1.sigma == approx(9)
         assert self.Cu_GB2.sigma == approx(9)

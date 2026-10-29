@@ -4,6 +4,7 @@ and manipulate interfaces, including grain boundaries.
 
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import warnings
@@ -172,11 +173,11 @@ class GrainBoundary(Structure):
             self.rotation_angle,
             self.gb_plane,
             self.join_plane,
-            self.init_cell,
+            copy.deepcopy(self.init_cell),
             self.vacuum_thickness,
             self.ab_shift,
             self.site_properties,
-            self.oriented_unit_cell,
+            copy.deepcopy(self.oriented_unit_cell),
         )
 
     def get_sorted_structure(
