@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from pytest import approx
 
-from pymatgen.core import DummySpecies, Element, Species, get_el_sp
+from pymatgen.core import DummySpecies, Element, Lattice, Species, Structure, get_el_sp
 from pymatgen.core.periodic_table import ElementBase, ElementType
 from pymatgen.core.units import Ha_to_eV
 from pymatgen.io.core import ParseError
@@ -414,6 +414,13 @@ class TestElement(MatSciTest):
         assert repr(Element.Fe) == "Element Fe"
         assert repr(Element.D) == "Element H"
 
+    @pytest.mark.parametrize("isotope", [Element.D, Element.T], ids=["D", "T"])
+    def test_isotope_deepcopy_and_as_dict(self, isotope):
+        # serializing/copying by symbol ("H") turned D and T back into H
+        assert deepcopy(isotope) == isotope
+        assert Element.from_dict(isotope.as_dict()) == isotope
+        assert Structure.from_dict(Structure(Lattice.cubic(3), [isotope], [[0, 0, 0]]).as_dict()).species == [isotope]
+
     def test_lt_not_implemented(self):
         assert Element.Fe.__lt__(26) is NotImplemented
         with pytest.raises(TypeError, match="'<' not supported"):
@@ -761,6 +768,25 @@ class TestSpecies(MatSciTest):
         assert not Species("Fe", 0) < Species("Fe", 0, spin=1)
         assert not Species("Fe", 0) < Species("Fe", 0)
 
+    def test_lt_zero_or_none_oxi_state(self):
+        # a zero/None oxi_state on self used to skip the oxi_state comparison, so Fe0+ and
+        # Fe2+ were each not less than the other and sorted() depended on input order
+        assert Species("Fe", 0) < Species("Fe", 2)
+        assert not Species("Fe", 2) < Species("Fe", 0)
+        assert Species("Fe", None) < Species("Fe", 2)
+        assert Species("Fe", -2) < Species("Fe", None)
+        expected = [Species("Fe", -2), Species("Fe", 0), Species("Fe", 2)]
+        assert sorted([Species("Fe", 2), Species("Fe", 0), Species("Fe", -2)]) == expected
+        assert sorted([Species("Fe", 0), Species("Fe", 2), Species("Fe", -2)]) == expected
+        # equal nonzero oxi_state: fall through to spin like the zero case does
+        assert Species("Fe", 2, spin=2) < Species("Fe", 2, spin=3)
+
+    def test_isotope_deepcopy_and_as_dict(self):
+        d_plus = Species("D", 1)
+        assert deepcopy(d_plus) == d_plus
+        assert Species.from_dict(d_plus.as_dict()) == d_plus
+        assert d_plus != Species("H", 1)
+
     def test_valence_noble_gas(self):
         n_valence, n_electrons = Species("Ar", 0).valence
         assert math.isnan(n_valence)
@@ -810,6 +836,11 @@ class TestSpecies(MatSciTest):
             Species.from_str("fe2+")
         with pytest.raises(ValueError, match="Invalid species string"):
             Species.from_str("Fe")
+        # a trailing token without "=" used to raise IndexError, which get_el_sp let escape
+        with pytest.raises(ValueError, match="Invalid species string"):
+            Species.from_str("Fe2+!")
+        with pytest.raises(ValueError, match="Can't parse Element or Species"):
+            get_el_sp("Fe2+!")
 
     @pytest.mark.parametrize("species", [Species("Fe", 2), Species("Fe", 3, spin=5), Species("O", -2)])
     def test_as_from_dict(self, species):
@@ -905,6 +936,14 @@ class TestDummySpecies:
         copied = deepcopy(dummy)
         assert copied == dummy
         assert copied is not dummy
+
+    def test_deepcopy_keeps_spin(self):
+        assert deepcopy(DummySpecies("X", 3, spin=2)).spin == 2
+
+    def test_from_str_of_str_with_spin(self):
+        # str() writes "X2+,spin=3"; the comma ended up in the kwarg name
+        dummy = DummySpecies("X", 2, spin=3)
+        assert DummySpecies.from_str(str(dummy)) == dummy
 
     @pytest.mark.parametrize("dummy", [DummySpecies("X", 2), DummySpecies("Xa", -1, spin=3), DummySpecies("X", None)])
     def test_as_from_dict(self, dummy):
