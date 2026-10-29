@@ -530,6 +530,8 @@ class Section(MSONable):
             path_parts = path_parts[1:]
         sec_str = self
         for pth in path_parts:
+            if isinstance(sec_str, SectionList):  # descend into the most recent repeat
+                sec_str = sec_str[-1]
             sec_str = sec_str.get_section(pth)
         return sec_str
 
@@ -744,13 +746,16 @@ class Cp2kInput(Section):
                     description=description,
                 )
                 description = ""
-                if tmp := self.by_path(current).get_section(sec.alias or sec.name):
+                parent = self.by_path(current)
+                if isinstance(parent, SectionList):  # nested in a repeated section
+                    parent = parent[-1]
+                if tmp := parent.get_section(sec.alias or sec.name):
                     if isinstance(tmp, SectionList):
-                        self.by_path(current)[sec.alias or sec.name].append(sec)
+                        parent[sec.alias or sec.name].append(sec)
                     else:
-                        self.by_path(current)[sec.alias or sec.name] = SectionList(sections=[tmp, sec])
+                        parent[sec.alias or sec.name] = SectionList(sections=[tmp, sec])
                 else:
-                    self.by_path(current).insert(sec)
+                    parent.insert(sec)
                 current = f"{current}/{alias or name}"
 
             else:
@@ -1015,7 +1020,7 @@ class Scf(Section):
             "SCF_GUESS": Keyword("SCF_GUESS", scf_guess, description="How to initialize the density matrix"),
             "MAX_ITER_LUMO": Keyword(
                 "MAX_ITER_LUMO",
-                kwargs.get("max_iter_lumo", 400),
+                kwargs.pop("max_iter_lumo", 400),
                 description="Iterations for solving for unoccupied levels when running OT",
             ),
         } | (keywords or {})
@@ -1468,7 +1473,7 @@ class Coord(Section):
                 *structure[i].coords,
             )
             for i in range(len(structure))
-        }
+        } | (keywords or {})
         super().__init__(
             name="COORD",
             description=description,
@@ -1623,7 +1628,7 @@ class MOCubes(Section):
         )
 
         keywords = {
-            "WRITE_CUBES": Keyword("WRITE_CUBE", write_cube),
+            "WRITE_CUBE": Keyword("WRITE_CUBE", write_cube),
             "NHOMO": Keyword("NHOMO", nhomo),
             "NLUMO": Keyword("NLUMO", nlumo),
         } | (keywords or {})
@@ -1949,17 +1954,16 @@ class Kpoints(Section):
 
         # A bare MONKHORST-PACK/MACDONALD scheme takes the mesh from a single kpts entry. Schemes that
         # already carry the mesh (e.g. from from_kpoints) or need none (GAMMA) are written as is.
+        # A GENERAL scheme always needs explicit KPOINT entries, even if there is only one.
         scheme_kwd = Keyword("SCHEME", scheme)
-        if len(kpts) == 1:
-            if scheme.upper() in {"MONKHORST-PACK", "MACDONALD"}:
-                scheme_kwd = Keyword("SCHEME", scheme, *kpts[0])
-            keywords["SCHEME"] = scheme_kwd
-        elif len(kpts) > 1:
+        if len(kpts) == 0:
+            raise ValueError("No k-points provided!")
+        if len(kpts) == 1 and scheme.upper() in {"MONKHORST-PACK", "MACDONALD"}:
+            scheme_kwd = Keyword("SCHEME", scheme, *kpts[0])
+        elif len(kpts) > 1 or scheme.upper() == "GENERAL":
             keywords["KPOINT"] = KeywordList(
                 [Keyword("KPOINT", *k, w) for k, w in zip(self.kpts, self.weights, strict=True)]
             )
-        else:
-            raise ValueError("No k-points provided!")
 
         keywords |= {
             "SCHEME": scheme_kwd,
@@ -2531,7 +2535,7 @@ class PotentialInfo(MSONable):
 
         for x in (
             "LDA",
-            "PADA",
+            "PADE",
             "MGGA",
             "GGA",
             "HF",
@@ -2656,6 +2660,8 @@ class GthPotential(AtomicMetadata):
             total_fill = self.nprj_ppnl[idx] * 20 + 24
             tmp = f"{self.radii[idx]: .14f} {self.nprj_ppnl[idx]: d}"
             out += f"{tmp:>24}"
+            if self.nprj_ppnl[idx] == 0:  # projector without coefficients still ends its line
+                out += "\n"
             for i in range(self.nprj_ppnl[idx]):
                 k = total_fill - 24 if i == 0 else total_fill
                 tmp = " ".join(f"{v: .14f}" for v in self.hprj_ppnl[idx][i].values())
