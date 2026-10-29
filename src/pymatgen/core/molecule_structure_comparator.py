@@ -244,7 +244,8 @@ class MoleculeStructureComparator(MSONable):
         else:
             covalent_atoms = list(range(n_atoms))
 
-        unavailable_elements = set(mol.composition.as_dict()) - set(self.covalent_radius)
+        # compare element symbols, so that oxidation-state-decorated molecules work too
+        unavailable_elements = {sp.symbol for sp in mol.species} - set(self.covalent_radius)
         if unavailable_elements:
             raise ValueError(f"The covalent radius for element {unavailable_elements} is not available")
 
@@ -316,6 +317,8 @@ class MoleculeStructureComparator(MSONable):
             "covalent_radius": self.covalent_radius,
             "priority_bonds": self.priority_bonds,
             "priority_cap": self.priority_cap,
+            "ignore_ionic_bond": self.ignore_ionic_bond,
+            "bond_13_cap": self.bond_13_cap,
         }
 
     @classmethod
@@ -333,4 +336,6 @@ class MoleculeStructureComparator(MSONable):
             covalent_radius=dct["covalent_radius"],
             priority_bonds=dct["priority_bonds"],
             priority_cap=dct["priority_cap"],
+            ignore_ionic_bond=dct.get("ignore_ionic_bond", True),
+            bond_13_cap=dct.get("bond_13_cap", 0.05),
         )
