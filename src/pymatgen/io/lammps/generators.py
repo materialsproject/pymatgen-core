@@ -20,7 +20,7 @@ import numpy as np
 from monty.io import zopen
 from monty.json import MSONable
 
-from pymatgen.core import Lattice, Molecule, Structure
+from pymatgen.core import Element, Lattice, Molecule, Structure
 from pymatgen.io.core import InputGenerator
 from pymatgen.io.lammps.data import CombinedData, LammpsBox, LammpsData, LammpsForceField
 from pymatgen.io.lammps.inputs import LammpsInputFile
@@ -428,14 +428,15 @@ class BaseLammpsSetGenerator(InputGenerator):
                 raise FileNotFoundError(f"Data file {data} not found. Please check the path.")
 
         if isinstance(data, str):
-            try:
-                data = LammpsData.from_str(data, atom_style=atom_style)
-            except ValueError:
-                raise ValueError(f"Data file {data} not recognized. Please check the format.")
+            # LammpsData has no from_str; a string is interpreted as the path to a data file
+            if not Path(data).is_file():
+                raise ValueError(f"Data file {data} not found. Please check the path.")
+            data = LammpsData.from_file(data, atom_style=atom_style)
 
         species = ""
         if isinstance(data, Structure | Molecule):
-            species = " ".join({s.symbol for s in data.species})
+            # Same element order as the atom types assigned by LammpsData.from_structure
+            species = " ".join(el.symbol for el in sorted(Element(sym) for sym in data.symbol_set))
             warnings.warn("Structure or Molecule provided, converting to LammpsData object.", stacklevel=2)
             if isinstance(data, Structure):
                 data = LammpsData.from_structure(data, atom_style=atom_style)
@@ -535,25 +536,29 @@ class BaseLammpsSetGenerator(InputGenerator):
 
             if isinstance(self.force_field, LammpsForceField):
                 for key, value in self.force_field.as_dict().items():
-                    if key in FF_STYLE_KEYS and value:
-                        settings_dict.update({f"{key}": value, f"{key}_flag": f"{key}"})
-                    if key in FF_COEFF_KEYS and value:
-                        FF_string += f"{key} {value}\n"
-                    if key == "species":
+                    if key in FF_STYLE_KEYS:
+                        if value:
+                            settings_dict.update({key: value})
+                    elif key in FF_COEFF_KEYS:
+                        if value:
+                            # A list of coeffs is written as one command per entry
+                            coeffs = [value] if isinstance(value, str) else value
+                            FF_string += "".join(f"{key} {coeff}\n" for coeff in coeffs)
+                    elif key == "species":
                         # makes species specified in FF dict take precedence
-                        species = " ".join(value) if isinstance(value, list) else value
+                        if value:
+                            species = " ".join(value) if isinstance(value, list) else value
                     else:
                         warnings.warn(f"Force field key {key} not recognized, will be ignored.", stacklevel=2)
 
-                for ff_key in FF_STYLE_KEYS:
-                    if ff_key not in self.settings.as_dict() or not self.settings.as_dict()[ff_key]:  # type: ignore[union-attr]
-                        settings_dict.update({f"{ff_key}_flag": "###"})
-                        warnings.warn(
-                            f"Force field key {ff_key} not found in the force field dictionary.", stacklevel=2
-                        )
-
-            settings_dict.update({"dump_modify_flag": "dump_modify" if species else "###", "species": species})
             write_data.update({"forcefield.lammps": FF_string})
+
+        # Enable each *_style command iff a style was given in the settings or the force field,
+        # so that no unsubstituted "$..._flag" placeholder is left in the input file
+        if not isinstance(self.force_field, str):
+            for ff_key in FF_STYLE_KEYS:
+                settings_dict[f"{ff_key}_flag"] = ff_key if settings_dict.get(ff_key) else "###"
+        settings_dict.update({"dump_modify_flag": "dump_modify" if species else "###", "species": species})
 
         if additional_data:
             write_data.update({"extra.data": additional_data})

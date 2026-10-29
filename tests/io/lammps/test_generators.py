@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
+import warnings
 
 import pytest
 
-from pymatgen.core import Structure
+from pymatgen.core import Element, Structure
 from pymatgen.io.lammps.data import LammpsData, LammpsForceField
 from pymatgen.io.lammps.generators import (
     _BASE_LAMMPS_SETTINGS,
@@ -507,3 +508,59 @@ class TestLammpsMinimization(unittest.TestCase):
             lmp_min.data.as_dict()["atoms"].to_numpy()
             == LammpsData.from_structure(self.structure, atom_style="full").as_dict()["atoms"].to_numpy()
         ).all()
+
+
+@pytest.fixture
+def lgps_structure():
+    return Structure.from_file(f"{TEST_DIR}/lgps.cif")
+
+
+def _get_input_set_and_warnings(generator, data):
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        input_set = generator.get_input_set(data)
+    return input_set, [str(w.message) for w in record]
+
+
+def test_get_input_set_force_field_styles(lgps_structure):
+    force_field = LammpsForceField(
+        pair_style="eam",
+        pair_coeff=["1 1 Li.eam", "2 2 Ge.eam"],
+        bond_style="harmonic",
+        bond_coeff="1 100 1.0",
+    )
+    input_set, messages = _get_input_set_and_warnings(BaseLammpsSetGenerator(force_field=force_field), lgps_structure)
+    # valid force field keys must not be reported as unrecognized
+    assert not [msg for msg in messages if "not recognized" in msg]
+    input_str = input_set["in.lammps"].get_str()
+    assert "pair_style eam\n" in input_str
+    # bond_style comes from the force field and must not be dropped while bond_coeff is written
+    assert "bond_style harmonic\n" in input_str
+    assert "angle_style" not in input_str
+    assert input_set["forcefield.lammps"] == "pair_coeff 1 1 Li.eam\npair_coeff 2 2 Ge.eam\nbond_coeff 1 100 1.0\n"
+
+
+def test_get_input_set_no_unsubstituted_flags(lgps_structure):
+    input_set, _ = _get_input_set_and_warnings(BaseLammpsSetGenerator(), lgps_structure)
+    input_str = input_set["in.lammps"].get_str()
+    assert "_flag" not in input_str
+    assert "pair_style lj/cut 10.0\n" in input_str
+
+
+def test_get_input_set_dump_species_match_atom_types(lgps_structure):
+    force_field = LammpsForceField(pair_style="eam", pair_coeff="* * LiGePS.eam")
+    input_set, _ = _get_input_set_and_warnings(BaseLammpsSetGenerator(force_field=force_field), lgps_structure)
+    dump_modify = input_set["in.lammps"].get_args("dump_modify")
+    assert isinstance(dump_modify, str)
+    # element names must follow the atom type numbering of the data file
+    masses = input_set.data.masses["mass"]
+    expected = [min(Element, key=lambda el, mass=mass: abs(el.atomic_mass - mass)).symbol for mass in masses]
+    assert dump_modify.split()[:4] == ["d1", "sort", "id", "element"]
+    assert dump_modify.split()[4:] == expected
+
+
+def test_get_input_set_data_file_path_str(lgps_structure, tmp_path):
+    path = tmp_path / "lgps.data"
+    LammpsData.from_structure(lgps_structure, atom_style="atomic").write_file(str(path))
+    input_set, _ = _get_input_set_and_warnings(BaseLammpsSetGenerator(), str(path))
+    assert len(input_set.data.atoms) == len(lgps_structure)
