@@ -520,6 +520,15 @@ class TestMITMPRelaxSet(MatSciTest):
             assert mp_set.kpoints is not None
             assert mp_set.incar is not None
 
+    def test_user_magmom_zero_overrides_site_magmom(self):
+        # A user-specified magmom of 0 must take precedence over site magmoms, like any other value
+        lattice = [[3.84, 0, 0], [1.92, 3.33, 0], [0, -2.22, 3.14]]
+        coords = [[0, 0, 0], [0.75, 0.5, 0.75]]
+        struct = Structure(lattice, ["Fe", "Mn"], coords, site_properties={"magmom": (5.2, -4.5)})
+        user_set = MPRelaxSet(struct, user_incar_settings={"MAGMOM": {"Fe": 0, "Mn": 3}})
+        # Sorted by electronegativity: Mn, Fe
+        assert_allclose(user_set.incar["MAGMOM"], [3, 0])
+
     def test_get_kpoints(self):
         kpoints = MPRelaxSet(self.structure).kpoints
         assert kpoints.kpts == [(2, 4, 5)]

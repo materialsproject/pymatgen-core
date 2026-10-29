@@ -581,7 +581,8 @@ class VaspInputSet(InputGenerator, abc.ABC):
             if key == "MAGMOM":
                 mag = []
                 for site in structure:
-                    if uic_magmom := self.user_incar_settings.get("MAGMOM", {}).get(site.species_string):
+                    # Compare to None so that a user-specified magmom of 0 is honored
+                    if (uic_magmom := self.user_incar_settings.get("MAGMOM", {}).get(site.species_string)) is not None:
                         mag.append(uic_magmom)
                     elif hasattr(site, "magmom"):
                         mag.append(site.magmom)
