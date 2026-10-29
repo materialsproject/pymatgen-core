@@ -177,6 +177,7 @@ class GrainBoundary(Structure):
             self.ab_shift,
             self.site_properties,
             self.oriented_unit_cell,
+            properties=self.properties,
         )
 
     def get_sorted_structure(
@@ -209,8 +210,9 @@ class GrainBoundary(Structure):
             self.init_cell,
             self.vacuum_thickness,
             self.ab_shift,
-            self.site_properties,
+            struct.site_properties,
             self.oriented_unit_cell,
+            properties=self.properties,
         )
 
     @property
@@ -304,6 +306,7 @@ class GrainBoundary(Structure):
             ab_shift=dct["ab_shift"],
             oriented_unit_cell=Structure.from_dict(dct["oriented_unit_cell"]),
             site_properties=struct.site_properties,
+            properties=dct.get("properties"),
         )
 
 
