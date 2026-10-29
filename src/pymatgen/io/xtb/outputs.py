@@ -62,7 +62,10 @@ class CRESTOutput(MSONable):
                     crest_cmd = line.strip()[8:]
                     break
 
-        split_cmd = crest_cmd.split(" ")
+        if crest_cmd is None:
+            raise ValueError(f"No CREST command found in {output_filepath}")
+
+        split_cmd = crest_cmd.split()
 
         # Get input file if present
         try:
@@ -71,22 +74,24 @@ class CRESTOutput(MSONable):
         except FileNotFoundError:
             logger.exception(f"Input file {split_cmd[0]} not found")
 
+        def is_flag(token: str) -> bool:
+            """Whether token is a command line flag (e.g. -g, --chrg), not a negative number."""
+            return token.startswith("-") and re.fullmatch(r"-\d+(\.\d*)?", token) is None
+
         # Get CREST input flags
         for idx, entry in enumerate(split_cmd):
+            if not is_flag(entry):
+                continue
             value = None
-            if entry and "-" in entry:
-                option = entry[1:]
-                if idx < len(split_cmd) and "-" not in split_cmd[idx + 1]:
-                    value = split_cmd[idx + 1]
-                self.cmd_options[option] = value
+            if idx + 1 < len(split_cmd) and not is_flag(split_cmd[idx + 1]):
+                value = split_cmd[idx + 1]
+            self.cmd_options[entry.lstrip("-")] = value
         # Get input charge for decorating parsed molecules
         chg = 0
-        if "chrg" in self.cmd_options:
-            str_chg = self.cmd_options["chrg"]
-            chg = int(str_chg) if "-" in str_chg else int(str_chg[-1])
-        elif "c" in self.cmd_options:
-            str_chg = self.cmd_options["c"]
-            chg = int(str_chg) if "-" in str_chg else int(str_chg[-1])
+        for key in ("chrg", "c"):
+            if self.cmd_options.get(key) is not None:
+                chg = int(self.cmd_options[key])
+                break
 
         # Check for proper termination
         with open(output_filepath, "rb+") as xtb_out_file:
