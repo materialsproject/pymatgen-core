@@ -70,7 +70,7 @@ class Mcsqs:
             Structure object
         """
         data = data.splitlines()
-        data = [x.split() for x in data if x]  # remove empty lines
+        data = [x.split() for x in data if x.strip()]  # remove empty and whitespace-only lines
 
         # following specification/terminology given in manual
         if len(data[0]) == 6:  # lattice parameters
