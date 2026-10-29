@@ -65,6 +65,8 @@ class Lattice(MSONable):
                 axis of the lattice.
         """
         mat = np.array(matrix, dtype=np.float64).reshape((3, 3))
+        if not np.all(np.isfinite(mat)):
+            raise ValueError("Lattice matrix must contain only finite values")
         mat.setflags(write=False)
         self._matrix: NDArray[np.float64] = mat
         self._inv_matrix: NDArray[np.float64] | None = None

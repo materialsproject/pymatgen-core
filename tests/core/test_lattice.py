@@ -680,3 +680,12 @@ class TestLattice(MatSciTest):
     def test_is_3d_periodic(self):
         assert self.cubic.is_3d_periodic
         assert not self.cubic_partial_pbc.is_3d_periodic
+
+
+def test_lattice_rejects_nonfinite_matrix():
+    with pytest.raises(ValueError, match="finite"):
+        Lattice.cubic(float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        Lattice([[float("inf"), 0, 0], [0, 1, 0], [0, 0, 1]])
+    assert Lattice.cubic(0).volume == 0
+    assert Lattice.cubic(-1).volume == 1
