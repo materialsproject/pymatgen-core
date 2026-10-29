@@ -90,8 +90,10 @@ class TestAtomConfig(MatSciTest):
         atom_config = AtomConfig.from_file(filepath)
         tmp_file = f"{self.tmp_path}/atom.config.testing.lzma"
         atom_config.write_file(tmp_file)
-        tmp_atom_config = AtomConfig.from_file(filepath)
+        tmp_atom_config = AtomConfig.from_file(tmp_file)
         assert_allclose(atom_config.structure.lattice.abc, tmp_atom_config.structure.lattice.abc, 5)
+        assert tmp_atom_config.structure.species == atom_config.structure.species
+        assert_allclose(tmp_atom_config.structure.frac_coords, atom_config.structure.frac_coords, atol=1e-5)
 
 
 class TestGenKpt(MatSciTest):
