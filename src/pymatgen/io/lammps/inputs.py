@@ -7,6 +7,7 @@ https://github.com/Matgenix/atomate2-lammps.
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import shutil
@@ -482,9 +483,9 @@ class LammpsInputFile(InputFile):
         Args:
             lmp_input_file (LammpsInputFile): LammpsInputFile to append.
         """
-        # Renumbering comments and stages of the lmp_input_file.stages
-        new_list_to_add = lmp_input_file.stages
-        for i_stage, stage in enumerate(lmp_input_file.stages):
+        # Renumbering comments and stages of a copy of lmp_input_file.stages (the input is left untouched)
+        new_list_to_add = copy.deepcopy(lmp_input_file.stages)
+        for i_stage, stage in enumerate(new_list_to_add):
             stage_name = stage["stage_name"]
             if stage_name.split()[0].strip() == "Comment" and stage_name.split()[1].isdigit():
                 i_comment = int(stage_name.split()[1]) + self.ncomments
@@ -495,7 +496,7 @@ class LammpsInputFile(InputFile):
 
         # Making sure no stage_name of lmp_input_file clash with those from self.
         # If it is the case, we rename them.
-        for i_stage, stage in enumerate(lmp_input_file.stages, start=1):
+        for i_stage, stage in enumerate(new_list_to_add, start=1):
             if stage["stage_name"] in self.stages_names:
                 stage["stage_name"] = f"Stage {self.nstages + i_stage} (previously {stage['stage_name']})"
 
@@ -582,17 +583,9 @@ class LammpsInputFile(InputFile):
         # Strip string from starting and/or ending white spaces
         contents = contents.strip()
 
-        # Remove "&" symbols at the end of lines
-        while "&" in contents:
-            sequence = "&"
-            index = contents.index("&")
-            next_symbol = ""
-            idx = 0
-            while next_symbol != "\n":
-                sequence += next_symbol
-                idx += 1
-                next_symbol = contents[index + idx]
-            contents = contents.replace(f"{sequence}\n", "")
+        # Join continuation lines, i.e. remove "&" symbols (and trailing whitespace) at the end of lines.
+        # An "&" elsewhere (e.g. the "&&" operator in if/variable commands) is left untouched.
+        contents = re.sub(r"&[ \t]*\r?\n", "", contents)
 
         # Remove unwanted lines from the string
         lines = cls._clean_lines(contents.splitlines(), ignore_comments=ignore_comments)
@@ -814,9 +807,15 @@ class LammpsInputFile(InputFile):
         if len(string_list) == 0 or all(s == "" for s in string_list):
             raise ValueError("The list of strings should contain some non-empty strings.")
 
-        # Remove the first comment line possibly added by previous input creations
-        while "# LAMMPS input generated from LammpsInputFile" in string_list:
-            string_list.remove("# LAMMPS input generated from LammpsInputFile")
+        # Remove the header comment line possibly added by previous input creations
+        # (it is followed by the pymatgen version, so match on the prefix)
+        string_list = [
+            string
+            for string in string_list
+            if not string.strip().startswith("# LAMMPS input generated from LammpsInputFile")
+        ]
+        if all(s == "" for s in string_list):
+            raise ValueError("The list of strings should contain some non-empty strings.")
 
         # Get rid of possible initial empty lines
         # and final empty lines
@@ -843,7 +842,8 @@ class LammpsInputFile(InputFile):
             ):
                 lines.append(string)
 
-        lines.append(string_list[-1])
+        if len(string_list) > 1:  # a single line is both the first and the last one
+            lines.append(string_list[-1])
 
         return lines
 
