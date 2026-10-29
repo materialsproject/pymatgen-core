@@ -352,3 +352,21 @@ def test_process_multiwfn_qtaim():
         "66_ring",
         "70_ring",
     ]
+
+
+def test_add_atoms_with_unmapped_atom():
+    """Atoms without a matching atom CP (empty descriptor dicts) must not crash bond assignment."""
+    mol = Molecule.from_file(base_dir / "mol_all.xyz")
+    cp_file = base_dir / "CPprop_fudged_nuclei.txt"
+
+    with pytest.warns(UserWarning, match="Some atoms not mapped"):
+        descriptors = process_multiwfn_qtaim(mol, cp_file, bond_atom_criterion="qtaim")
+    assert descriptors["bond"]["1_bond"]["atom_inds"] == [3, 14]
+    # atom 55 has no CP, so bonds to it only retain the mapped partner
+    assert all(55 not in bond["atom_inds"] for bond in descriptors["bond"].values())
+
+    with (
+        pytest.warns(UserWarning, match="Some atoms not mapped"),
+        pytest.raises(ValueError, match="Could not match all atoms in connected_bond_paths"),
+    ):
+        process_multiwfn_qtaim(mol, cp_file, bond_atom_criterion="combined")
