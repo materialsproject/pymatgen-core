@@ -180,8 +180,9 @@ class NwTask(MSONable):
         self.basis_set_option = basis_set_option
 
         self.operation = operation
-        self.theory_directives = theory_directives or {}
-        self.alternate_directives = alternate_directives or {}
+        # copy so that later in-place updates (e.g. in dft_task) do not mutate the caller's dicts
+        self.theory_directives = dict(theory_directives or {})
+        self.alternate_directives = dict(alternate_directives or {})
 
     def __str__(self) -> str:
         bset_spec = []
@@ -479,7 +480,7 @@ class NwInput(MSONable):
         spin_multiplicity: float | None = None
         title: str | None = None
         basis_set: dict[str, str] | None = None
-        basis_set_option: str | None = None
+        basis_set_option: str = "cartesian"  # NWChem default
         mol: Molecule | None = None
         theory_directives: dict[str, dict[str, str]] = {}
         geom_options: list[str] | None = None
@@ -531,6 +532,10 @@ class NwInput(MSONable):
                 title = line[5:].strip().strip('"')
 
             elif tokens[0].lower() == "basis":
+                # read the basis_set_option, e.g. "basis spherical"
+                for token in tokens[1:]:
+                    if token.lower() in {"cartesian", "spherical"}:
+                        basis_set_option = token.lower()
                 # Parse basis sets
                 line = lines.pop(0).strip()
                 basis_set = {}
@@ -540,9 +545,6 @@ class NwInput(MSONable):
                     line = lines.pop(0).strip()
 
             elif tokens[0].lower() in NwTask.theories:
-                # read the basis_set_option
-                if len(tokens) > 1:
-                    basis_set_option = tokens[1]
                 # Parse theory directives.
                 theory = tokens[0].lower()
                 line = lines.pop(0).strip()
