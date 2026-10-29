@@ -795,6 +795,39 @@ loop_
         sm = StructureMatcher(stol=0.05, ltol=0.01, angle_tol=0.1)
         assert sm.fit(struct, s_test)
 
+    @pytest.mark.parametrize("key", ["_symmetry_cell_setting", "_space_group_crystal_system"])
+    def test_get_lattice_from_crystal_system(self, key):
+        cif_str = f"""data_test
+{key} cubic
+_cell_length_a 4.0
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Na1 0 0 0
+"""
+        struct = CifParser.from_str(cif_str).parse_structures(on_error="raise")[0]
+        assert struct.lattice.parameters == approx((4, 4, 4, 90, 90, 90))
+
+    def test_get_lattice_incomplete_crystal_system_params(self):
+        # Crystal system given but its required parameter is missing: used to raise an
+        # uncaught TypeError from Lattice.cubic() instead of a parse error
+        cif_str = """data_test
+_symmetry_cell_setting cubic
+_cell_length_b 4.0
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Na1 0 0 0
+"""
+        parser = CifParser.from_str(cif_str)
+        assert parser.get_lattice(parser._cif.data["test"]) is None
+        with pytest.raises(ValueError, match="Cannot determine lattice"):
+            parser.parse_structures(on_error="raise")
+
     def test_empty(self):
         # single line
         cb = CifBlock.from_str("data_mwe\nloop_\n_tag\n ''")

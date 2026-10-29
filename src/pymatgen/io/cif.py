@@ -717,20 +717,21 @@ class CifParser:
                 "_symmetry_cell_setting",
                 "_space_group_crystal_system",
             ):
-                if data.data.get(lattice_label):
-                    lattice_type = data.data.get(lattice_label, "").lower()
-                    try:
-                        required_args = getfullargspec(getattr(Lattice, lattice_type)).args
+                if not data.data.get(lattice_label):
+                    continue
+                lattice_type = data.data.get(lattice_label, "").lower()
+                try:
+                    required_args = getfullargspec(getattr(Lattice, lattice_type)).args
 
-                        lengths = (length for length in length_strings if length in required_args)
-                        angles = (a for a in angle_strings if a in required_args)
-                        return self.get_lattice(data, lengths, angles, lattice_type=lattice_type)
-                    except AttributeError as exc:
-                        self.warnings.append(str(exc))
-                        warnings.warn(str(exc), stacklevel=2)
-
-                else:
-                    return None
+                    lengths = tuple(length for length in length_strings if length in required_args)
+                    angles = tuple(a for a in angle_strings if a in required_args)
+                    return self.get_lattice_no_exception(data, lengths, angles, lattice_type=lattice_type)
+                except AttributeError as exc:
+                    self.warnings.append(str(exc))
+                    warnings.warn(str(exc), stacklevel=2)
+                except KeyError:
+                    # Parameters required by this crystal system are missing as well
+                    continue
         return None
 
     @staticmethod
@@ -1245,8 +1246,11 @@ class CifParser:
             else:
                 all_labels = None  # type: ignore[assignment]
 
+            if lattice is None:
+                raise ValueError("Cannot determine lattice: missing or incomplete _cell_length/_cell_angle data.")
+
             struct: Structure = Structure(
-                lattice,  # type:ignore[arg-type]
+                lattice,
                 all_species,
                 all_coords,
                 site_properties=site_properties,
