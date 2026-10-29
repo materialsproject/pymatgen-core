@@ -1089,3 +1089,9 @@ class TestChemicalPotential:
         # test nested brackets with charge
         comp = Composition("[N[Fe]2]2")
         assert str(comp) == "N2 Fe4"
+
+
+def test_nonfinite_composition_amounts_rejected():
+    for amount in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError, match="finite"):
+            Composition({"H": amount})

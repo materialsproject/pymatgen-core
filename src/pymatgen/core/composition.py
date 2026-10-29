@@ -224,6 +224,8 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         elem_amt = {}
         self._n_atoms: int | float = 0
         for key, val in elem_map.items():
+            if not math.isfinite(val):
+                raise ValueError("Amounts in Composition must be finite")
             if val < -type(self).amount_tolerance and not self.allow_negative:
                 raise ValueError("Amounts in Composition cannot be negative!")
             if abs(val) >= type(self).amount_tolerance:
