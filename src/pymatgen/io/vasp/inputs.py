@@ -812,7 +812,8 @@ class Incar(UserDict, MSONable):
         Warnings:
             BadIncarWarning: If there are duplicate in keys (case insensitive).
         """
-        params = params or {}
+        # Shallow-copy so the caller's mapping is never mutated (e.g. by the MAGMOM reshaping below)
+        params = dict(params or {})
 
         # Check for case-insensitive duplicate keys
         key_counter = Counter(key.strip().upper() for key in params)
@@ -1047,7 +1048,8 @@ class Incar(UserDict, MSONable):
                 output = []
                 # a single token is a number (incl. scientific notation, e.g. 1e-3) or an uppercase/dot
                 # string (e.g. .TRUE.); up to 3 tokens may be joined by "*" multipliers (e.g. 9*0.6)
-                num_or_str = r"-?\d+\.?\d*(?:[eE][-+]?\d+)?|[\.A-Z]+"
+                # Fortran also accepts a leading "+" and floats without a leading digit (e.g. .5, -.5)
+                num_or_str = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|[\.A-Z]+"
                 tokens = re.findall(rf"({num_or_str})\*?({num_or_str})?\*?({num_or_str})?", val)
                 for tok in tokens:
                     if tok[2]:  # nested multiplier "count1*count2*value" (e.g. 3*3*-1)

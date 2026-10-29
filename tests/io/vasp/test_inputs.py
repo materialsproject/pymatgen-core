@@ -1124,6 +1124,17 @@ SIGMA = 0.1"""
         assert incar["HFSCREEN"] == approx(0.2)
         assert incar["ALGO"] == "All"
 
+    def test_init_does_not_mutate_input(self):
+        params = {"MAGMOM": [1, 2, 3, 4, 5, 6], "LSORBIT": True}
+        incar = Incar(params)
+        assert incar["MAGMOM"] == [[1, 2, 3], [4, 5, 6]]
+        assert params["MAGMOM"] == [1, 2, 3, 4, 5, 6]
+
+    def test_proc_val_list_fortran_floats(self):
+        # Fortran-style floats without a leading digit or with a leading "+"
+        assert Incar.proc_val("MAGMOM", "2*.5 -.5 +1.5") == [0.5, 0.5, -0.5, 1.5]
+        assert Incar.from_str("MAGMOM = .6 2*-.25")["MAGMOM"] == [0.6, -0.25, -0.25]
+
     def test_proc_val(self):
         assert Incar.proc_val("HELLO", "-0.85 0.85") == "-0.85 0.85"
         # `ML_MODE` should always be lower case
