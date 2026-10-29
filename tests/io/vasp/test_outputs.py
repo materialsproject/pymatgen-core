@@ -1549,6 +1549,21 @@ class TestOutcar:
             outcar = Outcar(f"{VASP_OUT_DIR}/OUTCAR.truncated.gz")
         assert outcar.data["nplwvs_at_kpoints"] == []
 
+    def test_running_outcar_reports_last_values(self, tmp_path):
+        # An OUTCAR of a running/killed job has no final timing block. efermi, nelect
+        # and total_mag must still come from the last ionic step, not the first one.
+        with zopen(f"{VASP_OUT_DIR}/OUTCAR.gz", mode="rt", encoding="utf-8") as file:
+            text = file.read()
+        (tmp_path / "OUTCAR").write_text(text[: text.index("General timing and accounting")], encoding="utf-8")
+
+        full = Outcar(f"{VASP_OUT_DIR}/OUTCAR.gz")
+        running = Outcar(tmp_path / "OUTCAR")
+        assert full.efermi == approx(2.0112)
+        assert running.efermi == approx(full.efermi)
+        assert running.total_mag == approx(full.total_mag)
+        assert running.nelect == approx(full.nelect)
+        assert running.final_energy == approx(full.final_energy)
+
 
 class TestBSVasprun(MatSciTest):
     def test_get_band_structure(self):
