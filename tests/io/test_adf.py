@@ -289,3 +289,5 @@ class TestAdfOutput:
         adf_out = AdfOutput(filename)
         assert adf_out.final_energy == approx(-0.74399276)
         assert len(adf_out.final_structure) == 4
+        assert [site.specie.symbol for site in adf_out.final_structure] == ["N", "H", "H", "H"]
+        assert adf_out.final_structure.cart_coords[1] == approx([0.472858, 0.819015, 0.382100])
