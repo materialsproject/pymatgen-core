@@ -27,3 +27,15 @@ def test_jdftxinputset_write_file(tmp_path):
     read_jdftx_inputfile = JDFTXInfile.from_file(written_file)
     assert written_file.exists()
     assert_idential_jif(read_jdftx_inputfile, jdftx_inputfile)
+
+
+def test_jdftxinputset_write_file_with_fixed_ions(tmp_path):
+    """Ions with moveScale 0 must survive a read -> write round trip through JdftxInputSet."""
+    infile = Path(TEST_FILES_DIR) / "io" / "jdftx" / "test_jdftx_in_files" / "ct_slab_001.in"
+    jdftx_inputfile = JDFTXInfile.from_file(infile)
+    input_set = JdftxInputSet.from_file(infile)
+    input_set.write_input(tmp_path, infile="test.in")
+    read_jdftx_inputfile = JDFTXInfile.from_file(tmp_path / "test.in")
+    move_scales = [ion["moveScale"] for ion in jdftx_inputfile["ion"]]
+    assert 0 in move_scales
+    assert [ion["moveScale"] for ion in read_jdftx_inputfile["ion"]] == move_scales

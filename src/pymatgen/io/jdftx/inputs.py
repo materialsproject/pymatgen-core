@@ -867,8 +867,11 @@ def selective_dynamics_site_prop_to_jdftx_interpretable(selective_dynamics: Sequ
     """
     _selective_dynamics = []
     for i in range(len(selective_dynamics)):
+        if np.ndim(selective_dynamics[i]) == 0:
+            # Already in the JDFTx (moveScale) per-site scalar format, as stored by JDFTXStructure
+            _selective_dynamics.append(int(bool(selective_dynamics[i])))
         # Not worrying about partial free axes for now, just setting movescale to 0 if any axis is fixed
-        if any(not x for x in selective_dynamics[i]):
+        elif any(not x for x in selective_dynamics[i]):
             _selective_dynamics.append(0)
         else:
             _selective_dynamics.append(1)
