@@ -75,7 +75,7 @@ class AdsorbateSiteFinder:
                 slabs that have been reoriented, but the miller vector
                 must be supplied manually
         """
-        if mi_vec:  # get surface normal from miller index
+        if mi_vec is not None:  # get surface normal from miller index
             self.mvec = mi_vec
         else:
             self.mvec = get_mi_vec(slab)
@@ -116,6 +116,8 @@ class AdsorbateSiteFinder:
                 0.1, for which surface sites will be designated if they
                 are 10% less coordinated than their bulk counterpart
         """
+        # Slab.miller_index is a tuple, so a list input would be unhashable in the lookup below
+        miller_index = tuple(miller_index)
         # TODO: for some reason this works poorly with primitive cells
         # may want to switch the coordination algorithm eventually
         vnn_bulk = VoronoiNN(tol=0.05)
@@ -183,13 +185,13 @@ class AdsorbateSiteFinder:
         mask = (m_projs - np.amax(m_projs)) >= -height
         surf_sites = [slab.sites[n] for n in np.where(mask)[0]]
         if xy_tol:
-            # sort surface sites by height
-            surf_sites = [s for (h, s) in zip(m_projs[mask], surf_sites, strict=True)]
-            surf_sites.reverse()
+            # Sort surface sites by height, highest first, so the topmost site is kept at each in-plane position
+            surf_sites = [s for _h, s in sorted(zip(m_projs[mask], surf_sites, strict=True), key=lambda x: -x[0])]
             unique_sites: list = []
             unique_perp_fracs: list = []
             for site in surf_sites:
-                this_perp = site.coords - np.dot(site.coords, self.mvec)
+                # Project the site onto the miller plane
+                this_perp = site.coords - np.dot(site.coords, self.mvec) * np.asarray(self.mvec)
                 this_perp_frac = slab.lattice.get_fractional_coords(this_perp)
                 if not in_coord_list_pbc(unique_perp_fracs, this_perp_frac):
                     unique_sites.append(site)
@@ -681,9 +683,9 @@ def plot_slab(
     lattice_sum = vertices[0] + vertices[1]
     # inverse coords, sites, alphas, to show other side of slab
     if inverse:
-        alphas = np.array(reversed(alphas))
+        alphas = alphas[::-1]
         sites = list(reversed(sites))
-        coords = np.array(reversed(coords))
+        coords = coords[::-1]
     # Draw circles at sites and stack them accordingly
     for idx, coord in enumerate(coords):
         radius = sites[idx].species.elements[0].atomic_radius * scale
