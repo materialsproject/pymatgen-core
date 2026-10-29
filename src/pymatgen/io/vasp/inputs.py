@@ -31,7 +31,7 @@ from monty.os.path import zpath
 from monty.serialization import dumpfn, loadfn
 from tabulate import tabulate
 
-from pymatgen.core import SETTINGS, Element, Lattice, Structure, get_el_sp
+from pymatgen.core import SETTINGS, Element, Lattice, Structure
 from pymatgen.core import constants as const
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.util.io_utils import clean_lines
@@ -145,12 +145,13 @@ class Poscar(MSONable):
             if not selective_dynamics.all():
                 site_properties["selective_dynamics"] = selective_dynamics
 
-        if velocities:
+        # Use explicit None/size checks: the truth value of a multi-element ndarray is ambiguous
+        if velocities is not None and len(velocities) > 0:
             velocities = np.asarray(velocities)
             if velocities.any():
                 site_properties["velocities"] = velocities
 
-        if predictor_corrector:
+        if predictor_corrector is not None and len(predictor_corrector) > 0:
             predictor_corrector = np.asarray(predictor_corrector)
             if predictor_corrector.any():
                 site_properties["predictor_corrector"] = predictor_corrector
@@ -163,7 +164,7 @@ class Poscar(MSONable):
         if predictor_corrector_preamble:
             self.structure.properties["predictor_corrector_preamble"] = predictor_corrector_preamble
 
-        if lattice_velocities and np.any(lattice_velocities):
+        if lattice_velocities is not None and len(lattice_velocities) > 0 and np.any(lattice_velocities):
             self.structure.properties["lattice_velocities"] = np.asarray(lattice_velocities)
 
         self.true_names: bool = true_names
@@ -220,7 +221,7 @@ class Poscar(MSONable):
 
     @predictor_corrector_preamble.setter
     def predictor_corrector_preamble(self, predictor_corrector_preamble: str | None) -> None:
-        self.structure.properties["predictor_corrector"] = predictor_corrector_preamble
+        self.structure.properties["predictor_corrector_preamble"] = predictor_corrector_preamble
 
     @property
     def lattice_velocities(self) -> ArrayLike | None:
@@ -304,8 +305,10 @@ class Poscar(MSONable):
                 potcar_path = next((f for f in potcars if f == f"{dirname}/POTCAR"), min(potcars))
 
                 potcar = Potcar.from_file(potcar_path)
-                names = [sym.split("_")[0] for sym in potcar.symbols]
-                map(get_el_sp, names)  # ensure valid names
+                # Strip POTCAR suffixes, e.g. "Fe_pv" -> "Fe" and pseudo-hydrogen "H.75"/"H1.25" -> "H"
+                names = [re.split(r"[_.\d]", sym, maxsplit=1)[0] for sym in potcar.symbols]
+                for name in names:  # ensure valid element names
+                    Element(name)
             except Exception:
                 names = None
 
