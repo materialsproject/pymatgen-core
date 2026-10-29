@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import json
 import re
 from io import StringIO
 from itertools import combinations
@@ -12,7 +13,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 from matplotlib.colors import Normalize, same_color
-from monty.json import MontyDecoder
+from monty.json import MontyDecoder, MontyEncoder
 from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
@@ -1603,10 +1604,20 @@ class TestGrandPotentialEdgeCases:
     def test_as_from_dict(self):
         dct = self.gppd.as_dict()
         assert dct["@class"] == "GrandPotentialPhaseDiagram"
-        assert dct["chempots"] == {Element("O"): -5}
+        assert dct["chempots"] == {"O": -5}
         gppd = GrandPotentialPhaseDiagram.from_dict(dct)
         assert gppd.chempots == self.gppd.chempots
         assert gppd.elements == self.gppd.elements
+        expected = {e.original_entry.reduced_formula: self.gppd.get_form_energy(e) for e in self.gppd.stable_entries}
+        actual = {e.original_entry.reduced_formula: gppd.get_form_energy(e) for e in gppd.stable_entries}
+        assert actual == approx(expected)
+
+    def test_as_from_dict_json(self):
+        # as_dict used to contain Element keys (not JSON-serializable) and from_dict
+        # wrapped the stored GrandPotPDEntry objects in a second GrandPotPDEntry.
+        gppd = MontyDecoder().decode(json.dumps(self.gppd.as_dict(), cls=MontyEncoder))
+        assert gppd.chempots == {Element("O"): -5}
+        assert all(not isinstance(e.original_entry, GrandPotPDEntry) for e in gppd.all_entries)
         expected = {e.original_entry.reduced_formula: self.gppd.get_form_energy(e) for e in self.gppd.stable_entries}
         actual = {e.original_entry.reduced_formula: gppd.get_form_energy(e) for e in gppd.stable_entries}
         assert actual == approx(expected)

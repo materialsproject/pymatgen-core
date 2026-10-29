@@ -1577,8 +1577,11 @@ class GrandPotentialPhaseDiagram(PhaseDiagram):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "all_entries": [entry.as_dict() for entry in self.all_entries],
-            "chempots": self.chempots,
+            # Store the original (non-grand-potential) entries so from_dict does not
+            # wrap GrandPotPDEntry objects in a second GrandPotPDEntry.
+            "all_entries": [entry.original_entry.as_dict() for entry in self.all_entries],
+            # Element keys are not JSON-serializable.
+            "chempots": {el.symbol: mu for el, mu in self.chempots.items()},
             "elements": [entry.as_dict() for entry in self.elements],
         }
 
@@ -1592,6 +1595,8 @@ class GrandPotentialPhaseDiagram(PhaseDiagram):
             GrandPotentialPhaseDiagram
         """
         entries = MontyDecoder().process_decoded(dct["all_entries"])
+        # Legacy dicts stored GrandPotPDEntry objects; unwrap them to the original entries.
+        entries = [entry.original_entry if isinstance(entry, GrandPotPDEntry) else entry for entry in entries]
         elements = MontyDecoder().process_decoded(dct["elements"])
         return cls(entries, dct["chempots"], elements)
 
