@@ -530,14 +530,13 @@ class CifParser:
 
                     idxs_to_remove.append(idx)
 
-            # Remove the original row by iterating over all keys in the CIF
-            # data looking for lists, which indicates
-            # multiple data items, one for each row, and remove items from the
-            # list that corresponds to the removed row,
+            # Remove the original row from every column of the _atom_site loop,
             # so that it's not processed by the rest of this function (which
-            # would result in an error).
-            for original_key in data.data:
-                if isinstance(data.data[original_key], list):
+            # would result in an error). Columns of other loops (e.g. symmetry
+            # operations) are indexed independently and must be left untouched.
+            atom_site_keys = next((loop for loop in data.loops if "_atom_site_label" in loop), [])
+            for original_key in atom_site_keys:
+                if isinstance(data.data.get(original_key), list):
                     for idx in sorted(idxs_to_remove, reverse=True):
                         del data.data[original_key][idx]
 

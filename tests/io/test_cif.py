@@ -407,6 +407,36 @@ class TestCifIO(MatSciTest):
         for struct in parser.parse_structures():
             assert struct.formula == "Zn2.58 Fe1.38 As4 Pb2.04 O16"
 
+    def test_springer_pauling_fix_keeps_other_loops(self):
+        # Removing a Pauling-style mixed row (index 1) used to also delete entry 1 of every
+        # other loop, here dropping the inversion op and halving the Na sites
+        cif_str = """data_test
+_cell_length_a 4.0
+_cell_length_b 4.0
+_cell_length_c 4.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_symmetry_equiv_pos_as_xyz
+'x, y, z'
+'-x, -y, -z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Na1 Na 0.1 0.2 0.3 1
+Nb,Zr '0.8Nb + 0.2Zr' 0 0 0 1
+"""
+        parser = CifParser.from_str(cif_str)
+        assert "Pauling file corrections applied." in parser.warnings
+        assert parser._cif.data["test"]["_symmetry_equiv_pos_as_xyz"] == ["x, y, z", "-x, -y, -z"]
+        struct = parser.parse_structures(on_error="raise")[0]
+        assert struct.composition == Composition({"Na": 2, "Nb": 0.8, "Zr": 0.2})
+
     def test_cif_parser_cod(self):
         """Parsing problematic CIF files from the COD database."""
         # Symbol in capital letters
