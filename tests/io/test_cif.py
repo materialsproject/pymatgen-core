@@ -1046,6 +1046,18 @@ Si1 Si 0 0 0 1 0.0
         assert "Fe  Fe0  1  0.21872822  0.75000000  0.47486711  1  1.0" in cif_str
         assert "O  O23  1  0.95662769  0.25000000  0.29286233  1  -1.0" in cif_str
 
+    def test_cif_writer_non_numeric_site_properties(self):
+        # Non-float site properties used to raise "Unknown format code 'f'"
+        struct = Structure(
+            Lattice.cubic(3),
+            ["Na", "Cl"],
+            [[0, 0, 0], [0.5, 0.5, 0.5]],
+            site_properties={"tag": ["a", "b"], "charge": [1, -1]},
+        )
+        block = CifBlock.from_str(str(CifWriter(struct, write_site_properties=True)))
+        assert block["_atom_site_tag"] == ["a", "b"]
+        assert block["_atom_site_charge"] == ["1.00000000", "-1.00000000"]
+
     def test_write_spin_species(self):
         """Test that a Species with spin and oxidation state writes correctly."""
         lattice = Lattice.cubic(3.0)

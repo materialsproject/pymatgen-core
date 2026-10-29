@@ -1725,7 +1725,12 @@ class CifWriter:
 
                     if write_site_properties:
                         for key, val in site.properties.items():
-                            atom_site_properties[key].append(format_str.format(val))
+                            try:
+                                formatted = format_str.format(val)
+                            except (TypeError, ValueError):
+                                # Non-numeric property (e.g. str, list, Magmom)
+                                formatted = str(val)
+                            atom_site_properties[key].append(formatted)
 
                     count += 1
 
