@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections
 import collections.abc
+from copy import deepcopy
 import json
 import warnings
 from typing import TYPE_CHECKING, cast
@@ -522,7 +523,7 @@ class PeriodicSite(Site, MSONable):
             self.species,
             frac_coords,
             self.lattice,
-            properties=self.properties,
+            properties=deepcopy(self.properties),
             label=self.label,
         )
 

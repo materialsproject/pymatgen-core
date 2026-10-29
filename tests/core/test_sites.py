@@ -219,6 +219,16 @@ class TestPeriodicSite(MatSciTest):
         val = [0.25, 0.35, 4.46]
         assert_allclose(site.frac_coords, val)
 
+        source = PeriodicSite(
+            "Fe",
+            np.array([1.25, 2.35, 4.46]),
+            self.lattice,
+            properties={"metadata": {"tags": ["source"]}},
+        )
+        copied = source.to_unit_cell()
+        copied.properties["metadata"]["tags"].append("copy")
+        assert source.properties == {"metadata": {"tags": ["source"]}}
+
     def test_setters(self):
         site = self.propertied_site
         site.species = "Cu"
