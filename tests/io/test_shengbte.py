@@ -4,6 +4,7 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.io.shengbte import Control
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -87,3 +88,19 @@ class TestShengBTE(MatSciTest):
         control_from_dict = Control.from_dict(ctrl_from_file.as_dict())
         assert control_from_dict == ctrl_from_file
         assert control_from_dict.to_json() == ctrl_from_file.to_json()
+
+    def test_from_structure_element_order(self):
+        # elements used to follow composition order while types followed sorted Z,
+        # so MgO came back as OMg with the species swapped
+        struct = Structure(Lattice.cubic(4.2), ["Mg", "O"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        control = Control.from_structure(struct)
+        assert control["elements"] == ["O", "Mg"]
+        assert control["types"] == [2, 1]
+        assert control.get_structure().species == struct.species
+
+    def test_get_structure_single_element(self):
+        # f90nml returns elements = "Si" for a single element, which used to be zipped
+        # character by character into ["S", "i"]
+        struct = Control.from_file(self.filename).get_structure()
+        assert struct.formula == "Si2"
+        assert struct.lattice.a == approx(3.866975, abs=1e-5)

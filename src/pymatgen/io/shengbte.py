@@ -9,6 +9,7 @@ import numpy as np
 from monty.dev import requires
 from monty.json import MSONable
 
+from pymatgen.core import Element
 from pymatgen.core.structure import Structure
 from pymatgen.io.vasp import Kpoints
 
@@ -221,9 +222,9 @@ class Control(MSONable, dict):
         Returns:
             A ShengBTE control object.
         """
-        elements = list(map(str, structure.elements))
-
         unique_nums = np.unique(structure.atomic_numbers)
+        # Must follow the same (sorted by Z) order as the type indices below
+        elements = [Element.from_Z(int(z)).symbol for z in unique_nums]
         types_dict = dict(zip(unique_nums, range(len(unique_nums)), strict=True))
         types = [types_dict[i] + 1 for i in structure.atomic_numbers]
 
@@ -259,10 +260,16 @@ class Control(MSONable, dict):
         if not all(r in self for r in required):
             raise ValueError("All of ['lattvec', 'types', 'elements', 'positions'] must be in control object")
 
+        # f90nml reads single-valued arrays as scalars, e.g. elements = "Si"
         unique_elements = self["elements"]
+        if isinstance(unique_elements, str):
+            unique_elements = [unique_elements]
+        types = self["types"]
+        if isinstance(types, int):
+            types = [types]
         n_unique_elements = len(unique_elements)
         element_map = dict(zip(range(1, n_unique_elements + 1), unique_elements, strict=True))
-        species = [element_map[i] for i in self["types"]]
+        species = [element_map[i] for i in types]
 
         cell = np.array(self["lattvec"])
 
