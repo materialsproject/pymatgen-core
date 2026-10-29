@@ -195,7 +195,8 @@ class JonesFaithfulTransformation:
 
     def transform_lattice(self, lattice: Lattice) -> Lattice:
         """Transforms a lattice."""
-        return Lattice(np.matmul(lattice.matrix, self.P))
+        # (a', b', c') = (a, b, c) P with basis vectors as columns; Lattice.matrix stores them as rows
+        return Lattice(np.matmul(np.transpose(self.P), lattice.matrix))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
@@ -203,7 +204,7 @@ class JonesFaithfulTransformation:
         return np.allclose(self.P, other.P) and np.allclose(self.p, other.p)
 
     def __str__(self):
-        return str(JonesFaithfulTransformation.transformation_string)
+        return self.transformation_string
 
     def __repr__(self):
         return f"JonesFaithfulTransformation with P:\n{self.P}\nand p:\n{self.p}"
