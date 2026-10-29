@@ -1089,3 +1089,11 @@ class TestChemicalPotential:
         # test nested brackets with charge
         comp = Composition("[N[Fe]2]2")
         assert str(comp) == "N2 Fe4"
+
+
+def test_empty_composition_fraction_errors():
+    composition = Composition("H0O0")
+    with pytest.raises(ValueError, match="empty composition"):
+        composition.get_atomic_fraction("H")
+    with pytest.raises(ValueError, match="empty composition"):
+        composition.get_wt_fraction("H")

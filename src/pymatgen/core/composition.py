@@ -610,6 +610,8 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         Returns:
             Atomic fraction for element el in Composition
         """
+        if self._n_atoms == 0:
+            raise ValueError("cannot calculate atomic fraction for an empty composition")
         return abs(self[el]) / self._n_atoms
 
     def get_wt_fraction(self, el: SpeciesLike) -> float:
@@ -621,6 +623,8 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         Returns:
             float: Weight fraction for element el in Composition.
         """
+        if self._n_atoms == 0:
+            raise ValueError("cannot calculate weight fraction for an empty composition")
         sp = get_el_sp(el)
         if isinstance(sp, Species):
             return float(sp.atomic_mass * abs(self._data.get(sp, 0)) / self.weight)
