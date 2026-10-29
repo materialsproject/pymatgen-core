@@ -783,6 +783,19 @@ Direct
             assert_allclose(cy_indices2, py_indices2)
             assert len(cy_offsets) == len(py_offsets)
 
+    def test_get_neighbor_list_py_honors_exclude_self(self):
+        """The Python fallback must match the compiled path's self-pair semantics."""
+        struct = Structure(Lattice.cubic(10), ["H"], [[0, 0, 0]])
+
+        without_self = struct._get_neighbor_list_py(1.0, exclude_self=True)
+        with_self = struct._get_neighbor_list_py(1.0, exclude_self=False)
+
+        assert len(without_self[0]) == 0
+        assert_array_equal(with_self[0], [0])
+        assert_array_equal(with_self[1], [0])
+        assert_array_equal(with_self[2], [[0, 0, 0]])
+        assert_allclose(with_self[3], [0.0])
+
     @pytest.mark.xfail(reason="TODO: need someone to fix this")
     @pytest.mark.skipif(not os.getenv("CI"), reason="Only run this in CI tests")
     def test_get_all_neighbors_crosscheck_old(self):

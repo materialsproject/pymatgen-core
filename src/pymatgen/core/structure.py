@@ -1777,6 +1777,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             include_image=True,
             sites=sites,
             numerical_tol=numerical_tol,
+            exclude_self=False,
         )
         center_indices: list[int] = []
         points_indices: list[int] = []
@@ -2124,6 +2125,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         include_image: bool = False,
         sites: Sequence[PeriodicSite] | None = None,
         numerical_tol: float = 1e-8,
+        exclude_self: bool = True,
     ) -> list[list[PeriodicNeighbor]]:
         """Get neighbors for each atom in the unit cell, out to a distance r.
         Use this method if you are planning on looping over all sites in the
@@ -2156,6 +2158,8 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 with the site. Sites which are r + numerical_tol away is deemed
                 to be within r from the site. The default of 1e-8 should be
                 ok in most instances.
+            exclude_self (bool): whether to exclude a site neighboring with itself
+                within numerical tolerance distance, default to True
 
         Returns:
             list[list[PeriodicNeighbor]]: Neighbors for each site in structure.
@@ -2179,7 +2183,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 continue
             for n in point_neighbor:
                 coord, d, index, image = n
-                if (d > numerical_tol) or (self[index] != site):
+                if not exclude_self or (d > numerical_tol) or (self[index] != site):
                     neighbor = PeriodicNeighbor(
                         species=self[index].species,
                         coords=coord,
