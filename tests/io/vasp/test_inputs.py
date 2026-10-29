@@ -1437,6 +1437,31 @@ Cartesian
         kpt_copy.style = Kpoints.supported_modes.Monkhorst
         assert kpts != kpt_copy
 
+    def test_explicit_fractional_weights_round_trip(self):
+        kpoints = Kpoints(
+            comment="explicit",
+            num_kpts=3,
+            style=Kpoints.supported_modes.Reciprocal,
+            kpts=[(0, 0, 0), (0.5, 0, 0), (0.5, 0.5, 0)],
+            kpts_weights=[0.125, 0.375, 2],
+        )
+        lines = str(kpoints).splitlines()
+        assert lines[3:] == ["0 0 0 0.125", "0.5 0 0 0.375", "0.5 0.5 0 2"]
+        assert Kpoints.from_str(str(kpoints)).kpts_weights == [0.125, 0.375, 2]
+
+    def test_generating_basis_round_trip(self):
+        # Automatic mode with generating basis vectors and no (zero) shift line
+        kpoints = Kpoints(
+            comment="basis",
+            num_kpts=0,
+            style=Kpoints.supported_modes.Reciprocal,
+            kpts=[(0.25, 0, 0), (0, 0.25, 0), (0, 0, 0.5)],
+        )
+        new_kpoints = Kpoints.from_str(str(kpoints))
+        assert new_kpoints.kpts == [(0.25, 0, 0), (0, 0.25, 0), (0, 0, 0.5)]
+        assert new_kpoints.kpts_shift == (0, 0, 0)
+        assert new_kpoints.style == Kpoints.supported_modes.Reciprocal
+
     def test_automatic_kpoint(self):
         poscar = Poscar.from_str(
             """Al1
