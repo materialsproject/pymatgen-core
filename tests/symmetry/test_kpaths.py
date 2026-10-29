@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from monty.serialization import loadfn
@@ -31,6 +33,22 @@ class TestHighSymmKpath(MatSciTest):
         kpts, labels = kpath.get_kpoints()
         assert len(kpts) == len(labels)
         assert len(kpts) > 0
+
+    def test_invalid_path_type(self):
+        with pytest.raises(ValueError, match="Unknown path_type"):
+            HighSymmKpath(self.get_structure("Si"), path_type="foo")
+
+    def test_get_klabels_symmetry_equivalent_label(self):
+        """A label matched only via a symmetry operation keeps its full name plus the ^{*} marker."""
+        kpath = HighSymmKpath(self.get_structure("Si"), path_type="setyawan_curtarolo")
+        path_a = SimpleNamespace(kpath={"kpoints": {"P": np.array([0.5, 0, 0]), "Q": np.array([0.1, 0.2, 0.3])}})
+        path_b = SimpleNamespace(
+            kpath={"kpoints": {"X_1": np.array([0.5, 0, 0]), "\\Sigma_2": np.array([-0.1, -0.2, -0.3])}}
+        )
+        rpg = [np.eye(3), -np.eye(3)]
+        # lm_bs=path_b, sc_bs=hin_bs=path_a
+        labels = kpath._get_klabels(path_b, path_a, path_a, rpg)
+        assert labels["setyawan_curtarolo"]["latimer_munro"] == {"P": "X_1", "Q": "\\Sigma_2^{*}"}
 
     def test_path_type_property(self):
         """`path_type` returns whatever was passed in."""
