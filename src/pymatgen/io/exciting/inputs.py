@@ -64,7 +64,7 @@ class ExcitingInput(MSONable):
         """
         if structure.is_ordered:
             site_properties = {}
-            if lockxyz:
+            if lockxyz is not None:
                 site_properties["selective_dynamics"] = np.asarray(lockxyz)
             self.structure = structure.copy(site_properties=site_properties)
             self.title = structure.formula if title is None else title
@@ -137,7 +137,7 @@ class ExcitingInput(MSONable):
 
         # check the atomic positions type
         cartesian = False
-        if struct.attrib.get("cartesian"):
+        if struct.attrib.get("cartesian", "false").strip().lower() in ("true", ".true.", "t", "1"):
             cartesian = True
             for p, j in itertools.product(positions, range(3)):
                 p[j] *= ExcitingInput.bohr2ang
@@ -152,19 +152,19 @@ class ExcitingInput(MSONable):
 
         # get the stretch attribute
         stretch_in = _crystal.get("stretch")
-        stretch = np.array([float(a) for a in stretch_in]) if stretch_in else np.array([1.0, 1.0, 1.0])
+        stretch = np.array([float(a) for a in stretch_in.split()]) if stretch_in else np.array([1.0, 1.0, 1.0])
 
-        # get basis vectors and scale them accordingly
+        # get basis vectors and scale them accordingly (stretch scales each lattice vector)
         basisnode = _crystal.iter("basevect")
-        for vect in basisnode:
+        for idx, vect in enumerate(basisnode):
             if vect.text is None:
                 raise ValueError("vect.text cannot be None.")
             x, y, z = vect.text.split()
             vectors.append(
                 [
-                    float(x) * stretch[0] * scale,
-                    float(y) * stretch[1] * scale,
-                    float(z) * stretch[2] * scale,
+                    float(x) * stretch[idx] * scale,
+                    float(y) * stretch[idx] * scale,
+                    float(z) * stretch[idx] * scale,
                 ]
             )
         # create lattice and structure object
@@ -258,14 +258,7 @@ class ExcitingInput(MSONable):
                 coord = f"{fc[0]:16.8f} {fc[1]:16.8f} {fc[2]:16.8f}"
                 # obtain Cartesian coords from fractional ones if needed
                 if cartesian:
-                    coord2 = []
-                    for k in range(3):
-                        inter = (
-                            new_struct[j].frac_coords[k] * basis[0][k]
-                            + new_struct[j].frac_coords[k] * basis[1][k]
-                            + new_struct[j].frac_coords[k] * basis[2][k]
-                        ) * ang2bohr
-                        coord2.append(inter)
+                    coord2 = np.dot(fc, basis) * ang2bohr
                     coord = f"{coord2[0]:16.8f} {coord2[1]:16.8f} {coord2[2]:16.8f}"
 
                 # write atomic positions
