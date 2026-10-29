@@ -915,3 +915,16 @@ def test_count_layers():
         [[0, 0, 0.1], [0.5, 0.5, 0.1], [0, 0, 0.4], [0, 0, 0.7]],
     )
     assert count_layers(layered, Element("Si")) == 2
+
+    # Sites of other elements come first, so cluster indices must map to the selected sites only
+    reordered = Structure(
+        Lattice.tetragonal(3, 20),
+        ["O", "O", "Ti", "Ti"],
+        [[0, 0, 0.2], [0.5, 0.5, 0.2], [0, 0, 0.1], [0, 0, 0.4]],
+    )
+    assert count_layers(reordered, Element("Ti")) == 2
+
+    # An element matches its oxidation-state decorated species
+    reordered.add_oxidation_state_by_element({"O": -2, "Ti": 4})
+    assert count_layers(reordered, Element("Ti")) == 2
+    assert count_layers(reordered, reordered.species[2]) == 2

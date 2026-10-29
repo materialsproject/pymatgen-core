@@ -2921,7 +2921,9 @@ def label_termination(slab: Structure, ftol: float = 0.25, t_idx: int | None = N
 def count_layers(struct: Structure, el: Element | Species | None = None) -> int:
     """Count the number of layers along the c-axis."""
     el = el or struct.elements[0]
-    frac_coords = [site.frac_coords for site in struct if site.species_string == str(el)]
+    # Match either the exact species string (e.g. "Ti4+") or, for an element, any of its species
+    el_sites = [site for site in struct if str(el) in {site.species_string, *(sp.symbol for sp in site.species)}]
+    frac_coords = [site.frac_coords for site in el_sites]
     n_el_sites = len(frac_coords)
 
     if n_el_sites == 1:
@@ -2944,7 +2946,8 @@ def count_layers(struct: Structure, el: Element | Species | None = None) -> int:
 
     clustered_sites: dict[int, list[Site]] = {c: [] for c in clusters}
     for idx, cluster in enumerate(clusters):
-        clustered_sites[cluster].append(struct[idx])
+        # Clusters are indexed over the selected sites, not over the whole structure
+        clustered_sites[cluster].append(el_sites[idx])
 
     plane_heights = {np.mean(np.mod([s.frac_coords[2] for s in sites], 1)): c for c, sites in clustered_sites.items()}
 
