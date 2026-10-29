@@ -67,6 +67,18 @@ class TestKpoint:
         assert_allclose(kpoint.cart_coords, [1.0, 4.0, -5.0])
         assert kpoint.label == "X"
 
+    def test_does_not_alias_input_coords(self):
+        coords = np.array([1.25, -0.5, 0.0])
+        kpoint = Kpoint(coords, self.lattice, to_unit_cell=True)
+        assert_allclose(coords, [1.25, -0.5, 0.0])  # caller's array must not be modified
+        assert_allclose(kpoint.frac_coords, [0.25, 0.5, 0.0])
+
+        coords = np.array([0.1, 0.2, 0.3])
+        kpoint = Kpoint(coords, self.lattice)
+        coords[0] = 0.4
+        assert_allclose(kpoint.frac_coords, [0.1, 0.2, 0.3])
+        assert_allclose(kpoint.cart_coords, [1.0, 2.0, 3.0])
+
 
 class TestBandStructureSymmLine(MatSciTest):
     def setup_method(self):

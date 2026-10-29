@@ -60,7 +60,10 @@ class Kpoint(MSONable):
             label (str): The label of the Kpoint if any (None by default).
         """
         self._lattice = lattice
-        self._frac_coords = lattice.get_fractional_coords(coords) if coords_are_cartesian else np.asarray(coords)
+        # Copy so that to_unit_cell (and later caller-side mutation) never touches the input array
+        self._frac_coords = (
+            lattice.get_fractional_coords(coords) if coords_are_cartesian else np.array(coords, dtype=float)
+        )
         self._label = label
 
         if to_unit_cell:
