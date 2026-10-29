@@ -137,3 +137,22 @@ def test_forces_in_lattice_coordinates():
     bond = structure.cart_coords[0] - structure.cart_coords[1]
     cos_angle = np.dot(jout.forces[0], bond) / np.linalg.norm(jout.forces[0]) / np.linalg.norm(bond)
     assert cos_angle == pytest.approx(-1, abs=1e-3)
+
+
+def test_trajectory_does_not_mutate_slices():
+    """Building the combined trajectory must not extend the first slice's trajectory in place."""
+    jout = JDFTXOutfile.from_file(example_latmin_outfile_path)
+    assert len(jout.slices) > 1
+    slice_lens = [len(slc.trajectory) for slc in jout.slices]
+    assert len(jout.trajectory) == sum(slice_lens)
+    assert slice_lens[0] == len(jout.slices[0].jstrucs)
+    assert jout.trajectory is not jout.slices[0].trajectory
+
+
+def test_as_dict_with_none_slice():
+    """Slices that failed to parse are stored as None and must not break as_dict."""
+    jout = JDFTXOutfile.from_file(example_sp_outfile_path)
+    jout_with_none = JDFTXOutfile(slices=[None, *jout.slices])
+    dct = jout_with_none.as_dict()
+    assert dct["slices"][0] is None
+    assert len(dct["slices"]) == 2

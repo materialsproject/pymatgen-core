@@ -563,6 +563,7 @@ orb_ref_to_o_dict = {
     orb_ref_list[-1][3]: int(Orbital.f0),
     orb_ref_list[-1][4]: int(Orbital.f1),
     orb_ref_list[-1][5]: int(Orbital.f2),
+    orb_ref_list[-1][6]: int(Orbital.f3),
 }
 
 
