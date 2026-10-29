@@ -126,6 +126,8 @@ class TransformedStructure(MSONable):
             input_structure = self.final_structure.as_dict()
             alts = []
             for x in ranked_list[1:]:
+                # copy so that the transformation's own stored results are not mutated
+                x = dict(x)
                 struct = x.pop("structure")
                 actual_transformation = x.pop("transformation", transformation)
                 h_dict = actual_transformation.as_dict()
@@ -137,11 +139,12 @@ class TransformedStructure(MSONable):
                 dct["final_structure"] = struct.as_dict()
                 alts.append(TransformedStructure.from_dict(dct))
 
-            x = ranked_list[0]
+            x = dict(ranked_list[0])
             struct = x.pop("structure")
             actual_transformation = x.pop("transformation", transformation)
             h_dict = actual_transformation.as_dict()
-            h_dict["input_structure"] = self.final_structure.as_dict()
+            # self.final_structure was overwritten by the alternatives above
+            h_dict["input_structure"] = input_structure
             h_dict["output_parameters"] = x
             self.history.append(h_dict)
             self.final_structure = struct
