@@ -221,7 +221,8 @@ class Dos(MSONable):
             raise ValueError("Energies of both DOS are not compatible!")
 
         densities = {spin: self.densities[spin] + other.densities[spin] for spin in self.densities}
-        return type(self)(self.efermi, self.energies, densities)
+        # Subclasses (CompleteDos, FermiDos) have incompatible constructors, so always return a plain Dos
+        return Dos(self.efermi, self.energies, densities)
 
     def __str__(self) -> str:
         """A string which can be easily plotted."""

@@ -57,6 +57,16 @@ class TestDos:
         assert isinstance(dos_dict["densities"]["1"][0], float)
         assert not isinstance(dos_dict["densities"]["1"][0], np.float64)
 
+    def test_add_subclasses(self):
+        # Adding CompleteDos/FermiDos used to call the subclass constructor with
+        # Dos positional args and crash
+        for dos in (self.dos, FermiDos(self.dos)):
+            summed = dos + dos
+            assert type(summed) is Dos
+            assert summed.efermi == approx(dos.efermi)
+            for spin in dos.densities:
+                assert_allclose(summed.densities[spin], 2 * dos.densities[spin])
+
 
 class TestFermiDos:
     def setup_method(self):
