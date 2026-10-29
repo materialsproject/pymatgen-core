@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 import re
 from itertools import islice
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 import numpy as np
@@ -410,7 +411,8 @@ class LobsterMatrices(LobsterFile):
         Returns:
             str: Matrix type.
         """
-        name = str(self.filename).lower()
+        # Use the file name only: parent directories may contain other matrix type names
+        name = Path(self.filename).name.lower()
 
         for matrix_type in self.matrix_types:
             if matrix_type in name:
