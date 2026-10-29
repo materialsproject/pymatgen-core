@@ -693,7 +693,7 @@ class Cp2kOutput:
         the convergence cutoff for scf (eps_scf),.
         """
         max_scf = re.compile(r"max_scf:\s+(\d+)")
-        eps_scf = re.compile(r"eps_scf:\s+(\d+)")
+        eps_scf = re.compile(r"eps_scf:\s+(\d+\.?\d*(?:[eE][+\-]?\d+)?)")
         self.read_pattern(
             {"max_scf": max_scf, "eps_scf": eps_scf},
             terminate_on_match=True,
@@ -1165,16 +1165,17 @@ class Cp2kOutput:
         by spin up/spin down channel and over many ionic steps, see parse_mo_eigenvalues().
         """
         pattern = re.compile(r"HOMO.*-.*LUMO.*gap.*\s(-?\d+.\d+)")
+        # Read forwards so the per-spin lists are chronological and [-1] is the final gap
         self.read_pattern(
             patterns={"band_gap": pattern},
-            reverse=True,
+            reverse=False,
             terminate_on_match=False,
             postprocess=float,
         )
         bg = {Spin.up: [], Spin.down: []}
         for i in range(len(self.data["band_gap"])):
             if self.spin_polarized:
-                if i % 2:
+                if i % 2 == 0:
                     bg[Spin.up].append(self.data["band_gap"][i][0])
                 else:
                     bg[Spin.down].append(self.data["band_gap"][i][0])
@@ -1303,7 +1304,7 @@ class Cp2kOutput:
             if not line.startswith("#"):
                 continue
             if line.split()[1] == "Set":
-                nkpts += int(lines[0].split()[6])
+                nkpts += int(line.split()[6])
             elif line.split()[1] == "Point":
                 kpts.append(list(map(float, line.split()[-4:-1])))
             elif line.split()[1] == "Special":
@@ -1327,7 +1328,7 @@ class Cp2kOutput:
                 Spin.down: down[:, 1].reshape((nkpts, nbands)).T.tolist(),
             }
         else:
-            eigenvals = {Spin.up: bands_data.reshape((nbands, nkpts))}
+            eigenvals = {Spin.up: bands_data[:, 1].reshape((nkpts, nbands)).T.tolist()}
 
         # Filter out occupied and unoccupied states
         occupied_mask = ~np.isclose(bands_data[:, -1], 0.0)
