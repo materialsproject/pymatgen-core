@@ -17,7 +17,7 @@ import orjson
 from monty.io import zopen
 from monty.json import MSONable
 
-from pymatgen.core import Element, Site, Structure
+from pymatgen.core import Site, Structure
 from pymatgen.core.units import ang_to_bohr, bohr_to_angstrom
 from pymatgen.electronic_structure.core import Spin
 
@@ -463,7 +463,7 @@ class VolumetricData(MSONable):
 
             for site in self.structure:
                 file.write(
-                    f"\t {Element(site.species_string).Z} 0.000000 "
+                    f"\t {site.specie.Z} 0.000000 "
                     f"{ang_to_bohr * site.coords[0]} "
                     f"{ang_to_bohr * site.coords[1]} "
                     f"{ang_to_bohr * site.coords[2]} \n"
