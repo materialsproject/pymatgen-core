@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pymatgen.core.structure import Molecule
 from pymatgen.io.xtb.inputs import CRESTInput
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
@@ -40,3 +42,14 @@ class TestCRESTInput(MatSciTest):
                 exp_con.strip()
                 == cin.constrains_template(molecule=mol, reference_fnm="crest_in.xyz", constraints=constraints).strip()
             )
+
+    def test_write_input_files_constrains_in_working_dir(self):
+        mol = Molecule.from_file(f"{TEST_DIR}/crest_in.xyz")
+        work_dir = self.tmp_path / "work"
+        work_dir.mkdir()
+        constraints = {"atoms": [8, 1, 2], "force_constant": 0.5}
+        cin = CRESTInput(molecule=mol, working_dir=str(work_dir), constraints=constraints)
+        cin.write_input_files()
+        assert (work_dir / "crest_in.xyz").is_file()
+        assert (work_dir / ".constrains").is_file()
+        assert not os.path.exists(".constrains")
