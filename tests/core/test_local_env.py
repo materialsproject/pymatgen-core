@@ -1129,7 +1129,7 @@ class TestLocalStructOrderParams(MatSciTest):
 
         # Pentagonal planar.
         op_vals = ops_101.get_order_parameters(self.pentagonal_planar.sites, 0, indices_neighs=[1, 2, 3, 4, 5])
-        assert op_vals[12] == approx(0.1260699690)
+        assert op_vals[12] == approx(0.0911029411)
         assert op_vals[16] == approx(1)
         assert op_vals[31] == approx(1)
 
@@ -1140,7 +1140,7 @@ class TestLocalStructOrderParams(MatSciTest):
         # Square pyramid motif.
         op_vals = ops_101.get_order_parameters(self.square_pyramid, 0)
         assert op_vals[11] == approx(1)
-        assert op_vals[12] == approx(2 / 3)
+        assert op_vals[12] == approx(0.75)
         assert op_vals[17] == approx(1)
 
         # Pentagonal pyramid motif.
@@ -1759,6 +1759,19 @@ class TestLocalStructOrderParamsExtra:
         lsop._params[0] = None
         with pytest.raises(RuntimeError, match="param of idx=0 is None"):
             lsop.get_order_parameters(nacl, 0)
+
+    @pytest.mark.parametrize("op_type", ["tri_bipyr", "sq_bipyr", "oct_max", "sq_plan_max", "see_saw_rect"])
+    def test_south_pole_contributions_independent_of_op_order(self, op_type):
+        # South pole contributions used to be applied only to the last OP type in the list,
+        # so the value of an OP depended on which other OP types were requested after it.
+        coords = [[0, 0, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-0.5, 3**0.5 / 2, 0], [-0.5, -(3**0.5) / 2, 0]]
+        mol = Molecule(["C"] + ["H"] * 5, coords)
+        neighs = [1, 2, 3, 4, 5]
+        alone = LocalStructOrderParams([op_type]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        combined = LocalStructOrderParams([op_type, "cn"]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        reversed_ = LocalStructOrderParams(["cn", op_type]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        assert combined[0] == approx(alone[0])
+        assert reversed_[1] == approx(alone[0])
 
 
 class TestEconNNExtra:

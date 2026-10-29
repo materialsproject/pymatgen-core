@@ -3163,25 +3163,27 @@ class LocalStructOrderParams:
                                             np.dot(xtwoaxis, cast("np.ndarray", yaxis)),
                                             np.dot(xtwoaxis, xaxis),
                                         )
-                                # South pole contributions of m.
-                                if (
-                                    typ
-                                    in {
-                                        "tri_bipyr",
-                                        "sq_bipyr",
-                                        "pent_bipyr",
-                                        "hex_bipyr",
-                                        "oct_max",
-                                        "sq_plan_max",
-                                        "hex_plan_max",
-                                        "see_saw_rect",
-                                    }
-                                    and (param := self._params[idx]) is not None
-                                    and thetam >= param["min_SPP"]
-                                ):
-                                    tmp = param["IGW_SPP"] * (thetam * ipi - 1.0)
-                                    qsp_theta[idx][j][kc] += math.exp(-0.5 * tmp * tmp)
-                                    norms[idx][j][kc] += 1
+                                # South pole contributions of m (for every requested OP type,
+                                # not only the last one in self._types).
+                                for idx, typ in enumerate(self._types):
+                                    if (
+                                        typ
+                                        in {
+                                            "tri_bipyr",
+                                            "sq_bipyr",
+                                            "pent_bipyr",
+                                            "hex_bipyr",
+                                            "oct_max",
+                                            "sq_plan_max",
+                                            "hex_plan_max",
+                                            "see_saw_rect",
+                                        }
+                                        and (param := self._params[idx]) is not None
+                                        and thetam >= param["min_SPP"]
+                                    ):
+                                        tmp = param["IGW_SPP"] * (thetam * ipi - 1.0)
+                                        qsp_theta[idx][j][kc] += math.exp(-0.5 * tmp * tmp)
+                                        norms[idx][j][kc] += 1
 
                                 # Contributions of j-i-m angle and
                                 # angles between plane j-i-k and i-m vector.
