@@ -166,6 +166,22 @@ class TestTransformedStructure(MatSciTest):
         s = str(ts)
         assert "Current structure" in s
         assert "NaFePO4" in s
+        # str() used to pop input_structure from the history, breaking undo and structures
+        assert "input_structure" in ts.history[-1]
+        assert len(ts.structures) == 2
+        ts.undo_last_change()
+        assert ts.final_structure.reduced_formula == "LiFePO4"
+
+    def test_snl_does_not_mutate_history(self):
+        hist = ("testname", "testURL", {"test": "testing"})
+        struct_nl = StructureNL(self.structure, [("will", "will@test.com")], history=[hist])
+        t_struct = TransformedStructure.from_snl(struct_nl)
+        # from_snl used to add "_snl" to the SNL's own history descriptions
+        assert struct_nl.history[0].description == {"test": "testing"}
+        # to_snl used to pop "_snl" from the TransformedStructure history
+        t_struct.to_snl([("notwill", "notwill@test.com")])
+        assert t_struct.history[0]["_snl"] == {"url": "testURL", "name": "testname"}
+        assert t_struct.to_snl([("notwill", "notwill@test.com")]).history == [hist]
 
     def test_was_modified(self):
         ts = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])
