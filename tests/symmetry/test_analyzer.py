@@ -302,6 +302,37 @@ class TestSpacegroupAnalyzer(MatSciTest):
             expected_magmom = 1.0 if site.specie.name == "Na" else -1.0
             assert math.isclose(expected_magmom, site.properties["magmom"])
 
+    def test_keep_site_properties_inequivalent_same_species(self):
+        """Site properties must follow the matching input site, not the first site of that species."""
+        # P4mm perovskite-like cell: the apical O (index 2) is not equivalent to the equatorial O's
+        structure = Structure(
+            Lattice.tetragonal(4, 4.3),
+            ["Sr", "Ti", "O", "O", "O"],
+            [[0, 0, 0], [0.5, 0.5, 0.52], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+            site_properties={"tag": ["Sr", "Ti", "apical", "equatorial", "equatorial"]},
+        )
+        spga = SpacegroupAnalyzer(structure)
+        assert spga.get_space_group_symbol() == "P4mm"
+        for struct in (
+            spga.get_refined_structure(keep_site_properties=True),
+            spga.find_primitive(keep_site_properties=True),
+        ):
+            tags = sorted(site.properties["tag"] for site in struct)
+            assert tags == ["Sr", "Ti", "apical", "equatorial", "equatorial"]
+            for site in struct:
+                if site.properties["tag"] == "apical":
+                    # apical O is directly below Ti along c
+                    assert site.frac_coords[:2] == approx([0.5, 0.5])
+
+    def test_find_primitive_uses_angle_tolerance(self):
+        """find_primitive must idealize with the same angle_tolerance used to detect the space group."""
+        lattice = Lattice.from_parameters(3, 3, 3, 90, 90, 90.3)
+        structure = Structure(lattice, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        spga = SpacegroupAnalyzer(structure, symprec=0.01, angle_tolerance=5)
+        assert spga.get_space_group_symbol() == "Im-3m"
+        # idealized bcc primitive cell
+        assert spga.find_primitive().lattice.angles == approx([109.4712206] * 3)
+
     def test_get_ir_reciprocal_mesh(self):
         grid = self.sg.get_ir_reciprocal_mesh()
         assert len(grid) == 216

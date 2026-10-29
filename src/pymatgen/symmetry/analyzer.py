@@ -420,14 +420,39 @@ class SpacegroupAnalyzer:
             raise ValueError("Failed to refine cell")
         lattice, scaled_positions, numbers = cell
         species = [self._unique_species[i - 1] for i in numbers]
+        site_properties = None
         if keep_site_properties:
-            site_properties = {}
-            for k, v in self._site_props.items():
-                site_properties[k] = [v[self._numbers.index(i)] for i in numbers]
-        else:
-            site_properties = None
+            # refine_cell returns the standardized cell of the dataset, so its sites map to input sites
+            # through the primitive cell
+            prim_indices = self._space_group_data.std_mapping_to_primitive
+            if len(prim_indices) != len(numbers):
+                prim_indices = None
+            site_properties = self._get_site_properties(numbers, prim_indices)
         struct = Structure(lattice, species, scaled_positions, site_properties=site_properties)
         return struct.get_sorted_structure()
+
+    def _get_site_properties(self, numbers: Sequence[int], prim_indices: Sequence[int] | None) -> dict[str, list[Any]]:
+        """Get the input site properties for the sites of a cell derived from the input cell.
+
+        Args:
+            numbers (Sequence[int]): spglib type numbers of the sites of the derived cell.
+            prim_indices (Sequence[int] | None): Index of the primitive-cell site that each site of
+                the derived cell maps to (spglib mapping_to_primitive convention). If None, or if
+                the mapping is inconsistent with numbers, each site takes the properties of the
+                first input site with the same type number.
+
+        Returns:
+            dict[str, list]: Site properties for the derived cell.
+        """
+        input_indices = [self._numbers.index(num) for num in numbers]
+        if prim_indices is not None:
+            prim_to_input: dict[int, int] = {}
+            for idx, prim_idx in enumerate(self._space_group_data.mapping_to_primitive):
+                prim_to_input.setdefault(int(prim_idx), idx)
+            mapped = [prim_to_input.get(int(prim_idx)) for prim_idx in prim_indices]
+            if all(idx is not None and self._numbers[idx] == num for idx, num in zip(mapped, numbers, strict=True)):
+                input_indices = mapped  # type: ignore[assignment]
+        return {key: [vals[idx] for idx in input_indices] for key, vals in self._site_props.items()}
 
     def find_primitive(self, keep_site_properties: bool = False) -> Structure:
         """Find a primitive version of the unit cell.
@@ -447,17 +472,15 @@ class SpacegroupAnalyzer:
             as a Structure object. If no primitive cell is found, None is
             returned.
         """
-        cell = call_spglib(spglib.find_primitive, self._cell, symprec=self._symprec)
+        cell = call_spglib(spglib.find_primitive, self._cell, symprec=self._symprec, angle_tolerance=self._angle_tol)
         if cell is None or len(cell) != 3:
             raise ValueError("Failed to find primitive cell")
         lattice, scaled_positions, numbers = cell
         species = [self._unique_species[i - 1] for i in numbers]
+        site_properties = None
         if keep_site_properties:
-            site_properties = {}
-            for key, val in self._site_props.items():
-                site_properties[key] = [val[self._numbers.index(i)] for i in numbers]
-        else:
-            site_properties = None
+            # sites of the primitive cell are indexed as in the dataset's mapping_to_primitive
+            site_properties = self._get_site_properties(numbers, list(range(len(numbers))))
 
         return Structure(
             lattice,
