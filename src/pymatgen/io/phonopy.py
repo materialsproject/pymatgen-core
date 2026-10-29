@@ -418,6 +418,18 @@ def get_phonon_band_structure_symm_line_from_fc(
     return PhononBandStructureSymmLine(kpoints, frequencies, structure.lattice, labels_dict=labels_dict)
 
 
+def _get_gruneisen_structure(gruneisen_dict, structure=None, structure_path=None) -> Structure:
+    """Resolve the structure with priority structure > structure_path > structure in gruneisen_dict."""
+    if structure is not None:
+        return structure
+    if structure_path:
+        return Structure.from_file(structure_path)
+    try:
+        return get_structure_from_dict(gruneisen_dict)
+    except ValueError as exc:
+        raise ValueError("Please provide a structure or structure path") from exc
+
+
 def get_gruneisenparameter(gruneisen_path, structure=None, structure_path=None) -> GruneisenParameter:
     """Get Gruneisen object from gruneisen.yaml file, as obtained from phonopy (Frequencies in THz!).
     The order is structure > structure path > structure from gruneisen dict.
@@ -434,13 +446,7 @@ def get_gruneisenparameter(gruneisen_path, structure=None, structure_path=None) 
     """
     gruneisen_dict = loadfn(gruneisen_path)
 
-    if structure_path and structure is None:
-        structure = Structure.from_file(structure_path)
-    else:
-        try:
-            structure = get_structure_from_dict(gruneisen_dict)
-        except ValueError as exc:
-            raise ValueError("Please provide a structure or structure path") from exc
+    structure = _get_gruneisen_structure(gruneisen_dict, structure, structure_path)
 
     q_pts, multiplicities, frequencies, gruneisen = ([] for _ in range(4))
     phonopy_labels_dict = {}
@@ -502,16 +508,10 @@ def get_gs_ph_bs_symm_line_from_dict(
             These derivations occur because of very small frequencies
             (and therefore numerical inaccuracies) close to gamma.
     """
-    if structure_path and structure is None:
-        structure = Structure.from_file(structure_path)
-    else:
-        try:
-            structure = get_structure_from_dict(gruneisen_dict)
-        except ValueError as exc:
-            raise ValueError("Please provide a structure or structure path") from exc
+    structure = _get_gruneisen_structure(gruneisen_dict, structure, structure_path)
 
     q_points, frequencies, gruneisen_params = [], [], []
-    phonopy_labels_dict: dict[str, dict[str, str]] = {}
+    phonopy_labels_dict: dict[str, list[float]] = {}
 
     if fit:
         for pa in gruneisen_dict["path"]:
@@ -538,7 +538,7 @@ def get_gs_ph_bs_symm_line_from_dict(
                     frequencies_temp.append(bands)
                     gruneisen_temp.append(gruneisen_band)
                     if "label" in phonon[pa["nqpoint"] - idx - 1]:
-                        phonopy_labels_dict[phonon[pa["nqpoint"] - idx - 1]]["label"] = phonon[pa["nqpoint"] - idx - 1][
+                        phonopy_labels_dict[phonon[pa["nqpoint"] - idx - 1]["label"]] = phonon[pa["nqpoint"] - idx - 1][
                             "q-position"
                         ]
 
