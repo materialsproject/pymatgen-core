@@ -375,6 +375,9 @@ class Xmu(MSONable):
     def as_dict(self):
         """Get dict representations of Xmu object."""
         dct = MSONable.as_dict(self)
+        if isinstance(self.parameters, Tags):
+            # Tags subclasses dict, so MSONable.as_dict serializes it as a plain dict
+            dct["parameters"] = self.parameters.as_dict()
         dct["data"] = self.data.tolist()
         return dct
 
