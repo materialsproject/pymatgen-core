@@ -3747,6 +3747,14 @@ class TestVasprunEdgeCases(MatSciTest):
         vasprun.incar["IVDW"] = 99
         assert vasprun.run_type == "LDA+vdW-unknown"
 
+    def test_run_type_dft_d4(self):
+        # IVDW = 13 is DFT-D4 (e.g. MP24RelaxSet with dispersion="D4")
+        vasprun = self.vasprun
+        vasprun.parameters.update({"GGA": "", "LUSE_VDW": False})
+        vasprun.potcar_symbols = ["PAW Cu 22Jun2005"]
+        vasprun.incar["IVDW"] = 13
+        assert vasprun.run_type == "LDA+vdW-DFT-D4"
+
     def test_hubbards(self):
         vasprun = self.vasprun
         assert vasprun.hubbards == {}
