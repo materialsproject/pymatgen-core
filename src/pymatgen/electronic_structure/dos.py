@@ -643,7 +643,7 @@ class FermiDos(Dos, MSONable):
             "efermi": self.efermi,
             "energies": self.energies.tolist(),
             "densities": {str(spin): dens.tolist() for spin, dens in self.densities.items()},
-            "structure": self.structure,
+            "structure": self.structure.as_dict(),
             "nelecs": self.nelecs,
         }
 

@@ -114,6 +114,17 @@ class TestFermiDos:
         assert isinstance(dos_dict["densities"]["1"][0], float)
         assert not isinstance(dos_dict["densities"]["1"][0], np.float64)
 
+    def test_as_from_dict_round_trip(self):
+        dos_dict = self.dos.as_dict()
+        assert isinstance(dos_dict["structure"], dict)
+        orjson.dumps(dos_dict, option=orjson.OPT_SERIALIZE_NUMPY)
+
+        new_dos = FermiDos.from_dict(dos_dict)
+        assert new_dos.structure == self.dos.structure
+        assert new_dos.nelecs == approx(self.dos.nelecs)
+        assert_allclose(new_dos.energies, self.dos.energies)
+        assert_allclose(new_dos.tdos, self.dos.tdos)
+
     def test_get_e_h_concs(self):
         e_conc, h_conc = self.dos.get_e_h_concs(fermi_level=self.dos.efermi + 2.0, temperature=300)
         assert e_conc == approx(2.6916894571633496e16)
