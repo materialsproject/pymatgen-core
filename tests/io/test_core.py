@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import copy
 import os
+import pickle
 import re
 from typing import TYPE_CHECKING
+from zipfile import ZipFile
 
 import pytest
 from monty.json import MontyDecoder
@@ -151,6 +153,22 @@ class TestInputSet(MatSciTest):
         assert os.path.isfile(f"input_dir/{type(inp_set).__name__}.zip")
         with pytest.raises(FileNotFoundError, match="input_dir2"):
             inp_set.write_input(directory="input_dir2", make_dir=False, overwrite=True, zip_inputs=False)
+
+    def test_write_zip_arcnames(self, tmp_path):
+        # Zip entries used to be stored under the full directory path
+        inp_set = InputSet({"cif1": self.sif1, "cif2": "hello"})
+        inp_set.write_input(directory=tmp_path / "calc", zip_inputs=True)
+        with ZipFile(tmp_path / "calc" / "InputSet.zip") as zip_file:
+            assert sorted(zip_file.namelist()) == ["cif1", "cif2"]
+            assert zip_file.read("cif2") == b"hello"
+
+    def test_pickle(self):
+        # Unpickling used to hit infinite recursion in __getattr__ before _kwargs was restored
+        inp_set = InputSet({"cif1": self.sif1, "cif2": "hello"}, kwarg1=1)
+        inp_set2 = pickle.loads(pickle.dumps(inp_set))
+        assert list(inp_set2) == list(inp_set)
+        assert inp_set2["cif2"] == "hello"
+        assert inp_set2.kwarg1 == 1
 
     def test_write_from_str(self):
         inp_set = InputSet(

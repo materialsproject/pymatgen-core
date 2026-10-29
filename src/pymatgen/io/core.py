@@ -139,7 +139,9 @@ class InputSet(MSONable, MutableMapping):
 
     def __getattr__(self, key):
         """Allow accessing keys as attributes."""
-        if key in self._kwargs:
+        # Read _kwargs via __dict__: during unpickling it is not set yet, and self._kwargs
+        # would recurse back into __getattr__.
+        if key in self.__dict__.get("_kwargs", {}):
             return self.get(key)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute {key!r}")
 
@@ -227,7 +229,8 @@ class InputSet(MSONable, MutableMapping):
                 for fname in self.inputs:
                     file_path = path / fname
                     try:
-                        zip_file.write(file_path)
+                        # Store entries relative to the input directory, not by their full path
+                        zip_file.write(file_path, arcname=fname)
                         os.remove(file_path)
                     except FileNotFoundError:
                         pass
