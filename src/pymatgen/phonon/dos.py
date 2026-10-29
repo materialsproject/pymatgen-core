@@ -160,17 +160,19 @@ class PhononDos(MSONable):
     __rmul__ = __mul__
 
     def __eq__(self, other: object) -> bool:
-        """Two DOS are equal if their densities are equal.
+        """Two DOS are equal if their frequencies and densities are equal.
 
         Args:
             other: Another DOS object.
 
         Returns:
-            True if densities are equal.
+            True if frequencies and densities are equal.
         """
         if not isinstance(other, PhononDos):
             return NotImplemented
-        return np.allclose(self.densities, other.densities)
+        if self.densities.shape != other.densities.shape or self.frequencies.shape != other.frequencies.shape:
+            return False
+        return np.allclose(self.frequencies, other.frequencies) and np.allclose(self.densities, other.densities)
 
     def __repr__(self) -> str:
         frequencies, densities = self.frequencies.shape, self.densities.shape
