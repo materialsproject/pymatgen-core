@@ -558,7 +558,7 @@ class BandStructure:
         # Identify and remove duplicates from equivalent k-points
         for i in range(len(points) - 1):
             for j in range(i + 1, len(points)):
-                if np.allclose(pbc_diff(points[i], points[j]), [0, 0, 0], tol):
+                if np.allclose(pbc_diff(points[i], points[j]), [0, 0, 0], atol=tol):
                     rm_list.append(i)
                     break
         return np.delete(points, rm_list, axis=0)

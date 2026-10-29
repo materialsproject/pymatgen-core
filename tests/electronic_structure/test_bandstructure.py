@@ -237,6 +237,11 @@ class TestBandStructureSymmLine(MatSciTest):
         vbm_eqs = bs.get_sym_eq_kpoints(vbm_k)
         assert [0.0, 0.0, 0.0] in vbm_eqs
 
+        # images closer than tol must be merged (tol used to be passed as rtol and ignored)
+        near_gamma = [1e-4, 0.0, 0.0]
+        assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-2) == 1
+        assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-6) == 8
+
     def test_as_dict(self):
         expected_keys = {
             "@module",
