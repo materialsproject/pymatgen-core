@@ -252,15 +252,15 @@ class RemoveExistingFilter(AbstractStructureFilter):
             finder = SpacegroupAnalyzer(s, symprec=self.symprec)
             return finder.get_space_group_number()
 
+        comparator = self.structure_matcher._comparator
+        hash_comp = comparator.get_hash(structure.composition)
         for struct in self.existing_structures:
-            if (
-                (
-                    self.structure_matcher._comparator.get_hash(structure.composition)
-                    == self.structure_matcher._comparator.get_hash(struct.composition)
-                    and self.symprec is None
-                )
-                or get_sg(struct) == get_sg(structure)
-            ) and self.structure_matcher.fit(struct, structure):
+            if comparator.get_hash(struct.composition) != hash_comp:
+                continue
+            # only compare space groups if symprec is given (SpacegroupAnalyzer fails with symprec=None)
+            if self.symprec is not None and get_sg(struct) != get_sg(structure):
+                continue
+            if self.structure_matcher.fit(struct, structure):
                 return False
 
         self.structure_list.append(structure)

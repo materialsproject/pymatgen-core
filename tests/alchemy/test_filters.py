@@ -107,6 +107,16 @@ class TestRemoveExistingFilter:
             transmuter.transformed_structures[-1].final_structure,
         )
 
+    @pytest.mark.parametrize("symprec", [None, 1e-3])
+    def test_different_composition(self, symprec):
+        # with symprec=None a structure of a different composition used to fall through to a
+        # SpacegroupAnalyzer(symprec=None) call, raising SymmetryUndeterminedError
+        nacl = Structure(Lattice.cubic(5.6), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        kbr = Structure(Lattice.cubic(6.6), ["K", "Br"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        fil = RemoveExistingFilter([nacl], symprec=symprec)
+        assert fil.test(kbr)
+        assert not fil.test(nacl.copy())
+
 
 class TestContainSpecieRepr:
     def test_repr(self):
