@@ -2669,8 +2669,9 @@ def _get_slsqp_decomp(
 
     options = {"maxiter": maxiter, "disp": False}
 
-    # NOTE max_bound needs to be larger than 1
-    max_bound = comp.num_atoms
+    # NOTE max_bound needs to be at least 1 since the amounts are fractions of the
+    # normalized composition (a fractional comp, e.g. Li0.2O0.1, has num_atoms < 1)
+    max_bound = max(comp.num_atoms, 1)
     bounds = [(0, max_bound)] * len(competing_entries)
     x0 = [1 / len(competing_entries)] * len(competing_entries)
 

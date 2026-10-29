@@ -1560,6 +1560,18 @@ class TestPhaseDiagramEdgeCases:
         with pytest.raises(ValueError, match="No valid decomp found for"):
             phase_diagram._get_slsqp_decomp(Composition("Li2O"), competing)
 
+    def test_get_slsqp_decomp_fractional_composition(self):
+        # Compositions with fewer than one atom used to bound the amounts below 1,
+        # making the single-phase decomposition infeasible.
+        entries = [PDEntry("Li", -1.9), PDEntry("O2", -9.8), PDEntry("Li2O", -14.3), PDEntry("Li2O2", -19.0)]
+        pd = PhaseDiagram(entries)
+        decomp = phase_diagram._get_slsqp_decomp(Composition({"Li": 0.2, "O": 0.1}), list(pd.stable_entries))
+        assert {e.reduced_formula: amt for e, amt in decomp.items()} == approx({"Li2O": 1})
+
+        frac_entry = PDEntry({"Li": 0.2, "O": 0.1}, -14.3 * 0.1 + 0.03)
+        full_entry = PDEntry("Li2O", -14.3 + 0.3)
+        assert pd.get_phase_separation_energy(frac_entry) == approx(pd.get_phase_separation_energy(full_entry))
+
     def test_chempot_methods_invalid_element(self):
         with pytest.raises(ValueError, match="get_transition_chempots can only be called with elements"):
             self.pd.get_transition_chempots(Element("U"))
