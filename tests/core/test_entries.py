@@ -621,6 +621,18 @@ class TestComputedStructureEntryExtra:
         with pytest.raises(ValueError, match="Mismatching composition provided"):
             ComputedStructureEntry(fe_bcc, -16.0, composition="FeO")
 
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_from_dict_none_fields(self, fe_bcc, legacy):
+        # ComputedEntry.from_dict accepts None parameters/data/energy_adjustments; this raised AttributeError
+        dct = ComputedStructureEntry(fe_bcc, -16.0).as_dict()
+        dct |= {"parameters": None, "data": None, "energy_adjustments": None}
+        if legacy:
+            dct["correction"] = -1.5
+        entry = ComputedStructureEntry.from_dict(dct)
+        assert entry.parameters == {}
+        assert entry.data == {}
+        assert entry.energy == approx(-17.5 if legacy else -16.0)
+
     def test_from_dict_legacy_correction(self, fe_bcc):
         dct = ComputedStructureEntry(
             fe_bcc, -16.0, parameters={"run_type": "GGA"}, data={"a": 1}, entry_id="mp-13"
