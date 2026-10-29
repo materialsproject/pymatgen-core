@@ -110,6 +110,14 @@ class TestPeriodicSite(MatSciTest):
         assert self.propertied_site.properties["charge"] == approx(4.2)
         assert self.labeled_site.label == "site label"
 
+    @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+    def test_non_finite_coordinates_rejected(self, value):
+        with pytest.raises(ValueError, match="must be finite"):
+            PeriodicSite("Fe", [value, 0, 0], self.lattice)
+        # Explicitly requested skip_checks remains available for controlled deserialization.
+        site = PeriodicSite("Fe", [value, 0, 0], self.lattice, skip_checks=True)
+        assert not np.isfinite(site.frac_coords[0])
+
     def test_distance(self):
         other_site = PeriodicSite("Fe", np.array([0, 0, 0]), self.lattice)
         assert self.site.distance(other_site) == approx(6.22494979899)

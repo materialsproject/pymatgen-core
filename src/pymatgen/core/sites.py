@@ -366,6 +366,8 @@ class PeriodicSite(Site, MSONable):
                 raise ValueError(
                     f"Coordinates {frac_coords} for species {species} are not xyz-shaped (shape {frac_coords.shape})."
                 )
+            if not np.all(np.isfinite(frac_coords)):
+                raise ValueError(f"Coordinates {frac_coords} for species {species} must be finite.")
             if not isinstance(species, Composition):
                 try:
                     species = Composition({get_el_sp(species): 1})  # type: ignore[arg-type]
