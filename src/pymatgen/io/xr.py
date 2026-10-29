@@ -120,7 +120,7 @@ class Xr:
         coords = []
         for j in range(n_sites):
             if match := re.match(
-                r"\d+\s+(\w+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)",
+                r"\d+\s+(\S+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)",
                 lines[4 + j].strip(),
             ):
                 tmp_sp = match[1]

@@ -60,3 +60,11 @@ class TestXr:
         assert isinstance(xr.structure, Structure)
         xr2 = Xr.from_file(filename, use_cores=False)
         assert isinstance(xr2.structure, Structure)
+
+    def test_round_trip_oxidation_states(self):
+        # Species such as "Fe2+" did not match the (\w+) species pattern and were silently dropped
+        struct = Structure.from_file(f"{VASP_IN_DIR}/POSCAR")
+        struct.add_oxidation_state_by_element({"Fe": 2, "P": 5, "O": -2})
+        struct_back = Xr.from_str(str(Xr(struct))).structure
+        assert len(struct_back) == len(struct)
+        assert struct_back.species == struct.species
