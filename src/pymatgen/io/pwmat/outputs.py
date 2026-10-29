@@ -53,8 +53,8 @@ class Movement(MSONable):
         self.n_ionic_steps: int = len(self.chunk_sizes)
 
         self.ionic_steps: list[dict] = self._parse_sefv()
-        if self.ionic_step_offset and self.ionic_step_skip:
-            self.ionic_steps = self.ionic_steps[self.ionic_step_offset :: self.ionic_step_skip]
+        if self.ionic_step_offset or self.ionic_step_skip:
+            self.ionic_steps = self.ionic_steps[self.ionic_step_offset or 0 :: self.ionic_step_skip or 1]
 
     def _get_chunk_info(self) -> tuple[list[int], list[int]]:
         """Split MOVEMENT into many chunks, so that program process it chunk by chunk.
@@ -114,7 +114,7 @@ class Movement(MSONable):
             np.ndarray: The individual energy of atoms in each ionic step structure,
                 with shape of (n_ionic_steps, n_atoms).
         """
-        return np.array([step["eatoms"] for step in self.ionic_steps if ("eatoms" in step)])
+        return np.array([step["atom_energies"] for step in self.ionic_steps if "atom_energies" in step])
 
     @property
     def virials(self) -> np.ndarray:
@@ -137,17 +137,17 @@ class Movement(MSONable):
         """
         ionic_steps: list[dict] = []
         with zopen(self.filename, mode="rt", encoding="utf-8") as mvt:
-            tmp_step: dict = {}
             for ii in range(self.n_ionic_steps):
+                tmp_step: dict = {}
                 tmp_chunk: str = ""
                 for _ in range(self.chunk_sizes[ii]):
                     tmp_chunk += mvt.readline()
                 tmp_step["atom_config"] = AtomConfig.from_str(tmp_chunk)
                 tmp_step["e_tot"] = ACstrExtractor(tmp_chunk).get_e_tot()[0]
                 tmp_step["atom_forces"] = ACstrExtractor(tmp_chunk).get_atom_forces().reshape(-1, 3)
-                e_atoms: np.ndarray | None = ACstrExtractor(tmp_chunk).get_atom_forces()
+                e_atoms: np.ndarray | None = ACstrExtractor(tmp_chunk).get_atom_energies()
                 if e_atoms is not None:
-                    tmp_step["atom_energies"] = ACstrExtractor(tmp_chunk).get_atom_energies()
+                    tmp_step["atom_energies"] = e_atoms
                 else:
                     logger.info(f"Ionic step #{ii} : Energy deposition is turn down.")
                 virial: np.ndarray | None = ACstrExtractor(tmp_chunk).get_virial()
