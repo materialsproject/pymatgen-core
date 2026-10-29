@@ -100,8 +100,8 @@ class TestFermiDos:
             else:
                 assert sci_dos.get_fermi(c_ref, temperature=T) - fermi_range[idx] == approx(-0.4651, abs=1e-2)
 
-        assert sci_dos.get_fermi_interextrapolated(-1e26, 300) == approx(7.50545, abs=1e-4)
-        assert sci_dos.get_fermi_interextrapolated(1e26, 300) == approx(-1.41276, abs=1e-4)
+        assert sci_dos.get_fermi_interextrapolated(-1e26, 300) == approx(7.95526, abs=1e-4)
+        assert sci_dos.get_fermi_interextrapolated(1e26, 300) == approx(-1.79397, abs=1e-4)
         assert sci_dos.get_fermi_interextrapolated(0.0, 300) == approx(2.9069, abs=1e-4)
 
     def test_as_dict(self):
@@ -124,6 +124,30 @@ class TestFermiDos:
         assert new_dos.nelecs == approx(self.dos.nelecs)
         assert_allclose(new_dos.energies, self.dos.energies)
         assert_allclose(new_dos.tdos, self.dos.tdos)
+
+    def test_get_fermi_interextrapolated_log_linear(self, monkeypatch):
+        # get_fermi_interextrapolated assumes E_F is linear in ln|c| outside the range
+        # where get_fermi converges. For an exactly log-linear E_F(c) the extrapolation
+        # must therefore be exact, which requires the reference point to use ln(c_ref).
+        e_0, slope, c_max = 1.0, 0.05, 1e20
+
+        def get_doping(fermi_level, temperature):
+            return np.exp((e_0 - fermi_level) / slope)
+
+        def get_fermi(concentration, temperature, **kwargs):
+            if not 0 < concentration <= c_max:
+                raise ValueError("Could not find fermi")
+            return e_0 - slope * np.log(concentration)
+
+        monkeypatch.setattr(self.dos, "get_doping", get_doping)
+        monkeypatch.setattr(self.dos, "get_fermi", get_fermi)
+
+        for conc in (1e21, 1e23, 1e26):
+            assert self.dos.get_fermi_interextrapolated(conc, 300, warn=False) == approx(e_0 - slope * np.log(conc))
+        # result must not depend on the choice of the reference concentration
+        assert self.dos.get_fermi_interextrapolated(1e24, 300, warn=False, c_ref=1e15) == approx(
+            e_0 - slope * np.log(1e24)
+        )
 
     def test_get_e_h_concs(self):
         e_conc, h_conc = self.dos.get_e_h_concs(fermi_level=self.dos.efermi + 2.0, temperature=300)

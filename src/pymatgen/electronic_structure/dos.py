@@ -622,7 +622,8 @@ class FermiDos(Dos, MSONable):
             f_new = self.get_fermi_interextrapolated(concentration / 10.0, temperature, warn=False, **kwargs)
             clog = np.sign(concentration) * np.log(abs(concentration))
             c_new_log = np.sign(concentration) * np.log(abs(self.get_doping(f_new, temperature)))
-            slope = (f_new - f_ref) / (c_new_log - np.sign(concentration) * 10.0)
+            # natural log of the reference concentration, consistent with clog and c_new_log
+            slope = (f_new - f_ref) / (c_new_log - np.sign(concentration) * np.log(c_ref))
             return f_new + slope * (clog - c_new_log)
 
     @classmethod
