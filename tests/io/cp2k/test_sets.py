@@ -9,7 +9,9 @@ import numpy as np
 import pytest
 from pytest import approx
 
+from pymatgen.core import Species
 from pymatgen.core.structure import Molecule, Structure
+from pymatgen.io.cp2k.inputs import Keyword
 from pymatgen.io.cp2k.sets import (
     SETTINGS,
     CellOptSet,
@@ -483,8 +485,20 @@ class TestDftSetExtra(MatSciTest):
 
     def test_activate_motion_md(self) -> None:
         s = DftSet(self.si_structure, basis_and_potential=self.bp, xc_functionals="PBE", run_type="MD")
-        s.activate_motion()
+        s.activate_motion(thermostat="CSVR")
         assert s.check("motion/md")
+        assert "TYPE CSVR" in s.get_str()
+
+    def test_project_name(self) -> None:
+        s = DftSet(self.si_structure, basis_and_potential=self.bp, xc_functionals="PBE", project_name="Si_test")
+        assert s["GLOBAL"]["PROJECT_NAME"] == Keyword("PROJECT_NAME", "Si_test")
+
+    def test_input_structure_not_mutated(self) -> None:
+        struct = self.si_structure
+        struct.add_oxidation_state_by_element({"Si": 4})
+        DftSet(struct, basis_and_potential=self.bp, xc_functionals="PBE")
+        assert struct[0].specie == Species("Si", 4)
+        assert struct.site_properties == {}
 
     def test_activate_motion_cg_optimizer(self) -> None:
         # CG optimizer inserts a LINE_SEARCH subsection under the run-type section

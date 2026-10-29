@@ -190,7 +190,8 @@ class DftSet(Cp2kInput):
         """
         super().__init__(name="CP2K_INPUT", subsections={})
 
-        self.structure = structure
+        # Copy: create_subsys pushes species properties to site properties and strips oxidation states
+        self.structure = structure.copy()
         self.basis_and_potential = basis_and_potential or {}
         self.element_defaults = element_defaults or {}
         self.project_name = project_name
@@ -246,7 +247,7 @@ class DftSet(Cp2kInput):
 
         # Build the global section
         global_sec = Global(
-            project_name=self.kwargs.get("project_name", "CP2K"),
+            project_name=self.project_name,
             run_type=self.kwargs.get("run_type", "ENERGY_FORCE"),
         )
         self.insert(global_sec)
@@ -1090,7 +1091,7 @@ class DftSet(Cp2kInput):
                 "TIMESTEP": Keyword("TIMESTEP", timestep),
                 "STEPS": Keyword("STEPS", nsteps),
             }
-            thermostat = Section("THERMOSTAT", keywords={"TYPE": thermostat})
+            thermostat = Section("THERMOSTAT", keywords={"TYPE": Keyword("TYPE", thermostat)})
             md = Section("MD", subsections={"THERMOSTAT": thermostat}, keywords=md_keywords)
             self["MOTION"].insert(md)
 
