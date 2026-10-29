@@ -3049,7 +3049,15 @@ class VaspInput(dict, MSONable):
         """Deep copy of VaspInput."""
         if deep:
             return self.from_dict(self.as_dict())
-        return type(self)(**{key.lower(): val for key, val in self.items()})
+        standard_keys = ("INCAR", "KPOINTS", "POSCAR", self._potcar_filename)
+        return type(self)(
+            incar=self["INCAR"],
+            kpoints=self["KPOINTS"],
+            poscar=self["POSCAR"],
+            potcar=self[self._potcar_filename],
+            potcar_spec=self._potcar_filename == "POTCAR.spec",
+            optional_files={key: val for key, val in self.items() if key not in standard_keys},
+        )
 
     def run_vasp(
         self,

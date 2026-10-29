@@ -2000,6 +2000,21 @@ class TestVaspInput(MatSciTest):
         orig_nsw_val = self.vasp_input["INCAR"]["NSW"]
         assert orig_nsw_val == 99, f"{orig_nsw_val=}"
 
+    def test_shallow_copy_optional_files_and_potcar_spec(self):
+        vasp_input = VaspInput(
+            self.vasp_input.incar,
+            self.vasp_input.kpoints,
+            self.vasp_input.poscar,
+            "Fe\nP\nO",
+            potcar_spec=True,
+            optional_files={"ICONST": "R 1 2 0"},
+        )
+        vasp_input_copy = vasp_input.copy(deep=False)
+        # File names (dict keys) must be preserved, not lower-cased
+        assert set(vasp_input_copy) == {"INCAR", "KPOINTS", "POSCAR", "POTCAR.spec", "ICONST"}
+        assert vasp_input_copy.potcar == "Fe\nP\nO"
+        assert vasp_input_copy["ICONST"] is vasp_input["ICONST"]
+
     def test_run_vasp(self):
         self.vasp_input.run_vasp(".", vasp_cmd=["cat", "INCAR"])
         with open("vasp.out", encoding="utf-8") as file:
