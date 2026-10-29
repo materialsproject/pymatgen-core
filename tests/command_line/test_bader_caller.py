@@ -64,6 +64,16 @@ def test_relative_path_and_version(tmp_path, monkeypatch, banner, version):
     assert analysis.nelectrons == approx(1)
 
 
+def test_from_path_missing_chgcar(tmp_path):
+    # the "not found" check compared against None, but the helper returns "", so the
+    # missing CHGCAR surfaced later as an unrelated error (e.g. bader not installed)
+    with (
+        pytest.warns(UserWarning, match="Could not find 'CHGCAR'"),
+        pytest.raises(FileNotFoundError, match="Could not find CHGCAR"),
+    ):
+        BaderAnalysis.from_path(str(tmp_path))
+
+
 def test_bader_analysis_from_objects_does_not_mutate_chgcar(monkeypatch):
     # the spin-polarized branch used to overwrite chgcar.data["total"] with the
     # magnetization density and set chgcar.is_spin_polarized = False on the input

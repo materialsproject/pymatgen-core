@@ -400,7 +400,7 @@ class BaderAnalysis:
             return filepath
 
         chgcar_filename = _get_filepath("CHGCAR")
-        if chgcar_filename is None:
+        if not chgcar_filename:  # _get_filepath returns "" if not found
             raise FileNotFoundError("Could not find CHGCAR!")
         potcar_filename = _get_filepath("POTCAR")
         aeccar0 = _get_filepath("AECCAR0")
