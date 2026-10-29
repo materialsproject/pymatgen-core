@@ -38,7 +38,7 @@ def lattice_from_abivars(cls=None, *args, **kwargs):
 
     r_prim = kwargs.get("rprim")
     ang_deg = kwargs.get("angdeg")
-    a_cell = kwargs["acell"]
+    a_cell = kwargs.get("acell", [1.0, 1.0, 1.0])
 
     if r_prim is not None:
         if ang_deg is not None:
@@ -465,7 +465,7 @@ class Smearing(AbivarAble, MSONable):
             return cls.nosmearing()
 
         obj, tsmear = obj.split(":")
-        obj.strip()
+        obj = obj.strip()
 
         occopt = cls._mode2occopt[obj]
         try:
@@ -790,7 +790,7 @@ class KSampling(AbivarAble, MSONable):
     @property
     def is_homogeneous(self) -> bool:
         """Homogeneous sampling."""
-        return self.mode != "path"
+        return self.mode != KSamplingModes.path
 
     @classmethod
     def gamma_only(cls):
@@ -1074,8 +1074,8 @@ class RelaxationMethod(AbivarAble, MSONable):
             if key not in self._default_vars:
                 raise ValueError(f"{type(self).__name__}: No default value has been provided for {key=}")
 
-        for key in self.abivars:
-            if key is MANDATORY:
+        for key, value in self.abivars.items():
+            if value is MANDATORY:
                 raise ValueError(f"{type(self).__name__}: No default value has been provided for the mandatory {key=}")
 
     @classmethod
@@ -1137,7 +1137,7 @@ class RelaxationMethod(AbivarAble, MSONable):
 
     def as_dict(self):
         """Convert to dictionary."""
-        dct = dict(self._default_vars)
+        dct = dict(self.abivars)
         dct["@module"] = type(self).__module__
         dct["@class"] = type(self).__name__
         return dct

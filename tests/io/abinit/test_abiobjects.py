@@ -75,6 +75,13 @@ class TestLatticeFromAbivars(MatSciTest):
         with pytest.raises(ValueError, match=r"Angles must be > 0 but got \[-90  90  90\]"):
             lattice_from_abivars(acell=[1, 1, 1], angdeg=(-90, 90, 90))
 
+    def test_default_acell(self):
+        # acell defaults to [1, 1, 1] Bohr as in Abinit (and as documented).
+        lattice = lattice_from_abivars(rprim=10 * np.eye(3))
+        assert_allclose(lattice.abc, 3 * [10 * bohr_to_ang])
+        lattice = lattice_from_abivars(angdeg=(90, 90, 90))
+        assert_allclose(lattice.abc, 3 * [bohr_to_ang])
+
     def test_znucl_typat(self):
         """Test the order of typat and znucl in the Abinit input and enforce_typat, enforce_znucl."""
         # Ga  Ga1  1  0.33333333333333  0.666666666666667  0.500880  1.0
@@ -155,6 +162,9 @@ class TestSmearing(MatSciTest):
         # Test dict methods
         self.assert_msonable(fd1ev)
 
+    def test_as_smearing_whitespace(self):
+        assert Smearing.as_smearing(" gaussian : 0.004 ") == Smearing(7, 0.004)
+
 
 class TestElectronsAlgorithm(MatSciTest):
     def test_base(self):
@@ -206,6 +216,10 @@ class TestKSampling(MatSciTest):
         self.assert_msonable(monkhorst)
         self.assert_msonable(gamma_centered)
 
+    def test_is_homogeneous(self):
+        assert KSampling.monkhorst((3, 3, 3)).is_homogeneous
+        assert not KSampling.explicit_path(ndivsm=5, kpath_bounds=[[0, 0, 0], [0.5, 0, 0]]).is_homogeneous
+
 
 class TestRelaxation(MatSciTest):
     def test_base(self):
@@ -225,6 +239,15 @@ class TestRelaxation(MatSciTest):
         # Test dict methods
         self.assert_msonable(atoms_and_cell)
         self.assert_msonable(atoms_only)
+
+    def test_dict_round_trip(self):
+        relax = RelaxationMethod(ionmov=2, optcell=0, ntime=42, tolmxf=1e-5)
+        new = RelaxationMethod.from_dict(relax.as_dict())
+        assert new.to_abivars() == relax.to_abivars() == {"ionmov": 2, "optcell": 0, "ntime": 42, "tolmxf": 1e-5}
+
+    def test_mandatory_vars(self):
+        with pytest.raises(ValueError, match="mandatory key='optcell'"):
+            RelaxationMethod(ionmov=2)
 
 
 class TestPPModel(MatSciTest):
