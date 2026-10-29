@@ -612,8 +612,8 @@ class JDFTXInfile(dict, MSONable):
         Returns:
             list[str]: Tags that differ between the two JDFTXInfile objects.
         """
-        if exclude_tags is None:
-            exclude_tags = []
+        # Copy to avoid mutating the caller's list
+        exclude_tags = [] if exclude_tags is None else list(exclude_tags)
         if exclude_tag_categories is None:
             exclude_tag_categories = []
         if ensure_include_tags is None:
@@ -1023,7 +1023,6 @@ class JDFTXStructure(MSONable):
         lattice = _infile_to_pmg_lattice(jdftxinfile)
         atomic_symbols = [x["species-id"] for x in jdftxinfile["ion"]]
         coords = np.array([[x["x0"], x["x1"], x["x2"]] for x in jdftxinfile["ion"]])
-        coords *= const.value("Bohr radius") * 10**10  # Bohr radius in Ang; convert to Ang
         selective_dynamics = np.array([x["moveScale"] for x in jdftxinfile["ion"]])
         # Gather optional tags
         velocities = [
@@ -1035,7 +1034,7 @@ class JDFTXStructure(MSONable):
             [x["d0"], x["d1"], x["d2"]] if "constraint-type" in x else None for x in jdftxinfile["ion"]
         ]
         hyperplane_vectors = [
-            [[[y["d0"], y["d1"], y["d2"]] for y in x["HyperPlane"]]] if "HyperPlane" in x else None
+            [[y["d0"], y["d1"], y["d2"]] for y in x["HyperPlane"]] if "HyperPlane" in x else None
             for x in jdftxinfile["ion"]
         ]
         hyperplane_groups: list = [None for _ in range(len(hyperplane_vectors))]
@@ -1045,12 +1044,15 @@ class JDFTXStructure(MSONable):
                     constraint_types[i] = "HyperPlane"
                     constraint_vectors[i] = hyperplane_vectors[i]
             hyperplane_groups = [
-                [[y["group"] for y in x["HyperPlane"]] if "HyperPlane" in x else None] for x in jdftxinfile["ion"]
+                [y["group"] for y in x["HyperPlane"]] if "HyperPlane" in x else None for x in jdftxinfile["ion"]
             ]
 
         coords_are_cartesian = False  # is default for JDFTx
         if "coords-type" in jdftxinfile:
             coords_are_cartesian = jdftxinfile["coords-type"] == "Cartesian"
+        if coords_are_cartesian:
+            # Only Cartesian coordinates are in Bohr; lattice (fractional) coordinates are unitless
+            coords *= const.value("Bohr radius") * 10**10  # Bohr radius in Ang; convert to Ang
 
         struct: Structure = Structure(
             lattice,
@@ -1140,7 +1142,7 @@ class JDFTXStructure(MSONable):
                             _hyperplane = {}
                             for k in range(3):
                                 _hyperplane["d" + str(k)] = hyperplane[k]
-                            _hyperplane["group"] = self.hyperplane_groups[i][j]
+                            _hyperplane["group"] = cast("list", self.hyperplane_group_names)[i][j]
                             ion_dict_rep["HyperPlane"].append(_hyperplane)
                 else:
                     ion_dict_rep["constraint-type"] = ctype
