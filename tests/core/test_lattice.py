@@ -680,3 +680,14 @@ class TestLattice(MatSciTest):
     def test_is_3d_periodic(self):
         assert self.cubic.is_3d_periodic
         assert not self.cubic_partial_pbc.is_3d_periodic
+
+
+def test_d_hkl_rejects_invalid_miller_indices():
+    lattice = Lattice.cubic(3)
+    with pytest.raises(ValueError, match="miller_index"):
+        lattice.d_hkl([0, 0, 0])
+    with pytest.raises(ValueError, match="miller_index"):
+        lattice.d_hkl([float("nan"), 0, 0])
+    with pytest.raises(ValueError, match="miller_index"):
+        lattice.d_hkl([1, 2])
+    assert lattice.d_hkl([1, 0, 0]) == pytest.approx(3.0)

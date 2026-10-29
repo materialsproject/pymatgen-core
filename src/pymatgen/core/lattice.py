@@ -265,7 +265,9 @@ class Lattice(MSONable):
             float: distance between hkl plane and origin
         """
         g_star = self.reciprocal_lattice_crystallographic.metric_tensor
-        hkl = np.array(miller_index)
+        hkl = np.asarray(miller_index, dtype=float)
+        if hkl.shape != (3,) or not np.all(np.isfinite(hkl)) or np.all(hkl == 0):
+            raise ValueError("miller_index must be a finite, non-zero 3-vector")
         return 1 / ((np.dot(np.dot(hkl, g_star), hkl.T)) ** (1 / 2))
 
     @classmethod
