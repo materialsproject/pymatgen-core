@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import asdict
 
@@ -820,6 +821,18 @@ class TestPointGroupAnalyzer(MatSciTest):
         mol = Molecule(cube_species, cube_coords)
         pg_analyzer = PointGroupAnalyzer(mol, 0.1)
         assert pg_analyzer.sch_symbol == "Oh"
+
+    def test_spherical_th(self):
+        # Pyritohedral Th cluster: cyclic permutations of (0, +-1, +-2.5). Its mirrors do not contain
+        # the 3-fold axes, which used to make detection of Th depend on the order of the atoms.
+        coords = []
+        for s1, s2 in itertools.product((1, -1), repeat=2):
+            coords += [[0, s1, 2.5 * s2], [2.5 * s2, 0, s1], [s1, 2.5 * s2, 0]]
+        for ordered_coords in (coords, coords[::-1], sorted(coords)):
+            mol = Molecule(["Mo"] + ["N"] * 12, [[0, 0, 0], *ordered_coords])
+            pg_analyzer = PointGroupAnalyzer(mol)
+            assert pg_analyzer.sch_symbol == "Th"
+            assert len(pg_analyzer.get_pointgroup()) == 24
 
     def test_tricky(self):
         mol = Molecule.from_file(f"{TEST_DIR}/dh.xyz")

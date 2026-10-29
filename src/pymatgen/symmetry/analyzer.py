@@ -1386,12 +1386,13 @@ class PointGroupAnalyzer:
             self._proc_sym_top()
 
         elif rot == 3:
-            mirror_type = self._find_mirror(main_axis)
-            if mirror_type == "":
-                self.sch_symbol = "T"
-            elif self.is_valid_op(PointGroupAnalyzer.inversion_op):
+            # Of T, Td and Th only Th has inversion. Test it first: the Th mirrors are perpendicular
+            # to the 2-fold axes and do not contain the 3-fold axis, so _find_mirror can miss them.
+            if self.is_valid_op(PointGroupAnalyzer.inversion_op):
                 self.symmops.append(PointGroupAnalyzer.inversion_op)
                 self.sch_symbol = "Th"
+            elif self._find_mirror(main_axis) == "":
+                self.sch_symbol = "T"
             else:
                 self.sch_symbol = "Td"
 
