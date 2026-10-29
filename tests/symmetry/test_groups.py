@@ -145,6 +145,13 @@ class TestSpaceGroup:
             "Pbmn",
         }
 
+    def test_get_settings_full_and_abbreviated_symbols(self):
+        # the docstring accepts full and abbreviated symbols; both used to raise KeyError
+        assert SpaceGroup.get_settings("I4/m2/m2/m") == SpaceGroup.get_settings("I4/mmm")
+        settings = SpaceGroup.get_settings("C2/c")
+        assert len(settings) > 1
+        assert {SpaceGroup(symbol).int_number for symbol in settings} == {15}
+
     def test_crystal_system(self):
         sg = SpaceGroup("R-3c")
         assert sg.crystal_system == "trigonal"
@@ -262,6 +269,20 @@ class TestSpaceGroup:
         sg = SpaceGroup("Pnma")
         op = SymmOp.from_rotation_and_translation([[1, 0, 0], [0, -1, 0], [0, 0, -1]], [0.5, 0.5, 0.5])
         assert op in sg.symmetry_ops
+
+    def test_contains(self):
+        sg = SpaceGroup("Pnma")
+        op = SymmOp.from_rotation_and_translation([[1, 0, 0], [0, -1, 0], [0, 0, -1]], [0.5, 0.5, 0.5])
+        assert op in sg
+        assert SymmOp.from_rotation_and_translation(np.eye(3), [0.25, 0, 0]) not in sg
+        assert "x,y,z" not in sg
+        assert SymmOp.inversion() in PointGroup("mmm")
+        assert SymmOp.from_axis_angle_and_translation([0, 0, 1], 90) not in PointGroup("mmm")
+
+    def test_is_subgroup_of_non_space_group(self):
+        # used to return NotImplemented, which is truthy
+        assert SpaceGroup("Pnma").is_subgroup(PointGroup("mmm")) is False
+        assert PointGroup("mmm").is_supergroup(SpaceGroup("Pnma")) is False
 
     def test_other_settings(self):
         sg = SpaceGroup("Pbnm")

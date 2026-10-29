@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from pymatgen.core.lattice import Lattice
 
     # Don't import at runtime to avoid circular import
-    from pymatgen.core.operations import SymmOp  # noqa: TC004
+    from pymatgen.core.operations import SymmOp
 
     CrystalSystem: TypeAlias = Literal[
         "cubic",
@@ -80,8 +80,10 @@ class SymmetryGroup(Sequence, Stringify, ABC):
         """The set of symmetry operations associated with the group."""
 
     def __contains__(self, item: object) -> bool:
+        from pymatgen.core.operations import SymmOp
+
         if not isinstance(item, SymmOp):
-            return NotImplemented
+            return False
 
         return any(np.allclose(i.affine_matrix, item.affine_matrix) for i in self.symmetry_ops)
 
@@ -453,11 +455,11 @@ class SpaceGroup(SymmetryGroup):
         int_number = None
         if int_symbol in SpaceGroup.abbrev_sg_mapping:
             symbols.append(SpaceGroup.abbrev_sg_mapping[int_symbol])
-            int_number = SpaceGroup.sg_encoding[int_symbol]["int_number"]
+            int_number = SpaceGroup.sg_encoding[SpaceGroup.abbrev_sg_mapping[int_symbol]]["int_number"]
 
         elif int_symbol in SpaceGroup.full_sg_mapping:
             symbols.append(SpaceGroup.full_sg_mapping[int_symbol])
-            int_number = SpaceGroup.sg_encoding[int_symbol]["int_number"]
+            int_number = SpaceGroup.sg_encoding[SpaceGroup.full_sg_mapping[int_symbol]]["int_number"]
 
         else:
             for spg in SpaceGroup.SYMM_OPS:
@@ -626,7 +628,7 @@ class SpaceGroup(SymmetryGroup):
             bool: True if this space group is a subgroup of the supplied group.
         """
         if not isinstance(supergroup, SpaceGroup):
-            return NotImplemented
+            return False
 
         if len(supergroup.symmetry_ops) < len(self.symmetry_ops) and supergroup.point_group != self.point_group:
             return False
