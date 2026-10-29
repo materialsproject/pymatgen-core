@@ -1037,9 +1037,8 @@ class PseudoParser:
         Returns:
             List of pseudopotential objects.
         """
-        for i, ext in enumerate(exclude_exts):
-            if not ext.strip().startswith("."):
-                exclude_exts[i] = f".{ext.strip()}"
+        # Normalize the extensions without modifying the caller's (possibly immutable) sequence.
+        exclude_exts = [ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}" for ext in exclude_exts]
 
         # Exclude files depending on the extension.
         paths = []
@@ -1060,9 +1059,9 @@ class PseudoParser:
 
             if pseudo is not None:
                 pseudos.append(pseudo)
-                self._parsed_paths.extend(path)
+                self._parsed_paths.append(path)
             else:
-                self._wrong_paths.extend(path)
+                self._wrong_paths.append(path)
 
         return pseudos
 
@@ -1405,7 +1404,7 @@ class PawXmlSetup(Pseudo, PawPseudo):
 
         for idx, density_name in enumerate(["ae_core_density", "pseudo_core_density"]):
             rden = getattr(self, density_name)
-            label = "$n_c$" if idx == 1 else r"$\tilde{n}_c$"
+            label = "$n_c$" if idx == 0 else r"$\tilde{n}_c$"
             ax.plot(rden.mesh, rden.mesh * rden.values, label=label, lw=2)
 
         ax.legend(loc="best")
@@ -1561,7 +1560,11 @@ class PseudoTable(collections.abc.Sequence, MSONable):
 
             for pseudo in find_exts(top, exts, exclude_dirs=exclude_dirs):  # type:ignore[assignment]
                 try:
-                    pseudos.append(Pseudo.from_file(pseudo))  # type:ignore[arg-type]
+                    # from_file returns None (instead of raising) for files it cannot parse.
+                    if (new_pseudo := Pseudo.from_file(pseudo)) is not None:  # type:ignore[arg-type]
+                        pseudos.append(new_pseudo)
+                    else:
+                        logger.critical(f"Cannot parse pseudopotential file {pseudo}")
                 except Exception as exc:
                     logger.critical(f"Error in {pseudo}:\n{exc}")
 
@@ -1606,9 +1609,10 @@ class PseudoTable(collections.abc.Sequence, MSONable):
                 raise ValueError("Z.stop is None")
             pseudos = []
             for znum in iterator_from_slice(Z):
-                pseudos.extend(self._pseudos_with_z[znum])
+                pseudos.extend(self._pseudos_with_z.get(znum, []))
             return type(self)(pseudos)
-        return type(self)(self._pseudos_with_z[Z])
+        # Use get to avoid inserting empty entries in the defaultdict (would change zlist).
+        return type(self)(self._pseudos_with_z.get(Z, []))
 
     def __len__(self) -> int:
         return len(list(iter(self)))
@@ -1653,7 +1657,7 @@ class PseudoTable(collections.abc.Sequence, MSONable):
             # k, count = p.element, 1
             # Handle multiple-pseudos with the same name!
             while k in dct:
-                k += f"{k.split('#')[0]}#{count}"
+                k = f"{k.split('#')[0]}#{count}"
                 count += 1
             dct[k] = p.as_dict()
         dct["@module"] = type(self).__module__
@@ -1801,15 +1805,15 @@ class PseudoTable(collections.abc.Sequence, MSONable):
             New class: `PseudoTable` object
         """
         attrs = []
-        for i, pseudo in self:
+        for pseudo in self:
             try:
                 a = getattr(pseudo, attrname)
             except AttributeError:
                 a = np.inf
-            attrs.append((i, a))
+            attrs.append((pseudo, a))
 
         # Sort attrs, and build new table with sorted pseudos.
-        return type(self)([self[a[0]] for a in sorted(attrs, key=lambda t: t[1], reverse=reverse)])
+        return type(self)([a[0] for a in sorted(attrs, key=lambda t: t[1], reverse=reverse)])
 
     def sort_by_z(self):
         """Return a new PseudoTable with pseudos sorted by Z."""

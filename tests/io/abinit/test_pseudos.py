@@ -494,12 +494,21 @@ class TestPseudoParser:
         pseudos = PseudoParser().scan_directory(dirname, exclude_exts=["xml"], exclude_fnames=["14si.4.hgh"])
         assert [p.basename for p in pseudos] == ["14si.pspnc"]
 
-    @pytest.mark.xfail(strict=True, reason="scan_directory uses list.extend(path), storing the characters of each path")
     def test_scan_directory_parsed_paths(self):
         dirname = self._make_scan_dir()
         parser = PseudoParser()
         parser.scan_directory(dirname, exclude_exts=["xml", "cif"])
         assert sorted(parser._parsed_paths) == sorted(str(dirname / fn) for fn in ("14si.pspnc", "14si.4.hgh"))
+        assert parser._wrong_paths == [str(dirname / "bad.hgh")]
+
+    def test_scan_directory_exclude_exts_tuple(self):
+        dirname = self._make_scan_dir()
+        # Tuples used to raise TypeError and lists were modified in place.
+        pseudos = PseudoParser().scan_directory(dirname, exclude_exts=("xml", "cif", "hgh"))
+        assert [p.basename for p in pseudos] == ["14si.pspnc"]
+        exclude_exts = ["xml", "cif", "hgh"]
+        PseudoParser().scan_directory(dirname, exclude_exts=exclude_exts)
+        assert exclude_exts == ["xml", "cif", "hgh"]
 
 
 class TestPseudoBase:
@@ -616,7 +625,6 @@ class TestPawXmlSetup:
         assert labels == [f"TPROJ: O{i}" for i in range(1, 5)]
         plt.close("all")
 
-    @pytest.mark.xfail(strict=True, reason="plot_densities swaps the labels of the AE and pseudo core densities")
     def test_plot_densities_labels(self, oxygen):
         import matplotlib.pyplot as plt
 
@@ -697,7 +705,6 @@ class TestPseudoTableExtended(MatSciTest):
         with pytest.raises(ValueError, match=r"Z\.stop is None"):
             table[8:]
 
-    @pytest.mark.xfail(strict=True, reason="PseudoTable.__getitem__ inserts missing Z keys into the defaultdict")
     def test_getitem_does_not_mutate(self):
         table = self.table
         assert len(table[26]) == 0
@@ -763,21 +770,20 @@ class TestPseudoTableExtended(MatSciTest):
         table.Ge[0].dojo_report = {"hints": {}}
         assert table.with_dojo_report().zlist == [32]
 
-    @pytest.mark.xfail(strict=True, reason="PseudoTable.sorted unpacks (index, pseudo) while iterating over pseudos")
     def test_sorted(self):
         new = self.table.sorted("Z_val", reverse=True)
         assert isinstance(new, PseudoTable)
         assert len(new) == len(self.table)
+        assert sorted(p.basename for p in new) == sorted(p.basename for p in self.table)
 
     def test_as_dict_round_trip(self):
         new = PseudoTable.from_dict(self.table.as_dict())
         assert new.zlist == self.table.zlist
         assert [p.basename for p in new] == [p.basename for p in self.table]
 
-    @pytest.mark.xfail(strict=True, reason="PseudoTable.as_dict builds malformed keys for duplicated elements")
     def test_as_dict_keys(self):
         dct = PseudoTable(self.si_files).as_dict()
-        assert {k for k in dct if not k.startswith("@")} == {"Silicon", "Silicon#1", "Silicon#2"}
+        assert {k for k in dct if not k.startswith("@")} == {"Si", "Si#1", "Si#2"}
 
     def test_from_dir(self):
         top = Path("pseudos")
@@ -806,9 +812,6 @@ class TestPseudoTableExtended(MatSciTest):
         shutil.copy(f"{TEST_DIR}/gan.cif", empty)
         assert PseudoTable.from_dir(str(empty), exts="all_files") is None
 
-    @pytest.mark.xfail(
-        strict=True, reason="PseudoTable.from_dir appends None for unparsable files and then crashes in __init__"
-    )
     def test_from_dir_unparsable_file(self):
         top = Path("pseudos")
         top.mkdir()
