@@ -132,6 +132,9 @@ def get_ph_bs_symm_line_from_dict(bands_dict, has_nac=False, labels_dict=None) -
         PhononBandStructure: the phonon band structure
     """
     structure = get_structure_from_dict(bands_dict)
+    # Hoisted out of the per-band/per-atom loop: site_properties rebuilds a dict over all sites on each access
+    masses = structure.site_properties["phonopy_masses"]
+    frac_coords = structure.frac_coords
 
     q_pts = []
     frequencies = []
@@ -150,14 +153,7 @@ def get_ph_bs_symm_line_from_dict(bands_dict, has_nac=False, labels_dict=None) -
                     eig_vec = np.zeros(3, complex)
                     for x in range(3):
                         eig_vec[x] = eig_a[x][0] + eig_a[x][1] * 1j
-                    eig_b.append(
-                        eigvec_to_eigdispl(
-                            eig_vec,
-                            q_pos,
-                            structure[idx].frac_coords,
-                            structure.site_properties["phonopy_masses"][idx],
-                        )
-                    )
+                    eig_b.append(eigvec_to_eigdispl(eig_vec, q_pos, frac_coords[idx], masses[idx]))
                 eig_q.append(eig_b)
         frequencies.append(bands)
         if "label" in phonon:
