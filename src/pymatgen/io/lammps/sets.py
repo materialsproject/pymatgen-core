@@ -10,6 +10,7 @@ For additional flexibility and automation, use the atomate2-lammps implementatio
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pymatgen.io.core import InputSet
@@ -86,14 +87,21 @@ class LammpsInputSet(InputSet):
 
         Args:
             directory: Directory to read input files from. It should contain at least two files:
-                       in.lammps for the LAMMPS input file, and system.data with the system information.
+                       in.lammps for the LAMMPS input file, and system.data (or input.data, as written by
+                       write_input) with the system information.
             keep_stages: Whether to keep the stage structure of the LammpsInputFile or not.
         """
         input_file = LammpsInputFile.from_file(f"{directory}/in.lammps", keep_stages=keep_stages)
         atom_style = input_file.get_args("atom_style")
+        if atom_style == []:  # not set in the input file: LammpsData default
+            atom_style = "full"
         if isinstance(atom_style, list):
             raise ValueError("Variable atom_style is specified multiple times in the input file.")  # noqa: TRY004
-        data_file = LammpsData.from_file(f"{directory}/system.data", atom_style=atom_style)
+        # Fall back to "input.data", the name used by LammpsInputSet.write_input
+        data_path = Path(directory) / "system.data"
+        if not data_path.is_file() and (Path(directory) / "input.data").is_file():
+            data_path = Path(directory) / "input.data"
+        data_file = LammpsData.from_file(str(data_path), atom_style=atom_style)
         return cls(inputfile=input_file, data=data_file, calc_type="read_from_dir")
 
     def validate(self) -> bool:
