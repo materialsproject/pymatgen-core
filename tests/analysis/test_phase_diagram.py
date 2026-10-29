@@ -1917,6 +1917,14 @@ class TestPDPlotterExtra:
         assert all(same_color(text.get_color(), "r") for text in ax.texts)
         plt.close("all")
 
+    def test_plot_element_profile_xlim(self):
+        # the last plateau used to be hard-coded to end at 5 eV regardless of xlim
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib")
+        ax = plotter.plot_element_profile(Element("O"), Composition("Li2O"), xlim=10)
+        assert ax.get_xlim() == (0, 10)
+        assert max(max(line.get_xdata()) for line in ax.get_lines()) == approx(10)
+        plt.close("all")
+
     def test_chempot_range_map_plot(self):
         plotter = PDPlotter(self.pd_ternary, backend="matplotlib")
         for elements in ([Element("Li"), Element("O")], [Element("O"), Element("Li")]):
