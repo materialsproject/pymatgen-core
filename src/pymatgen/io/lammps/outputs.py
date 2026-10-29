@@ -183,6 +183,7 @@ def parse_lammps_log(filename: str = "log.lammps") -> list[pd.DataFrame]:
         return df_thermo
 
     runs = []
-    for b, e in zip(begins, ends, strict=True):
+    # An incomplete last run has a begin but no end marker; zip drops it as documented
+    for b, e in zip(begins, ends, strict=False):
         runs.append(_parse_thermo(lines[b + 1 : e]))
     return runs

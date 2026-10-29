@@ -154,3 +154,24 @@ class TestFunc:
         peptide0_select = peptide0.loc[[0, 6], ["Step", "TotEng", "Press"]]
         peptide0_data = [[0, -5237.4580, -837.0112], [300, -5251.3637, -471.5505]]
         assert_allclose(peptide0_select, peptide0_data)
+
+    def test_parse_lammps_log_incomplete_run(self, tmp_path):
+        # The last run has no "Loop time" marker (e.g. a killed job) and must be skipped, not raise
+        log = (
+            "LAMMPS (29 Oct 2020)\n"
+            "Per MPI rank memory allocation (min/avg/max) = 1.0 | 1.0 | 1.0 Mbytes\n"
+            "Step Temp E_pair\n"
+            "       0          300   -1.0\n"
+            "      10          290   -1.1\n"
+            "Loop time of 0.1 on 1 procs for 10 steps with 2 atoms\n"
+            "\n"
+            "Per MPI rank memory allocation (min/avg/max) = 1.0 | 1.0 | 1.0 Mbytes\n"
+            "Step Temp E_pair\n"
+            "       0          300   -1.0\n"
+        )
+        path = tmp_path / "log.lammps"
+        path.write_text(log)
+        runs = parse_lammps_log(str(path))
+        assert len(runs) == 1
+        assert list(runs[0].columns) == ["Step", "Temp", "E_pair"]
+        assert_allclose(runs[0].to_numpy(), [[0, 300, -1.0], [10, 290, -1.1]])
