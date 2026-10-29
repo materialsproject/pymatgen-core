@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 import warnings
 
 import pytest
@@ -21,6 +22,44 @@ def test_parse_atomic_densities_deprecation(parse_atomic_densities):
         pytest.raises(ValueError, match="You must provide either a Cube file or a CHGCAR"),
     ):
         BaderAnalysis(bader_path="bader", parse_atomic_densities=parse_atomic_densities)
+
+
+FAKE_ACF = """\
+    #         X           Y           Z       CHARGE      MIN DIST    ATOMIC VOL
+ --------------------------------------------------------------------------------
+    1      0.0000      0.0000      0.0000      1.0000      1.0000      10.0000
+ --------------------------------------------------------------------------------
+    VACUUM CHARGE:               0.0000
+    VACUUM VOLUME:               0.0000
+    NUMBER OF ELECTRONS:         1.0000
+"""
+
+
+def _write_fake_bader(path, banner: str) -> str:
+    """Write a fake bader executable that prints banner and writes ACF.dat."""
+    exe = path / "fake_bader"
+    exe.write_text(f"#!/bin/sh\necho '{banner}'\ncat > ACF.dat <<'EOF'\n{FAKE_ACF}EOF\n")
+    exe.chmod(0o755)
+    return str(exe)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fake bader is a POSIX shell script")
+@pytest.mark.parametrize(
+    ("banner", "version"),
+    [("  GRID BASED BADER ANALYSIS  (Version 1.05 08/19/23)", 1.05), ("unexpected output", -1)],
+)
+def test_relative_path_and_version(tmp_path, monkeypatch, banner, version):
+    # relative paths used to be resolved inside ScratchDir (FileNotFoundError) and a
+    # short/unexpected version banner raised IndexError
+    bader_exe = _write_fake_bader(tmp_path, banner)
+    shutil.copy(f"{TEST_DIR}/CHGCAR.gz", tmp_path / "CHGCAR.gz")
+    monkeypatch.chdir(tmp_path)
+    ctx = pytest.warns(UserWarning, match="outdated") if version < 1 else warnings.catch_warnings()
+    with ctx:
+        analysis = BaderAnalysis(chgcar_filename="CHGCAR.gz", bader_path=bader_exe)
+    assert analysis.version == approx(version)
+    assert analysis.data[0]["charge"] == approx(1)
+    assert analysis.nelectrons == approx(1)
 
 
 @pytest.mark.skipif(not shutil.which("bader"), reason="bader executable not present")
