@@ -609,6 +609,9 @@ class OrderDisorderedStructureTransformation(AbstractTransformation):
             rand_structures = get_randomly_manipulated_structures(
                 struct=struct, manipulations=manipulations, n_return=n_to_return
             )
+            if self.no_oxi_states:
+                for rand_struct in rand_structures:
+                    rand_struct.remove_oxidation_states()
             if return_ranked_list:
                 return [
                     {"energy": 0.0, "energy_above_minimum": 0.0, "structure": s} for s in rand_structures[:n_to_return]

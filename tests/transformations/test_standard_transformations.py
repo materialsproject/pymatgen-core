@@ -450,6 +450,8 @@ class TestOrderDisorderedStructureTransformation:
 
         output = trafo.apply_transformation(struct * [2, 2, 2], return_ranked_list=False)
         assert output.composition.reduced_formula == struct.composition.reduced_formula
+        # no_oxi_states=True must strip the dummy 0+ oxidation states (as the Ewald algos do)
+        assert all(isinstance(sp, Element) for sp in output.composition)
 
     # TODO: This test is not supposed to require StandardTransmuter. Needs to be rewritten.
     # def test_occ_tol_with_supercell(self):
