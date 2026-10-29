@@ -1052,7 +1052,7 @@ class Lattice(MSONable):
             Lattice: LLL reduced
         """
         if delta not in self._lll_matrix_mappings:
-            self._lll_matrix_mappings[delta] = self._calculate_lll()
+            self._lll_matrix_mappings[delta] = self._calculate_lll(delta=delta)
         return type(self)(self._lll_matrix_mappings[delta][0])
 
     def _calculate_lll(self, delta: float = 0.75) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -1789,7 +1789,8 @@ def get_integer_index(
     Returns:
         tuple[int, ...]: The Miller index.
     """
-    mi = np.asarray(miller_index)
+    # Copy as float: the in-place divisions below must neither fail on integer input nor mutate the caller's array
+    mi = np.array(miller_index, dtype=np.float64)
     # Deal with the case we have small irregular floats
     # that are all equal or factors of each other
     mi /= min(m for m in mi if m != 0)
@@ -1908,7 +1909,7 @@ def get_points_in_spheres(
                 valid_images.append(np.tile(image, [np.sum(valid_index_bool), 1]) - image_offsets[valid_index_bool])
                 valid_indices.extend([k for k in ind if valid_index_bool[k]])
         if not valid_coords:
-            return [[]] * len(center_coords)
+            return [[] for _ in range(len(center_coords))]
         valid_coords = np.concatenate(valid_coords, axis=0)  # type: ignore[assignment]
         valid_images = np.concatenate(valid_images, axis=0)  # type:ignore[assignment]
 

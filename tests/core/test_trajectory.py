@@ -778,6 +778,28 @@ class TestTrajectoryMethods(MatSciTest):
         assert_allclose(first.lattice, expected)
         assert first[4].lattice.a == pytest.approx(expected[4][0][0])
 
+    def test_extend_different_constant_lattices(self):
+        traj_1 = Trajectory(species=SI_SPECIES, coords=SI_COORDS, lattice=LATTICE)
+        other_lattice = np.eye(3) * 5.0
+        traj_2 = Trajectory(species=SI_SPECIES, coords=SI_COORDS, lattice=other_lattice)
+        traj_1.extend(traj_2)
+        assert traj_1.constant_lattice is False
+        assert_allclose(traj_1[0].lattice.matrix, LATTICE)
+        assert_allclose(traj_1[-1].lattice.matrix, other_lattice)
+
+    def test_extend_same_constant_lattice(self):
+        traj_1 = Trajectory(species=SI_SPECIES, coords=SI_COORDS, lattice=LATTICE)
+        traj_2 = Trajectory(species=SI_SPECIES, coords=SI_COORDS, lattice=LATTICE)
+        traj_1.extend(traj_2)
+        assert traj_1.constant_lattice is True
+        assert_allclose(traj_1.lattice, LATTICE)
+
+    def test_numpy_integer_index(self, struct_traj, mol_traj):
+        struct = struct_traj[np.int64(1)]
+        assert isinstance(struct, Structure)
+        assert_allclose(struct.frac_coords, SI_COORDS[1])
+        assert isinstance(mol_traj[np.arange(3)[2]], Molecule)
+
     def test_extend_frame_props_none_first(self):
         props = [{"energy": float(idx)} for idx in range(3)]
         traj_1 = Trajectory(species=SI_SPECIES, coords=SI_COORDS, lattice=LATTICE)
