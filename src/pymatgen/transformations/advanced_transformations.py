@@ -370,11 +370,14 @@ class EnumerateStructureTransformation(AbstractTransformation):
             )
             structures = [structure.copy()]
 
-        if self.max_disordered_sites:
+        if structures is not None:
+            # ordered structure: nothing to enumerate
+            max_cell_sizes: Iterable[int] = []
+        elif self.max_disordered_sites:
             n_disordered = sum(1 for site in structure if not site.is_ordered)
             if n_disordered > self.max_disordered_sites:
                 raise ValueError(f"Too many disordered sites! ({n_disordered} > {self.max_disordered_sites})")
-            max_cell_sizes: Iterable[int] = range(
+            max_cell_sizes = range(
                 self.min_cell_size,
                 math.floor(self.max_disordered_sites / n_disordered) + 1,
             )

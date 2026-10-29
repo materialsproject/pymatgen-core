@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from shutil import which
+from unittest.mock import patch
 
 import numpy as np
 import orjson
@@ -169,6 +170,20 @@ class TestChargeBalanceTransformation:
         struct_trafo = trafo.apply_transformation(struct)
 
         assert struct_trafo.charge == approx(0, abs=1e-5)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"max_cell_size": None, "max_disordered_sites": 5}])
+def test_enumerate_structure_transformation_ordered_input(kwargs):
+    # Ordered input used to be passed to enumlib anyway (overwriting the copy and
+    # failing) or raise ZeroDivisionError with max_disordered_sites.
+    struct = Structure(Lattice.cubic(4), ["Li+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    est = EnumerateStructureTransformation(**kwargs)
+    with (
+        patch.object(advanced, "EnumlibAdaptor", side_effect=AssertionError("enumlib should not run")),
+        pytest.warns(UserWarning, match="because it is ordered"),
+    ):
+        out = est.apply_transformation(struct)
+    assert out == struct
 
 
 @pytest.mark.skipif(not enumlib_present, reason="enum_lib not present.")
