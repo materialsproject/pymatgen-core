@@ -401,9 +401,9 @@ class Vasprun(MSONable):
                 )
                 self.nionic_steps = len(self.md_data) if self.md_data else len(self.ionic_steps)
 
-            if parse_potcar_file:
-                self.update_potcar_spec(parse_potcar_file)
-                self.update_charge_from_potcar(parse_potcar_file)
+        if parse_potcar_file:
+            self.update_potcar_spec(parse_potcar_file)
+            self.update_charge_from_potcar(parse_potcar_file)
 
         if self.incar.get("ALGO") not in {"Chi", "Bse"} and not self.converged and self.parameters.get("IBRION") != 0:
             msg = f"{filename} is an unconverged VASP run.\n"

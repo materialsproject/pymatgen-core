@@ -885,6 +885,17 @@ class TestVasprun(MatSciTest):
             for ipot in range(len(potcar)):
                 assert vrun.potcar_spec[ipot]["summary_stats"] == potcar[ipot]._summary_stats
 
+    def test_parse_potcar_with_ionic_step_skip(self):
+        # POTCAR spec and structure charge must also be set when skipping ionic steps
+        copyfile(f"{VASP_OUT_DIR}/vasprun.charged.xml.gz", "vasprun.xml.gz")
+        copyfile(f"{FAKE_POTCAR_DIR}/POT_GGA_PAW_PBE/POTCAR.Si.gz", "POTCAR.gz")
+        potcar = Potcar.from_file("POTCAR.gz")
+
+        vrun = Vasprun("vasprun.xml.gz", ionic_step_skip=2, ionic_step_offset=1, parse_potcar_file=True)
+        assert vrun.potcar_spec[0]["summary_stats"] == potcar[0]._summary_stats
+        assert vrun.final_structure.charge == -1
+        assert all(struct.charge == -1 for struct in vrun.structures)
+
 
 class TestOutcar:
     @pytest.mark.parametrize("compressed", [True, False])
