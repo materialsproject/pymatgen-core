@@ -36,7 +36,7 @@ def get_site_symmetries(struct: Structure, precision: float = 0.1) -> list[list[
         for idx2, site2 in enumerate(struct):
             temp_struct.replace(
                 idx2,
-                site2.specie,
+                site2.species,
                 temp_struct.frac_coords[idx2] - struct.frac_coords[idx1],
             )
 

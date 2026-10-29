@@ -5,6 +5,7 @@ import gzip
 import orjson
 from monty.json import MontyDecoder
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.symmetry import site_symmetries as ss
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -52,3 +53,9 @@ class TestSiteSymmetries(MatSciTest):
             )
         )
         assert shared_ops == self.shared_ops
+
+    def test_get_site_symmetries_disordered(self):
+        # CsCl-type cell with a mixed-occupancy site: both sites have the full m-3m point group
+        struct = Structure(Lattice.cubic(4), [{"Na": 0.5, "K": 0.5}, "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        point_ops = ss.get_site_symmetries(struct)
+        assert [len(ops) for ops in point_ops] == [48, 48]
