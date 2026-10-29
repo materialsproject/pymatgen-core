@@ -854,7 +854,15 @@ class DiscretizeOccupanciesTransformation(AbstractTransformation):
                     raise RuntimeError("Cannot discretize structure within tolerance!")
                 sp[k] = new_occ
 
-        return Structure(structure.lattice, species, structure.frac_coords)
+        return Structure(
+            structure.lattice,
+            species,
+            structure.frac_coords,
+            charge=structure.charge,
+            site_properties=structure.site_properties,
+            labels=structure.labels,
+            properties=structure.properties,
+        )
 
     def __repr__(self):
         return "DiscretizeOccupanciesTransformation"

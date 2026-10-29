@@ -610,6 +610,22 @@ class TestDeformStructureTransformation:
 
 
 class TestDiscretizeOccupanciesTransformation:
+    def test_preserves_site_properties_and_charge(self):
+        # site properties, labels and charge used to be silently dropped
+        struct_orig = Structure(
+            Lattice.cubic(4),
+            [{"Li": 0.19, "Na": 0.81}, {"O": 1}],
+            [[0, 0, 0], [0.5, 0.5, 0.5]],
+            charge=1,
+            site_properties={"magmom": [0.5, -0.5]},
+            labels=["A", "X"],
+        )
+        struct = DiscretizeOccupanciesTransformation(max_denominator=5).apply_transformation(struct_orig)
+        assert dict(struct[0].species) == {Element("Li"): 0.2, Element("Na"): 0.8}
+        assert struct.site_properties == {"magmom": [0.5, -0.5]}
+        assert struct.labels == ["A", "X"]
+        assert struct.charge == 1
+
     def test_apply_transformation(self):
         lattice = Lattice.cubic(4)
         struct_orig = Structure(
