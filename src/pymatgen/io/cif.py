@@ -1269,15 +1269,12 @@ class CifParser:
                 struct = SymmetrizedStructure(struct, sg, equivalent_indices, wyckoffs)
 
             if not check_occu:
-                if lattice is None:
-                    raise RuntimeError("Cannot generate Structure with lattice as None.")
-
                 for idx in range(len(struct)):
                     struct[idx] = PeriodicSite(
                         all_species_noedit[idx],
                         all_coords[idx],
                         lattice,
-                        properties=site_properties,
+                        properties={key: vals[idx] for key, vals in site_properties.items()},
                         label=all_labels[idx],
                         skip_checks=True,
                     )

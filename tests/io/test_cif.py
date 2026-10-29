@@ -1206,6 +1206,15 @@ Gd1 5.05 5.05 0.0"""
 
         assert s_ncl.matches(s_ncl_from_msg)
 
+    def test_parse_structures_no_check_occu_site_properties(self):
+        # check_occu=False used to assign the whole site_properties dict of lists to every site
+        ref = self.mcif.parse_structures(primitive=False, symmetrized=True)[0]
+        struct = self.mcif.parse_structures(primitive=False, check_occu=False)[0]
+        assert len(struct) == len(ref)
+        for site, ref_site in zip(struct, ref, strict=True):
+            assert isinstance(site.properties["magmom"], Magmom)
+            assert site.properties["magmom"] == ref_site.properties["magmom"]
+
     def test_axial_moment_transform_non_orthogonal_cell(self):
         # MAGNDATA 1.34 (HoAuGe): child cell of a hexagonal parent (a doubled, so
         # a = 2b, gamma = 120 deg);
