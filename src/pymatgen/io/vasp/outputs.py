@@ -1622,7 +1622,7 @@ class Vasprun(MSONable):
             kpoint = Kpoints(
                 comment="Kpoints from vasprun.xml",
                 style=Kpoints.supported_modes.Reciprocal,
-                num_kpts=len(kpoint.kpts),
+                num_kpts=len(actual_kpoints),
                 kpts=actual_kpoints,
                 kpts_weights=weights,  # type: ignore[arg-type]
             )

@@ -421,6 +421,10 @@ class TestVasprun(MatSciTest):
     def test_uniform(self):
         vasprun_uniform = Vasprun(f"{VASP_OUT_DIR}/vasprun.uniform.xml.gz", parse_potcar_file=False)
         assert vasprun_uniform.kpoints.style == Kpoints.supported_modes.Reciprocal
+        # Explicit k-points: num_kpts must match the k-point list so the KPOINTS round-trips
+        kpoints = vasprun_uniform.kpoints
+        assert kpoints.num_kpts == len(kpoints.kpts) == len(vasprun_uniform.actual_kpoints) == 220
+        assert len(Kpoints.from_str(str(kpoints)).kpts) == 220
 
     def test_no_projected(self):
         vasprun_no_pdos = Vasprun(f"{VASP_OUT_DIR}/vasprun_Li_no_projected.xml.gz", parse_potcar_file=False)
