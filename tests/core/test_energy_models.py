@@ -61,6 +61,11 @@ class TestIsingModel:
         struct[5] = Species("Fe", 2, spin=-4)
         assert model.get_energy(struct) == approx(51.97424405382921)
 
+    def test_get_energy_species_without_spin(self):
+        # Species.spin defaults to None, which raised TypeError in j * spin1 * spin2
+        struct = Structure(Lattice.cubic(3), [Species("Fe", 2, spin=1), Species("Fe", 2)], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        assert IsingModel(5, 2.7).get_energy(struct) == approx(0)
+
     def test_as_from_dict(self):
         model = IsingModel(5, 4)
         restored = IsingModel.from_dict(model.as_dict())
