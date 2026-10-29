@@ -148,8 +148,8 @@ class VaspInputSet(InputGenerator, abc.ABC):
             set LDAUU for Fe to 5 in an oxide, or {"LDAUU":{"Fe":5}} to set LDAUU to 5
             regardless of the input structure. If a None value is given, that key is
             unset. For example, {"ENCUT": None} will remove ENCUT from the
-            incar settings. Finally, KSPACING is a special setting and can be set to
-            "auto" in which the KSPACING is set automatically based on the band gap.
+            incar settings. To set KSPACING automatically based on the band gap, use
+            auto_kspacing=True rather than a KSPACING value in user_incar_settings.
         user_kpoints_settings (dict or Kpoints): Allow user to override kpoints setting
             by supplying a dict. e.g. {"reciprocal_density": 1000}. User can also
             supply Kpoints object.
@@ -210,9 +210,9 @@ class VaspInputSet(InputGenerator, abc.ABC):
             instead of ``reciprocal_density`` for metallic systems. Note, this only works
             if the bandgap is not None.
         bandgap_tol (float): Tolerance for determining if a system is metallic when
-            KSPACING is set to "auto". If the bandgap is less than this value, the
+            auto_kspacing or auto_ismear is True. If the bandgap is less than this value, the
             system is considered metallic. Defaults to 1e-4 (eV).
-        bandgap (float): Used for determining KSPACING if KSPACING == "auto" or
+        bandgap (float): Used for determining KSPACING if auto_kspacing == True or
             ISMEAR if auto_ismear == True. Set automatically when using from_prev_calc.
         prev_incar (str or dict): Previous INCAR used for setting parent INCAR when
             inherit_incar == True. Set automatically when using from_prev_calc.
