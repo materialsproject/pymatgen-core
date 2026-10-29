@@ -541,10 +541,9 @@ def bader_analysis_from_objects(
             summary["charge_transfer"] = charge_transfer
 
         if chgcar.is_spin_polarized:
-            # write a CHGCAR containing magnetization density only
-            chgcar.data["total"] = chgcar.data["diff"]
-            chgcar.is_spin_polarized = False
-            chgcar.write_file("CHGCAR_mag")
+            # write a CHGCAR containing magnetization density only (without mutating the input)
+            chgcar_mag = Chgcar(chgcar.poscar, {"total": chgcar.data["diff"]})
+            chgcar_mag.write_file("CHGCAR_mag")
 
             chgcar_mag_path = f"{tmp_dir}/CHGCAR_mag"
             ba = BaderAnalysis(

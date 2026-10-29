@@ -9,7 +9,9 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.command_line import bader_caller
 from pymatgen.command_line.bader_caller import BaderAnalysis, bader_analysis_from_path
+from pymatgen.io.vasp.outputs import Chgcar
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/command_line/bader"
@@ -60,6 +62,32 @@ def test_relative_path_and_version(tmp_path, monkeypatch, banner, version):
     assert analysis.version == approx(version)
     assert analysis.data[0]["charge"] == approx(1)
     assert analysis.nelectrons == approx(1)
+
+
+def test_bader_analysis_from_objects_does_not_mutate_chgcar(monkeypatch):
+    # the spin-polarized branch used to overwrite chgcar.data["total"] with the
+    # magnetization density and set chgcar.is_spin_polarized = False on the input
+    chgcar = Chgcar.from_file(f"{TEST_DIR}/CHGCAR.gz")
+    chgcar.data["diff"] = 0.1 * chgcar.data["total"]
+    chgcar.is_spin_polarized = True
+    total_before = chgcar.data["total"].copy()
+    written_mag = {}
+
+    class FakeBaderAnalysis:
+        def __init__(self, chgcar_filename, **kwargs):
+            if chgcar_filename.endswith("CHGCAR_mag"):
+                written_mag["total"] = Chgcar.from_file(chgcar_filename).data["total"]
+            self.data = [{"min_dist": 1.0, "charge": 1.0, "atomic_vol": 10.0}]
+            self.vacuum_charge = self.vacuum_volume = 0.0
+            self.version = 1.05
+
+    monkeypatch.setattr(bader_caller, "BaderAnalysis", FakeBaderAnalysis)
+    summary = bader_caller.bader_analysis_from_objects(chgcar)
+
+    assert summary["magmom"] == [1.0]
+    assert chgcar.is_spin_polarized
+    assert_allclose(chgcar.data["total"], total_before)
+    assert_allclose(written_mag["total"], chgcar.data["diff"], rtol=1e-4)
 
 
 @pytest.mark.skipif(not shutil.which("bader"), reason="bader executable not present")
