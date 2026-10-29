@@ -55,6 +55,21 @@ class Ion(Composition, MSONable, Stringify):
         new_charge = self.charge * other
         return type(self)(new_composition, new_charge)
 
+    # Composition binds __rmul__ to Composition.__mul__, which drops the charge
+    __rmul__ = __mul__
+
+    def __truediv__(self, other) -> Self:
+        """Division of an Ion by a factor."""
+        new_composition = self.composition / other
+        new_charge = self.charge / other
+        return type(self)(new_composition, new_charge)
+
+    __div__ = __truediv__
+
+    def copy(self) -> Self:
+        """A copy of the ion, keeping its charge."""
+        return type(self)(self.composition, self.charge)
+
     def __hash__(self) -> int:
         return hash((self.composition, self.charge))
 
@@ -82,9 +97,10 @@ class Ion(Composition, MSONable, Stringify):
         if match := re.search(r"\(aq\)", formula):
             formula = formula.replace(match.group(), "", 1)
 
-        # Check for charge in brackets
+        # Check for charge in brackets. Only brackets holding a charge count: others,
+        # e.g. "[Fe(CN)6]-3", are formula groups for Composition to parse.
         charge = 0.0
-        if match := re.search(r"\[([^\[\]]+)\]", formula):
+        if match := re.search(r"\[([\d.+-]+)\]", formula):
             if m_chg := re.search(r"([\.\d]*)([+-]*)([\.\d]*)", match[1]):
                 if m_chg[1] != "":
                     if m_chg[3] != "":
