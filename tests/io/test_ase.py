@@ -7,7 +7,7 @@ import pytest
 from monty.json import MontyDecoder, jsanitize
 
 from pymatgen.core import Composition, Lattice, Molecule, Structure
-from pymatgen.core.structure import StructureError
+from pymatgen.core.structure import IMolecule, StructureError
 from pymatgen.io.ase import AseAtomsAdaptor, MSONAtoms
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR
 
@@ -276,6 +276,29 @@ def test_get_molecule():
     molecule = AseAtomsAdaptor.get_molecule(atoms)
     assert molecule.charge == 2
     assert molecule.spin_multiplicity == 3
+
+
+def test_imolecule_charge_spin_round_trip():
+    # get_atoms used to ignore IMolecule charge/spin, and get_molecule(cls=IMolecule)
+    # crashed on the Molecule-only set_charge_and_spin
+    imol = IMolecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 0.96], [0.93, 0, -0.24]], charge=1, spin_multiplicity=2)
+    atoms = AseAtomsAdaptor.get_atoms(imol)
+    assert atoms.charge == 1
+    assert atoms.spin_multiplicity == 2
+
+    imol_back = AseAtomsAdaptor.get_molecule(atoms, cls=IMolecule)
+    assert type(imol_back) is IMolecule
+    assert imol_back.charge == 1
+    assert imol_back.spin_multiplicity == 2
+
+
+def test_msonable_atoms_charge_spin_round_trip():
+    # MSONAtoms.as_dict used to drop the charge/spin_multiplicity patched in by get_atoms
+    mol = Molecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 0.96], [0.93, 0, -0.24]], charge=1, spin_multiplicity=2)
+    atoms_back = MSONAtoms.from_dict(AseAtomsAdaptor.get_atoms(mol).as_dict())
+    mol_back = AseAtomsAdaptor.get_molecule(atoms_back)
+    assert mol_back.charge == 1
+    assert mol_back.spin_multiplicity == 2
 
 
 @pytest.mark.parametrize("filename", ["io/vasp/outputs/OUTCAR.gz", "cif/V2O3.cif"])
