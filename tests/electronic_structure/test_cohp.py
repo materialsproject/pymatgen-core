@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import warnings
 
 import orjson
@@ -794,6 +795,23 @@ class TestCombinedIcohp:
         assert self.icoopcollection_Fe.extremum_icohpvalue(summed_spin_channels=False, spin=Spin.down) == approx(
             -0.05756
         )
+
+    def test_as_from_dict_without_orbital_icohps(self):
+        # as_dict used to iterate over list_orb_icohp=None and raise TypeError
+        for collection in (self.icohpcollection_KF, self.icohpcollection_Fe):
+            dct = collection.as_dict()
+            assert dct["list_orb_icohp"] is None
+            new_collection = IcohpCollection.from_dict(dct)
+            assert new_collection.as_dict() == collection.as_dict()
+            assert new_collection.extremum_icohpvalue() == approx(collection.extremum_icohpvalue())
+
+    def test_from_dict_does_not_mutate_input(self):
+        dct = self.icohpcollection_orbitalwise.as_dict()
+        dct_copy = copy.deepcopy(dct)
+        IcohpCollection.from_dict(dct)
+        assert dct == dct_copy
+        # so the same dict can be deserialized more than once
+        assert IcohpCollection.from_dict(dct).as_dict() == self.icohpcollection_orbitalwise.as_dict()
 
 
 class TestCompleteCohp(MatSciTest):

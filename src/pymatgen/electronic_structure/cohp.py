@@ -1431,7 +1431,9 @@ class IcohpCollection(MSONable):
             "list_num": self._list_num,
             "list_icohp": [{str(spin): value for spin, value in icohp.items()} for icohp in self._list_icohp],
             "is_spin_polarized": self._is_spin_polarized,
-            "list_orb_icohp": [
+            "list_orb_icohp": None
+            if self._list_orb_icohp is None
+            else [
                 {
                     key: {
                         "icohp": {str(spin): value for spin, value in val["icohp"].items()},
@@ -1461,8 +1463,11 @@ class IcohpCollection(MSONable):
                 new_icohp_dict[spin_enum] = value
             list_icohp.append(new_icohp_dict)
 
-        new_list_orb = [{orb_label: {} for orb_label in bond} for bond in dct["list_orb_icohp"]]  # type:ignore[var-annotated]
-        for bond_num, lab_orb_icohp in enumerate(dct["list_orb_icohp"]):
+        list_orb_icohp = dct.get("list_orb_icohp")
+        new_list_orb: list[dict[str, dict]] | None = (
+            None if list_orb_icohp is None else [{orb_label: {} for orb_label in bond} for bond in list_orb_icohp]
+        )
+        for bond_num, lab_orb_icohp in enumerate(list_orb_icohp or []):
             for orb in lab_orb_icohp:
                 for key in lab_orb_icohp[orb]:
                     sub_dict = {}
@@ -1481,18 +1486,17 @@ class IcohpCollection(MSONable):
                         for item in lab_orb_icohp[orb][key]:
                             # Handle LCFO orbitals
                             if isinstance(item, (list, tuple)):
-                                item[1] = Orbital(item[1])
-                                orb_temp.append(tuple(item))
+                                # build a new tuple rather than assigning into the input dict's list
+                                orb_temp.append((item[0], Orbital(item[1]), *item[2:]))
                             else:
                                 orb_temp.append(item)
                         sub_dict[key] = orb_temp  # type: ignore[assignment]
 
-                    new_list_orb[bond_num][orb].update(sub_dict)
-
-        dct["list_icohp"] = list_icohp
-        dct["list_orb_icohp"] = new_list_orb
+                    new_list_orb[bond_num][orb].update(sub_dict)  # type:ignore[index]
 
         init_dict = {k: v for k, v in dct.items() if "@" not in k}
+        init_dict["list_icohp"] = list_icohp
+        init_dict["list_orb_icohp"] = new_list_orb
 
         return cls(**init_dict)
 
