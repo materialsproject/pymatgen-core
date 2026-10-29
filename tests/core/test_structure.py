@@ -439,6 +439,20 @@ class TestIStructure(MatSciTest):
         assert new_struct.properties["another_prop"] == "test"
         assert new_struct.properties["test_property"] == "test"
 
+        # Copying general properties must not create a mutable alias to the source.
+        source = Structure(
+            self.lattice,
+            ["Si"],
+            [[0, 0, 0]],
+            properties={"metadata": {"tags": ["source"]}},
+        )
+        copied = source.copy(properties={"copied": True})
+        copied.properties["metadata"]["tags"].append("copy")
+        copied.properties["only_in_copy"] = True
+        assert source.properties == {"metadata": {"tags": ["source"]}}
+        assert "copied" not in source.properties
+        assert "only_in_copy" not in source.properties
+
     def test_interpolate(self):
         coords = [[0, 0, 0], [0.75, 0.5, 0.75]]
         struct = IStructure(self.lattice, ["Si"] * 2, coords)

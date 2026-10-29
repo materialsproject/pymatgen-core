@@ -17,6 +17,7 @@ import sys
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from copy import deepcopy
 from collections.abc import Callable, Iterable, Iterator, MutableSequence, Sequence
 from typing import (
     TYPE_CHECKING,
@@ -2385,7 +2386,9 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         new_site_props = self.site_properties
         if site_properties:
             new_site_props.update(site_properties)
-        props = self.properties
+        # General structure properties are mutable metadata. Copy them before
+        # applying overrides so copying a structure cannot mutate the source.
+        props = deepcopy(self.properties)
         if properties:
             props.update(properties)
         if not sanitize:
