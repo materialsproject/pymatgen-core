@@ -1669,6 +1669,17 @@ class TestCompoundPhaseDiagramEdgeCases:
         # O2 and LiO8 lie outside the Li-Li2O2 segment (they need a negative amount of Li)
         assert sorted(e.original_entry.reduced_formula for e in cpd.all_entries) == ["Li", "Li2O2"]
 
+    def test_transform_entries_does_not_mutate_input(self):
+        entries = [
+            ComputedEntry("Li", -2, entry_id="mp-1"),
+            ComputedEntry("O2", -8, entry_id="mp-2"),
+            ComputedEntry("Li2O", -15, entry_id="mp-3"),
+        ]
+        cpd = CompoundPhaseDiagram(entries, [Composition("Li"), Composition("Li2O")])
+        assert not any(hasattr(entry, "attribute") for entry in entries)
+        # transformed entries are still labelled with the entry_id
+        assert sorted(e.attribute for e in cpd.all_entries) == ["mp-1", "mp-3"]
+
     def test_transformed_entry_negative_reactant_raises(self):
         sp_mapping = {Composition("Li"): DummySpecies("Xf"), Composition("Li2O2"): DummySpecies("Xg")}
         with pytest.raises(TransformedPDEntryError, match="Only reactions with positive amounts"):

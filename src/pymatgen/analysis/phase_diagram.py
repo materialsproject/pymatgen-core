@@ -1699,11 +1699,12 @@ class CompoundPhaseDiagram(PhaseDiagram):
             sp_mapping[comp] = DummySpecies("X" + self.num2str(idx))
 
         for entry in entries:
-            if getattr(entry, "attribute", None) is None:
-                entry.attribute = getattr(entry, "entry_id", None)
-
             try:
                 transformed_entry = TransformedPDEntry(entry, sp_mapping)
+                # Label with the entry_id if no attribute is set. Set this on the
+                # transformed entry rather than mutating the caller's entry.
+                if transformed_entry.attribute is None:
+                    transformed_entry.attribute = getattr(entry, "entry_id", None)
                 new_entries.append(transformed_entry)
             except ReactionError:
                 # If the reaction can't be balanced, the entry does not fall
