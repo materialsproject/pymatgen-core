@@ -1282,6 +1282,19 @@ class TestCompleteCohp(MatSciTest):
         for cohp in cohps:
             assert cohp.as_dict() == cohp_label.as_dict()
 
+    def test_from_dict_total_from_orbital_resolved(self):
+        # Like from_file, from_dict must rebuild missing total COHPs/ICOHPs from the
+        # orbital-resolved ones. It used to compute them and then discard the result.
+        dct = self.cohp_orb.as_dict()
+        del dct["COHP"]["1"], dct["ICOHP"]["1"]
+        cohp = CompleteCohp.from_dict(dct)
+        orb_res = self.cohp_orb.orb_res_cohp["1"].values()
+
+        assert_allclose(cohp.all_cohps["1"].cohp[Spin.up], sum(orb["COHP"][Spin.up] for orb in orb_res))
+        assert_allclose(cohp.all_cohps["1"].icohp[Spin.up], sum(orb["ICOHP"][Spin.up] for orb in orb_res))
+        assert_allclose(cohp.all_cohps["1"].cohp[Spin.up], self.cohp_orb.all_cohps["1"].cohp[Spin.up], atol=1e-3)
+        assert_allclose(cohp.all_cohps["1"].icohp[Spin.up], self.cohp_orb.all_cohps["1"].icohp[Spin.up], atol=1e-3)
+
     def test_orbital_resolved_cohp_summed_spin_channels(self):
         ref = self.cohp_orb.orb_res_cohp["1"]["4s-4px"]
         cohp_label = self.cohp_orb.get_orbital_resolved_cohp("1", "4s-4px", summed_spin_channels=True)

@@ -646,6 +646,8 @@ class CompleteCohp(Cohp):
             bonds = None
 
         for label in dct["COHP"]:
+            if dct["COHP"][label] is None:
+                continue  # rebuilt from the orbital-resolved COHPs below
             cohp = {Spin(int(spin)): np.array(dct["COHP"][label][spin]) for spin in dct["COHP"][label]}
             try:
                 icohp = {Spin(int(spin)): np.array(dct["ICOHP"][label][spin]) for spin in dct["ICOHP"][label]}
@@ -695,7 +697,8 @@ class CompleteCohp(Cohp):
                 # COHPs from the single-orbital populations.
                 # Total COHPs may not be present when the COHP generator keyword
                 # is used in LOBSTER versions 2.2.0 and earlier.
-                if label not in dct["COHP"] or dct["COHP"][label] is None:
+                total_cohp = cohp_dict.get(label)
+                if total_cohp is None:
                     cohp = {
                         Spin.up: np.sum(
                             np.array([orb_cohp[label][orb]["COHP"][Spin.up] for orb in orb_cohp[label]]),
@@ -709,9 +712,10 @@ class CompleteCohp(Cohp):
                         )
                     except KeyError:
                         pass
+                    total_cohp = cohp_dict[label] = Cohp(efermi, energies, cohp)
 
-                orb_res_icohp = None in [orb_cohp[label][orb]["ICOHP"] for orb in orb_cohp[label]]
-                if (label not in dct["ICOHP"] or dct["ICOHP"][label] is None) and orb_res_icohp:
+                has_orb_res_icohp = None not in [orb_cohp[label][orb]["ICOHP"] for orb in orb_cohp[label]]
+                if total_cohp.icohp is None and has_orb_res_icohp:
                     icohp = {
                         Spin.up: np.sum(
                             np.array([orb_cohp[label][orb]["ICOHP"][Spin.up] for orb in orb_cohp[label]]),
@@ -725,6 +729,7 @@ class CompleteCohp(Cohp):
                         )
                     except KeyError:
                         pass
+                    total_cohp.icohp = icohp
         else:
             orb_cohp = {}
 
