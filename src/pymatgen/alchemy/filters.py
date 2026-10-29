@@ -7,7 +7,7 @@ import math
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from monty.json import MSONable
+from monty.json import MontyDecoder, MSONable
 
 from pymatgen.core import get_el_sp
 from pymatgen.core.structure_matcher import ElementComparator, StructureMatcher
@@ -271,8 +271,28 @@ class RemoveExistingFilter(AbstractStructureFilter):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "init_args": {"structure_matcher": self.structure_matcher.as_dict()},
+            "init_args": {
+                "existing_structures": [struct.as_dict() for struct in self.existing_structures],
+                "structure_matcher": self.structure_matcher.as_dict(),
+                "symprec": self.symprec,
+            },
         }
+
+    @classmethod
+    def from_dict(cls, dct: dict) -> Self:
+        """
+        Args:
+            dct (dict): Dict representation.
+
+        Returns:
+            RemoveExistingFilter
+        """
+        init_args = MontyDecoder().process_decoded(dct["init_args"])
+        return cls(
+            init_args.get("existing_structures", []),
+            structure_matcher=init_args.get("structure_matcher"),
+            symprec=init_args.get("symprec"),
+        )
 
 
 class ChargeBalanceFilter(AbstractStructureFilter):

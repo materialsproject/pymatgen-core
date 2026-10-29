@@ -117,6 +117,16 @@ class TestRemoveExistingFilter:
         assert fil.test(kbr)
         assert not fil.test(nacl.copy())
 
+    def test_as_from_dict(self):
+        # as_dict used to drop existing_structures/symprec and from_dict raised TypeError on init_args
+        fil = RemoveExistingFilter(self._existing_structures, symprec=1e-3)
+        fil2 = MontyDecoder().process_decoded(json.loads(json.dumps(fil.as_dict())))
+        assert isinstance(fil2, RemoveExistingFilter)
+        assert fil2.symprec == 1e-3
+        assert fil2.existing_structures == self._existing_structures
+        assert isinstance(fil2.structure_matcher, StructureMatcher)
+        assert not fil2.test(self._existing_structures[0])
+
 
 class TestContainSpecieRepr:
     def test_repr(self):
