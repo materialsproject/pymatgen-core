@@ -126,14 +126,17 @@ class TestSlab(MatSciTest):
             self.hydrogen.copy(properties={"metadata": {"source": 1}}),
             0,
             np.array([1, 2, 3]),
+            site_properties={"metadata": [{"source": 1}]},
             reorient_lattice=False,
         )
         copied = slab.copy()
         copied.oriented_unit_cell.properties["metadata"]["source"] = 2
         copied.scale_factor[0] = 9
+        copied[0].properties["metadata"]["source"] = 3
 
         assert slab.oriented_unit_cell.properties["metadata"]["source"] == 1
         assert slab.scale_factor[0] == 1
+        assert slab[0].properties["metadata"]["source"] == 1
 
     def test_add_adsorbate_atom(self):
         zno_slab = Slab(

@@ -288,7 +288,7 @@ class Slab(Structure):
         Returns:
             A copy of the Structure, with optionally new site_properties
         """
-        props = self.site_properties
+        props = copy.deepcopy(self.site_properties)
         if site_properties:
             props.update(site_properties)
 
