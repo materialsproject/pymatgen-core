@@ -1070,3 +1070,27 @@ def test_opt_constraint(tmp_path):
 
     with pytest.raises(ValueError, match="can only differ by a sign"):
         _write_and_parse(tmp_path, _opt_constraint_text(90.0, -90.0))
+
+
+def test_structure_changes_removes_adjacent_special_sites(monkeypatch):
+    """All coordinating metals must be stripped, even when listed consecutively."""
+    from pymatgen.core.graphs import MoleculeGraph
+    from pymatgen.core.local_env import JmolNN
+    from pymatgen.io.qchem import outputs
+
+    graphed_species = []
+    original = MoleculeGraph.from_local_env_strategy
+
+    def spy(mol, strategy):
+        graphed_species.append([site.specie.symbol for site in mol])
+        return original(mol, strategy)
+
+    # OpenBabelNN requires openbabel; any molecular NN strategy exercises the same code path
+    monkeypatch.setattr(outputs, "OpenBabelNN", JmolNN)
+    monkeypatch.setattr(outputs.MoleculeGraph, "from_local_env_strategy", spy)
+    mol = Molecule(
+        ["Li", "Li", "O", "H", "H"],
+        [[3, 0, 0], [-3, 0, 0], [0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]],
+    )
+    assert check_for_structure_changes(mol, mol) == "no_change"
+    assert graphed_species == [["O", "H", "H"], ["O", "H", "H"]]
