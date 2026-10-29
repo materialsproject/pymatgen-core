@@ -3216,6 +3216,18 @@ class TestMolecule(MatSciTest):
         assert returned is mol
         assert mol.formula == "H3 N1"
 
+    def test_copy_does_not_alias_properties(self):
+        source = Molecule(
+            ["O", "H", "H"],
+            [[0, 0, 0], [1, 0, 0], [-1, 0, 0]],
+            properties={"metadata": {"tags": ["source"]}},
+        )
+        copied = source.copy()
+        copied.properties["metadata"]["tags"].append("copy")
+        copied.properties["only_in_copy"] = True
+        assert source.properties == {"metadata": {"tags": ["source"]}}
+        assert "only_in_copy" not in source.properties
+
     def test_from_sites(self):
         mol = Molecule.from_sites(self.mol)
         assert mol == self.mol

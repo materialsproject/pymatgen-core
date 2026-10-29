@@ -3409,7 +3409,7 @@ class IMolecule(SiteCollection[Site], MSONable):
         Returns:
             IMolecule
         """
-        return type(self).from_sites(self, properties=self.properties)
+        return type(self).from_sites(self, properties=deepcopy(self.properties))
 
     @classmethod
     def from_sites(
