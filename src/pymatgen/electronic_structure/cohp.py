@@ -410,6 +410,7 @@ class CompleteCohp(Cohp):
             cohp=final_cohp,
             are_coops=self.are_coops,
             are_cobis=self.are_cobis,
+            are_multi_center_cobis=self.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -469,7 +470,8 @@ class CompleteCohp(Cohp):
             energies=first_cohpobject.energies,
             cohp=final_cohp,
             are_coops=first_cohpobject.are_coops,
-            are_cobis=first_cohpobject.are_coops,
+            are_cobis=first_cohpobject.are_cobis,
+            are_multi_center_cobis=first_cohpobject.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -538,6 +540,7 @@ class CompleteCohp(Cohp):
             cohp=final_cohp,
             are_coops=first_cohpobject.are_coops,
             are_cobis=first_cohpobject.are_cobis,
+            are_multi_center_cobis=first_cohpobject.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -612,6 +615,7 @@ class CompleteCohp(Cohp):
             icohp=final_icohp,
             are_coops=self.are_coops,
             are_cobis=self.are_cobis,
+            are_multi_center_cobis=self.are_multi_center_cobis,
         )
 
     @classmethod
@@ -932,6 +936,7 @@ class CompleteCohp(Cohp):
             bonds=bond_dict,
             are_coops=are_coops,
             are_cobis=are_cobis,
+            are_multi_center_cobis=are_multi_center_cobis,
             orb_res_cohp=orb_res_cohp,
         )
 

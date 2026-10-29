@@ -1090,6 +1090,22 @@ class TestCompleteCohp(MatSciTest):
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1", "1"]).cohp[Spin.up][300] == approx(0.03392 * 2.0)
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1", "1"], divisor=2).cohp[Spin.up][300] == approx(0.03392)
 
+    def test_population_type_is_propagated(self):
+        summed_cobi = self.cobi.get_summed_cohp_by_label_list(["1"])
+        assert summed_cobi.are_cobis
+        assert not summed_cobi.are_coops
+        summed_coop = self.coop_lobster.get_summed_cohp_by_label_list(["1"])
+        assert summed_coop.are_coops
+        assert not summed_coop.are_cobis
+
+        # from_file dropped are_multi_center_cobis
+        assert self.cobi_multi.are_multi_center_cobis
+        assert not self.cobi_multi.are_cobis
+        label = next(iter(self.cobi_multi.all_cohps))
+        assert self.cobi_multi.get_cohp_by_label(label).are_multi_center_cobis
+        assert self.cobi_multi.get_summed_cohp_by_label_list([label]).are_multi_center_cobis
+        assert CompleteCohp.from_dict(self.cobi_multi.as_dict()).are_multi_center_cobis
+
     def test_get_summed_cohp_by_label_list_summed_spin(self):
         # files without spin polarization
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1"], summed_spin_channels=True).energies[0] == approx(
