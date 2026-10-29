@@ -733,6 +733,10 @@ class VaspInputSet(InputGenerator, abc.ABC):
         # skip dictionary parameters to avoid dictionaries appearing in the INCAR
         _apply_incar_updates(incar, self.user_incar_settings, skip=["LDAUU", "LDAUJ", "LDAUL", "MAGMOM"])
 
+        # EDIFF_PER_ATOM is a pymatgen config key (converted to EDIFF above), not a VASP tag.
+        # It must not leak into the INCAR via user_incar_settings or incar_updates.
+        incar.pop("EDIFF_PER_ATOM", None)
+
         # Remove unused INCAR parameters
         _remove_unused_incar_params(incar, skip=list(self.user_incar_settings))
 

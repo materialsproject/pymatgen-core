@@ -529,6 +529,16 @@ class TestMITMPRelaxSet(MatSciTest):
         # Sorted by electronegativity: Mn, Fe
         assert_allclose(user_set.incar["MAGMOM"], [3, 0])
 
+    def test_ediff_per_atom_not_written_to_incar(self):
+        # EDIFF_PER_ATOM is a pymatgen config key and must never end up as an INCAR tag
+        user_set = MPScanRelaxSet(self.structure, user_incar_settings={"EDIFF_PER_ATOM": 1e-6})
+        assert "EDIFF_PER_ATOM" not in user_set.incar
+        assert user_set.incar["EDIFF"] == approx(1e-5)
+
+        user_set = MPRelaxSet(self.structure, user_incar_settings={"EDIFF_PER_ATOM": 1e-6})
+        assert "EDIFF_PER_ATOM" not in user_set.incar
+        assert user_set.incar["EDIFF"] == approx(1e-6 * len(self.structure))
+
     def test_get_kpoints(self):
         kpoints = MPRelaxSet(self.structure).kpoints
         assert kpoints.kpts == [(2, 4, 5)]
@@ -1244,6 +1254,7 @@ class TestMITMDSet(MatSciTest):
         incar = param.incar
         assert "LDAUU" not in incar
         assert incar["EDIFF"] == approx(1e-5)
+        assert "EDIFF_PER_ATOM" not in incar
         assert incar["ALGO"] == "Fast"
         assert incar["ISMEAR"] == 0
         assert incar["IBRION"] == 0
