@@ -74,22 +74,26 @@ class BalancedReaction(MSONable):
             if abs(coeff) > self.TOLERANCE:
                 self._all_comp += [key]
                 self._coeffs += [coeff]
+        self._els = sorted({el for comp in self._all_comp for el in comp.elements})
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
             return NotImplemented
-        for comp in self._all_comp:
+        for comp in {*self._all_comp, *other._all_comp}:
+            coeff1 = self.get_coeff(comp) if comp in self._all_comp else 0
             coeff2 = other.get_coeff(comp) if comp in other._all_comp else 0
-            if abs(self.get_coeff(comp) - coeff2) > self.TOLERANCE:
+            if abs(coeff1 - coeff2) > self.TOLERANCE:
                 return False
         return True
 
     def __hash__(self) -> int:
-        # Necessity for hash method is unclear (see gh-3673)
+        # Necessity for hash method is unclear (see gh-3673). Only hash the
+        # compositions taking part in the net reaction so that hashing is
+        # consistent with __eq__ and works for subclasses (e.g. Reaction)
+        # that never set reactants_coeffs/products_coeffs.
         return hash(
-            (
-                frozenset(self.reactants_coeffs.items()),
-                frozenset(self.products_coeffs.items()),
+            frozenset(
+                comp for comp, coeff in zip(self._all_comp, self._coeffs, strict=True) if abs(coeff) > self.TOLERANCE
             )
         )
 
