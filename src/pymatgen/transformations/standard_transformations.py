@@ -944,7 +944,11 @@ class ScaleToRelaxedTransformation(AbstractTransformation):
             match = StructureMatcher()
             s_map = match.get_best_electronegativity_anonymous_mapping(self.unrelaxed_structure, structure)
         else:
-            s_map = self.species_map
+            # accept string keys/values and a list of tuples, as documented
+            s_map = {
+                get_el_sp(key): val if isinstance(val, dict) else get_el_sp(val)
+                for key, val in dict(self.species_map).items()
+            }
 
         params = list(structure.lattice.abc)
         params.extend(structure.lattice.angles)

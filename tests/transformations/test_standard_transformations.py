@@ -692,3 +692,13 @@ class TestScaleToRelaxedTransformation:
         assert (Fe_init.lattice.a < Fe_fin.lattice.a) == (Mo_init.lattice.a < Mo_fin.lattice.a)
         assert (Fe_init.lattice.b < Fe_fin.lattice.b) == (Mo_init.lattice.b < Mo_fin.lattice.b)
         assert (Fe_init.lattice.c < Fe_fin.lattice.c) == (Mo_init.lattice.c < Mo_fin.lattice.c)
+
+    @pytest.mark.parametrize("species_map", [{"Na": "K", "Cl": "Br"}, [("Na", "K"), ("Cl", "Br")]])
+    def test_species_map(self, species_map):
+        # string-keyed dicts and lists of tuples (as documented) used to raise KeyError/TypeError
+        nacl_init = Structure(Lattice.cubic(5.6), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        nacl_fin = Structure(Lattice.cubic(5.7), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        kbr = Structure(Lattice.cubic(6.6), ["K", "Br"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        kbr_fin = ScaleToRelaxedTransformation(nacl_init, nacl_fin, species_map).apply_transformation(kbr)
+        assert [site.species_string for site in kbr_fin] == ["K", "Br"]
+        assert kbr_fin.lattice.a == approx(6.6 * 5.7 / 5.6)
