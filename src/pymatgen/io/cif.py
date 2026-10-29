@@ -226,9 +226,9 @@ class CifBlock:
                         break
                     items.append("".join(deq.popleft()))
 
+                if len(items) % len(columns) != 0:
+                    raise ValueError(f"{len(items)=} is not a multiple of {len(columns)=}")
                 n = len(items) // len(columns)
-                if len(items) % n != 0:
-                    raise ValueError(f"{len(items)=} is not a multiple of {n=}")
                 loops.append(columns)
                 for k, v in zip(columns * n, items, strict=True):
                     data[k].append(v.strip())

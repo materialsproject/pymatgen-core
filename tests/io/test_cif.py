@@ -161,6 +161,16 @@ loop_
   CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"""
         assert str(CifBlock(data, loops, "test")) == cif_str
 
+    def test_loop_item_count(self):
+        # A loop with no values used to raise ZeroDivisionError
+        cb = CifBlock.from_str("data_test\nloop_\n_foo\n_bar\nloop_\n_baz\n1\n2")
+        assert cb.data["_foo"] == cb.data["_bar"] == []
+        assert cb.data["_baz"] == ["1", "2"]
+
+        # 8 values for 3 columns used to slip past the check and fail in zip()
+        with pytest.raises(ValueError, match=r"len\(items\)=8 is not a multiple of len\(columns\)=3"):
+            CifBlock.from_str("data_test\nloop_\n_a\n_b\n_c\n1 2 3 4 5 6 7 8")
+
 
 class TestCifIO(MatSciTest):
     def test_cif_parser(self):
