@@ -654,6 +654,7 @@ class GaussianOutput:
         read_mulliken = read_eigen = num_basis_found = terminated = parse_forces = False
         read_mo = parse_hessian = standard_orientation = parse_bond_order = parse_freq = False
         read_coord = parse_stage = 0
+        mulliken_txt: list[str] = []
         eigen_txt = []
         forces = []
         frequencies = []
@@ -945,7 +946,7 @@ class GaussianOutput:
                         read_eigen = True
                     elif mulliken_patt.search(line):
                         read_mulliken = True
-                        mulliken_txt: list[str] = []
+                        mulliken_txt = []
                     elif not parse_forces and forces_on_patt.search(line):
                         parse_forces = True
                     elif freq_on_patt.search(line):
