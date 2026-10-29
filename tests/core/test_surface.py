@@ -142,6 +142,11 @@ class TestSlab(MatSciTest):
         species = [str(site.specie) for site in self.zno55.get_sorted_structure()]
         assert species == ["Zn2+"] * 4 + ["O2-"] * 4
 
+    def test_get_sorted_structure_keeps_energy(self):
+        slab = self.zno55.copy()
+        slab.energy = -1.5
+        assert slab.get_sorted_structure().energy == approx(-1.5)
+
     def test_methods(self):
         # Test various structure methods
         self.zno55.get_primitive_structure()
@@ -864,6 +869,23 @@ class TestSlabGenerator(MatSciTest):
         assert moved[top_idx].frac_coords[2] == approx(layers[0] - (layers[1] - layers[0]), abs=1e-5)
         others = [idx for idx in range(len(slab)) if idx != top_idx]
         assert_allclose(moved.frac_coords[others], slab.frac_coords[others])
+
+    def test_init_does_not_modify_input(self):
+        struct = self.MgO.copy()
+        slab_gen = SlabGenerator(struct, (1, 0, 0), 10, 10)
+        assert struct.site_properties == {}
+        assert {"bulk_wyckoff", "bulk_equivalent"} <= set(slab_gen.parent.site_properties)
+        assert {"bulk_wyckoff", "bulk_equivalent"} <= set(slab_gen.get_slab().site_properties)
+
+    def test_move_to_other_side_keeps_site_properties(self):
+        slab_gen = SlabGenerator(self.MgO, (1, 0, 0), 10, 10, center_slab=True, reorient_lattice=False)
+        slab = slab_gen.get_slab()
+        slab.add_site_property("magmom", list(range(len(slab))))
+        top_idx = int(np.argmax(slab.frac_coords[:, 2]))
+        moved = slab_gen.move_to_other_side(slab, [top_idx])
+        assert moved.site_properties == slab.site_properties
+        assert moved.reorient_lattice is False
+        assert_allclose(moved.lattice.matrix, slab.lattice.matrix)
 
     def test_repair_broken_bonds_reversed_pair(self):
         # The reference element is chosen by coordination, so the order of the pair should not matter

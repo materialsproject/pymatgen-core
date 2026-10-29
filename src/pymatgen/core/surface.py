@@ -630,6 +630,7 @@ class Slab(Structure):
             site_properties=struct.site_properties,
             reorient_lattice=self.reorient_lattice,
             reconstruction=self.reconstruction,
+            energy=self.energy,
         )
 
     def add_adsorbate_atom(
@@ -975,18 +976,19 @@ class SlabGenerator:
             divisor = abs(reduce(math.gcd, vector))  # type: ignore[arg-type]
             return cast("tuple[int, int, int]", tuple(int(idx / divisor) for idx in vector))
 
-        def add_site_types() -> None:
-            """Add Wyckoff symbols and equivalent sites to the initial structure."""
-            if (
-                "bulk_wyckoff" not in initial_structure.site_properties
-                or "bulk_equivalent" not in initial_structure.site_properties
-            ):
-                spg_analyzer = SpacegroupAnalyzer(initial_structure)
-                initial_structure.add_site_property("bulk_wyckoff", spg_analyzer.get_symmetry_dataset().wyckoffs)
-                initial_structure.add_site_property(
-                    "bulk_equivalent",
-                    spg_analyzer.get_symmetry_dataset().equivalent_atoms.tolist(),
-                )
+        def add_site_types(structure: Structure | IStructure) -> Structure | IStructure:
+            """Add Wyckoff symbols and equivalent sites to a copy of the structure, if missing."""
+            if "bulk_wyckoff" in structure.site_properties and "bulk_equivalent" in structure.site_properties:
+                return structure
+            # Work on a copy so the caller's structure is not modified
+            structure = structure.copy()
+            spg_analyzer = SpacegroupAnalyzer(structure)
+            structure.add_site_property("bulk_wyckoff", spg_analyzer.get_symmetry_dataset().wyckoffs)
+            structure.add_site_property(
+                "bulk_equivalent",
+                spg_analyzer.get_symmetry_dataset().equivalent_atoms.tolist(),
+            )
+            return structure
 
         def calculate_surface_normal() -> np.ndarray:
             """Calculate the unit surface normal vector using the reciprocal
@@ -1069,7 +1071,7 @@ class SlabGenerator:
 
         # Add Wyckoff symbols and equivalent sites to the initial structure,
         # to help identify types of sites in the generated slab
-        add_site_types()
+        initial_structure = add_site_types(initial_structure)
 
         # Calculate the surface normal
         lattice = initial_structure.lattice
@@ -1548,12 +1550,14 @@ class SlabGenerator:
 
         return Slab(
             init_slab.lattice,
-            slab.species,
+            slab.species_and_occu,
             slab.frac_coords,
             init_slab.miller_index,
             init_slab.oriented_unit_cell,
             init_slab.shift,
             init_slab.scale_factor,
+            reorient_lattice=init_slab.reorient_lattice,
+            site_properties=slab.site_properties,
             energy=init_slab.energy,
         )
 
