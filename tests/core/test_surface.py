@@ -116,6 +116,25 @@ class TestSlab(MatSciTest):
         c = zno_slab_cart.lattice.matrix[2]
         assert_allclose([0, 0, np.linalg.norm(c)], c)
 
+    def test_copy_owns_oriented_unit_cell_and_scale_factor(self):
+        """Copying a slab must isolate its mutable construction metadata."""
+        slab = Slab(
+            self.hydrogen.lattice,
+            self.hydrogen.species,
+            self.hydrogen.frac_coords,
+            (1, 0, 0),
+            self.hydrogen.copy(properties={"metadata": {"source": 1}}),
+            0,
+            np.array([1, 2, 3]),
+            reorient_lattice=False,
+        )
+        copied = slab.copy()
+        copied.oriented_unit_cell.properties["metadata"]["source"] = 2
+        copied.scale_factor[0] = 9
+
+        assert slab.oriented_unit_cell.properties["metadata"]["source"] == 1
+        assert slab.scale_factor[0] == 1
+
     def test_add_adsorbate_atom(self):
         zno_slab = Slab(
             self.zno55.lattice,
