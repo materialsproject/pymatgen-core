@@ -273,7 +273,8 @@ class TransformedPDEntry(PDEntry):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "sp_mapping": self.sp_mapping,
+            # Composition keys are not JSON-serializable, so store (composition, species) pairs.
+            "sp_mapping": [[comp.as_dict(), sp.as_dict()] for comp, sp in self.sp_mapping.items()],
             **self.original_entry.as_dict(),
         }
 
@@ -286,8 +287,11 @@ class TransformedPDEntry(PDEntry):
         Returns:
             TransformedPDEntry
         """
-        sp_mapping = dct["sp_mapping"]
-        del dct["sp_mapping"]
+        dct = dct.copy()
+        sp_mapping = dct.pop("sp_mapping")
+        if not isinstance(sp_mapping, dict):
+            decoder = MontyDecoder()
+            sp_mapping = {Composition(comp): decoder.process_decoded(sp) for comp, sp in sp_mapping}
         entry = MontyDecoder().process_decoded(dct)
         return cls(entry, sp_mapping)
 

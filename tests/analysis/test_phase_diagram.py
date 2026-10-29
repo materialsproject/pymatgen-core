@@ -170,6 +170,17 @@ class TestTransformedPDEntry:
         assert entry.name == "LiFeO2" == self.transformed_entry.name
         assert entry.energy_per_atom == approx(53.0 / (23 / 15)) == self.transformed_entry.energy_per_atom
 
+    def test_as_from_dict_json(self):
+        # sp_mapping used to be stored with Composition keys (not JSON-serializable)
+        # and from_dict deleted "sp_mapping" from the input dict.
+        dct = json.loads(json.dumps(self.transformed_entry.as_dict(), cls=MontyEncoder))
+        entry = TransformedPDEntry.from_dict(dct)
+        assert "sp_mapping" in dct
+        assert TransformedPDEntry.from_dict(dct).composition == entry.composition
+        assert entry.sp_mapping == self.transformed_entry.sp_mapping
+        assert entry.composition == self.transformed_entry.composition
+        assert entry.energy_per_atom == approx(self.transformed_entry.energy_per_atom)
+
     def test_str(self):
         assert str(self.transformed_entry).startswith("TransformedPDEntry Xf0+0.46666667 Xg")
         assert str(self.transformed_entry).endswith("with original composition Li1 Fe1 O2, energy = 53.0000")
