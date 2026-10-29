@@ -2324,7 +2324,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 as if each comparison were reversed.
         """
         sites = sorted(self, key=key, reverse=reverse)
-        return type(self).from_sites(sites, charge=self._charge, properties=self.properties)
+        return type(self).from_sites(sites, charge=self._charge, properties=deepcopy(self.properties))
 
     def get_reduced_structure(self, reduction_algo: Literal["niggli", "LLL"] = "niggli") -> Self:
         """Get a reduced structure.
@@ -3801,7 +3801,7 @@ class IMolecule(SiteCollection[Site], MSONable):
             site_properties=self.site_properties,
             charge_spin_check=self._charge_spin_check,
             labels=self.labels,
-            properties=self.properties,
+            properties=deepcopy(self.properties),
         )
 
     def to(self, filename: PathLike = "", fmt: str = "") -> str | None:

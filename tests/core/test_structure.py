@@ -288,6 +288,16 @@ class TestIStructure(MatSciTest):
             "Se",
         ]
 
+        source = Structure(
+            self.lattice,
+            ["O", "Li"],
+            coords,
+            properties={"metadata": {"tags": ["source"]}},
+        )
+        sorted_copy = source.get_sorted_structure()
+        sorted_copy.properties["metadata"]["tags"].append("sorted")
+        assert source.properties == {"metadata": {"tags": ["source"]}}
+
     def test_get_space_group_data(self):
         assert self.struct.get_space_group_info() == ("Fd-3m", 227)
 
@@ -3029,9 +3039,16 @@ Site: H (-0.5134, 0.8892, -0.3630)"""
         assert mol != self.mol
 
     def test_get_centered_molecule(self):
-        mol = IMolecule(["O"] * 2, [[0, 0, 0], [0, 0, 1.2]], spin_multiplicity=3)
+        mol = IMolecule(
+            ["O"] * 2,
+            [[0, 0, 0], [0, 0, 1.2]],
+            spin_multiplicity=3,
+            properties={"metadata": {"tags": ["source"]}},
+        )
         centered = mol.get_centered_molecule()
         assert_allclose(centered.center_of_mass, [0, 0, 0])
+        centered.properties["metadata"]["tags"].append("centered")
+        assert mol.properties == {"metadata": {"tags": ["source"]}}
 
     def test_as_from_dict(self):
         dct = self.mol.as_dict()
