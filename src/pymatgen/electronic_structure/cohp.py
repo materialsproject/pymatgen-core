@@ -12,6 +12,7 @@ DOI: 10.1002/cplu.202200123.
 
 from __future__ import annotations
 
+import copy
 import re
 import sys
 import warnings
@@ -1334,11 +1335,11 @@ class IcohpCollection(MSONable):
             atomnumber1 = int(re.split(r"(\d+)", value._atom1)[1]) - 1
             atomnumber2 = int(re.split(r"(\d+)", value._atom2)[1]) - 1
             if site in (atomnumber1, atomnumber2):
-                # Swap order of atoms so that searched one is always atom1
+                # Swap order of atoms so that searched one is always atom1.
+                # Swap on a shallow copy so the stored IcohpValue is not mutated.
                 if site == atomnumber2:
-                    save = value._atom1
-                    value._atom1 = value._atom2
-                    value._atom2 = save
+                    value = copy.copy(value)
+                    value._atom1, value._atom2 = value._atom2, value._atom1
 
                 second_test = True if only_bonds_to is None else re.split("(\\d+)", value._atom2)[0] in only_bonds_to
                 if minbondlength <= value._length <= maxbondlength and second_test:

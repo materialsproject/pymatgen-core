@@ -513,6 +513,16 @@ class TestCombinedIcohp:
                 v.pop("@version")
             assert v == icohpvalue_spin[key]
 
+    def test_get_icohp_dict_of_site_does_not_mutate_collection(self):
+        # Site 1 (K2) is atom2 in every KF bond, so the returned values are swapped
+        icohps = self.icohpcollection_KF.get_icohp_dict_of_site(site=1)
+        assert len(icohps) == 6
+        for icohp in icohps.values():
+            assert (icohp._atom1, icohp._atom2) == ("K2", "F1")
+        # ... but the stored IcohpValues must keep their original atom order
+        for icohp in self.icohpcollection_KF._icohplist.values():
+            assert (icohp._atom1, icohp._atom2) == ("F1", "K2")
+
     def test_get_icohp_dict_of_site(self):
         # without spin polarization
         icohpvalue = {}
