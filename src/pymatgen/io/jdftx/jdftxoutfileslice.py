@@ -275,7 +275,7 @@ class JDFTXOutfileSlice:
     parsable_pseudos: ClassVar[list[str]] = ["GBRV", "SG15"]
     has_parsable_pseudo: bool = False
 
-    _total_electrons_backup: int | None = None
+    _total_electrons_backup: float | None = None
     total_electrons: float | None = None
     _mu_backup: float | None = None
 
@@ -682,7 +682,13 @@ class JDFTXOutfileSlice:
         else:
             line_start = lines3[-1]
             line_start_rel_idx = lines1.index(line_start)
-            line_end = lines1[line_start_rel_idx + 1] if len(lines1) >= line_start_rel_idx + 2 else len(lines1) - 1
+            if len(lines1) >= line_start_rel_idx + 2:
+                line_end = lines1[line_start_rel_idx + 1]
+            else:
+                # eigStats is the last dump; its (indented) block ends at the first non-indented line
+                line_end = line_start + 1
+                while line_end < len(text) and text[line_end][:1].isspace() and text[line_end].strip():
+                    line_end += 1
             _varsdict = _init_dict_from_colon_dump_lines([text[idx] for idx in range(line_start, line_end)])
             for key in _varsdict:
                 varsdict[eigstats_keymap[key]] = float(_varsdict[key]) * Ha_to_eV
@@ -925,7 +931,7 @@ class JDFTXOutfileSlice:
             if _val is not None and np.isnan(_val):
                 nval = None
             elif _val is not None:
-                nval = int(_val)
+                nval = float(_val)
             else:
                 nval = None
             self._total_electrons_backup = nval
@@ -940,7 +946,7 @@ class JDFTXOutfileSlice:
             if _val is not None and np.isnan(_val):
                 mval = None
             elif _val is not None:
-                mval = float(_val)
+                mval = float(_val) * Ha_to_eV
             else:
                 mval = None
             self._mu_backup = mval

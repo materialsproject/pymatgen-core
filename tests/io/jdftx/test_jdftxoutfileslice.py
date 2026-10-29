@@ -233,3 +233,36 @@ def test_none_on_partial(ex_slice: list[str]):
             assert isinstance(joutslice, JDFTXOutfileSlice | None)
         else:
             assert isinstance(joutslice, JDFTXOutfileSlice | None)
+
+
+def test_set_backup_vars_units():
+    """The backup mu must be converted from Hartree to eV, and fractional electron counts must not be truncated."""
+    joutslice = JDFTXOutfileSlice._from_out_slice(ex_slice1)
+    joutslice.mu = None
+    joutslice.total_electrons = None
+    joutslice._set_backup_vars(["\tFillingsUpdate:  mu: -0.500000000  nElectrons: 8.500000"])
+    assert joutslice._mu_backup == pytest.approx(-0.5 * Ha_to_eV)
+    assert joutslice._total_electrons_backup == pytest.approx(8.5)
+
+
+def test_eigstats_when_last_dump():
+    """eigStats must still be parsed when it is the last 'Dumping' block of the out file slice."""
+    text = [
+        "Dumping 'jdft.fillings' ... done\n",
+        "Dumping 'jdft.eigStats' ...\n",
+        "    eMin: -3.836283 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 0 )\n",
+        "    HOMO: -0.212435 at state 5 ( [ +0.166667 +0.500000 +0.000000 ] spin 0 )\n",
+        "    mu  : -0.209509\n",
+        "    LUMO: -0.209424 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 0 )\n",
+        "    eMax: +0.113409 at state 6 ( [ +0.333333 -0.333333 +0.000000 ] spin 0 )\n",
+        "    HOMO-LUMO gap: +0.003011\n",
+        "    Optical gap  : +0.004303 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 0 )\n",
+        "End date and time: Sun Jan  7 22:54:02 2024  (Duration: 0-0:02:53.72)\n",
+        "Done!\n",
+    ]
+    joutslice = JDFTXOutfileSlice._from_out_slice(ex_slice1)
+    varsdict = joutslice._get_eigstats_varsdict(text, "jdft")
+    assert joutslice.has_eigstats
+    assert varsdict["emin"] == pytest.approx(-3.836283 * Ha_to_eV)
+    assert varsdict["efermi"] == pytest.approx(-0.209509 * Ha_to_eV)
+    assert varsdict["optical_egap"] == pytest.approx(0.004303 * Ha_to_eV)
