@@ -171,8 +171,10 @@ def test_initmagmomtag():
     assert initmagmomtag.get_token_len() == 0
     initmagmomtag = InitMagMomTag(write_tagname=True, write_value=True)
     assert initmagmomtag.get_token_len() == 2
-    with pytest.warns(Warning, match="warning"):
+    with pytest.warns(Warning, match=re.escape("Could not fix the typing for tag 'tag' (unstringable value)!")):
         initmagmomtag.validate_value_type("tag", Unstringable(), try_auto_type_fix=True)
+    with pytest.warns(Warning, match=re.escape("Could not fix the typing for tag 'tag' abc!")):
+        IntTag().validate_value_type("tag", "abc", try_auto_type_fix=True)
 
 
 def test_tagcontainer_validation():
