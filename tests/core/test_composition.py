@@ -1029,6 +1029,39 @@ class TestComposition(MatSciTest):
             ]
         )
 
+    def test_contains_element_type_rare_earth_metal(self):
+        # ElementType.rare_earth_metal maps to Element.is_rare_earth (used to raise AttributeError)
+        assert Composition("LaNiO3").contains_element_type("rare_earth_metal") is True
+        assert Composition("YBa2Cu3O7").contains_element_type("rare_earth_metal") is True
+        assert Composition("Fe2O3").contains_element_type("rare_earth_metal") is False
+
+    def test_anonymized_formula_mixed_valence(self):
+        # reduce by the gcd of the element amounts, not of the per-species amounts
+        assert Composition({"Fe2+": 1, "Fe3+": 1, "O2-": 2}).anonymized_formula == "AB"
+        assert Composition({"Fe2+": 2, "Fe3+": 4, "O2-": 8}).anonymized_formula == "A3B4"
+
+    def test_replace_does_not_mutate_input(self):
+        elem_map = {"Li": "Na", "K": "Rb"}
+        with pytest.warns(UserWarning, match="not present in composition"):
+            assert Composition("Li2O").replace(elem_map) == Composition("Na2O")
+        assert elem_map == {"Li": "Na", "K": "Rb"}
+
+    def test_eq_with_dict(self):
+        # a dict keyed by symbol strings used to raise KeyError
+        assert Composition("Fe2O3") == {"Fe": 2, "O": 3}
+        assert Composition("Fe2O3") != {"Fe": 2, "O": 4}
+        assert Composition("Fe2O3") != {"Fe": 2, "Xyz!": 3}
+
+    def test_oxi_state_guesses_single_element_target_charge(self):
+        assert Composition("Fe").oxi_state_guesses() == ({"Fe": 0.0},)
+        assert Composition("Fe").oxi_state_guesses(target_charge=3) == ({"Fe": 3.0},)
+        assert Composition("O2").oxi_state_guesses(target_charge=-4) == ({"O": -2.0},)
+
+    def test_mul_div_numpy_scalars(self):
+        comp = Composition("Fe2O3")
+        assert comp * np.int64(2) == Composition("Fe4O6")
+        assert comp / np.int64(2) == Composition("FeO1.5")
+
 
 def test_reduce_formula():
     assert reduce_formula({"Li": 2, "Mn": 4, "O": 8}) == ("LiMn2O4", 2)
