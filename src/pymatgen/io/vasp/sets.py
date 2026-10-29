@@ -3468,7 +3468,9 @@ class MPAbsorptionSet(VaspInputSet):
 
 def _get_ispin(vasprun: Vasprun | None, outcar: Outcar | None) -> Literal[1, 2]:
     """Get value of ISPIN depending on the magnetization in the OUTCAR and vasprun."""
-    if outcar is not None and outcar.magnetization is not None:
+    # Outcar.magnetization is an empty tuple (never None) when the OUTCAR has no
+    # site-projected moments (e.g. LORBIT not set), so fall back to the vasprun then.
+    if outcar is not None and outcar.magnetization:
         # Turn off spin when magmom for every site is smaller than 0.02.
         site_magmom = np.array([i["tot"] for i in outcar.magnetization])
         return 2 if np.any(np.abs(site_magmom) > 0.02) else 1

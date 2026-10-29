@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 from glob import glob
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import numpy as np
@@ -52,6 +53,7 @@ from pymatgen.io.vasp.sets import (
     NEBSet,
     VaspInputGenerator,
     VaspInputSet,
+    _get_ispin,
     batch_write_input,
     get_structure_from_prev_run,
     get_valid_magmom_struct,
@@ -2242,6 +2244,18 @@ class TestMPAbsorptionSet(MatSciTest):
 
 def test_vasp_input_set_alias():
     assert VaspInputSet is VaspInputGenerator
+
+
+def test_get_ispin_falls_back_to_vasprun():
+    # Outcar.magnetization is an empty tuple when no site moments are printed (e.g. no LORBIT)
+    outcar_no_mag = SimpleNamespace(magnetization=())
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_no_mag) == 2
+    assert _get_ispin(SimpleNamespace(is_spin=False), outcar_no_mag) == 1
+
+    outcar_mag = SimpleNamespace(magnetization=({"tot": 0.001}, {"tot": 0.5}))
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_mag) == 2
+    outcar_mag = SimpleNamespace(magnetization=({"tot": 0.001}, {"tot": -0.01}))
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_mag) == 1
 
 
 class TestMP24Sets:
