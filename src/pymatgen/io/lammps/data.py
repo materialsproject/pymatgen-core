@@ -388,7 +388,8 @@ class LammpsData(MSONable):
         if "q" in atoms:
             site_properties["charge"] = atoms["q"].to_numpy()
         if self.velocities is not None:
-            site_properties["velocities"] = self.velocities.to_numpy()
+            # Align velocities to the Atoms section by atom ID, which need not share its row order
+            site_properties["velocities"] = self.velocities.loc[atoms.index].to_numpy()
         return Structure(
             lattice,
             species,
@@ -670,8 +671,9 @@ class LammpsData(MSONable):
                         raise RuntimeError(
                             "Do not support intermolecular topology formed by atoms with different molecule-IDs"
                         )
-                    label = label_topo(indices)
-                    topo_coeffs[ff_kw][topo_idx]["types"].append(label)
+                    # Coeffs sections are optional in data files (they may be set in the input script)
+                    if ff_kw in topo_coeffs:
+                        topo_coeffs[ff_kw][topo_idx]["types"].append(label_topo(indices))
                     if data_by_mols[mids[0]].get(key):
                         data_by_mols[mids[0]][key].append(indices)
                     else:
@@ -692,7 +694,6 @@ class LammpsData(MSONable):
         for mid in unique_mids:
             data = data_by_mols[mid]
             atoms = data["Atoms"]
-            shift = min(atoms.index)
             type_ids = atoms["type"]
             species = masses.loc[type_ids, "element"]
             labels = masses.loc[type_ids, "label"]
@@ -707,7 +708,9 @@ class LammpsData(MSONable):
             topologies = {}
             for kw in SECTION_KEYWORDS["topology"]:
                 if data.get(kw):
-                    topologies[kw] = (np.array(data[kw]) - shift).tolist()
+                    # Map atom IDs to site indices in this molecule; IDs need not be contiguous or sorted
+                    atom_ids = np.array(data[kw])
+                    topologies[kw] = atoms.index.get_indexer(atom_ids.ravel()).reshape(atom_ids.shape).tolist()
             topo_list.append(
                 Topology(
                     sites=mol,
@@ -734,7 +737,8 @@ class LammpsData(MSONable):
         with zopen(filename, mode="rt", encoding="utf-8") as file:
             lines = file.readlines()
         kw_pattern = r"|".join(itertools.chain(*SECTION_KEYWORDS.values()))
-        section_marks = [idx for idx, line in enumerate(lines) if re.search(kw_pattern, line)]
+        # The first line is a free-form title and must not be mistaken for a section header
+        section_marks = [idx for idx, line in enumerate(lines) if idx > 0 and re.search(kw_pattern, line)]
         parts = np.split(lines, section_marks)
 
         float_group = r"([0-9eE.+-]+)"
@@ -999,11 +1003,12 @@ class LammpsData(MSONable):
 
         if isinstance(box_or_lattice, LammpsBox):
             box_or_lattice = box_or_lattice.to_lattice()
-
-        box_or_lattice.pbc = (False, False, False)
+        # Build a new non-periodic Lattice instead of mutating the caller's Lattice
+        matrix = box_or_lattice.matrix if isinstance(box_or_lattice, Lattice) else box_or_lattice
+        lattice = Lattice(matrix, pbc=(False, False, False))
 
         structure = Structure(
-            lattice=box_or_lattice,
+            lattice=lattice,
             species=molecule.species,
             coords=molecule.cart_coords,
             site_properties=molecule.site_properties if hasattr(molecule, "site_properties") else {},
