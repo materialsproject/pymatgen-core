@@ -1292,7 +1292,7 @@ class TestMillerIndexFinder(MatSciTest):
         [
             ("cscl", (1, 0, 0), "cubic", 6),
             ("cscl", (1, 1, 1), "cubic", 8),
-            ("LiCoO2", (1, 0, 4), "trigonal", 12),
+            ("LiCoO2", (1, 0, 4), "trigonal", 6),
         ],
     )
     def test_get_symmetrically_equivalent_miller_indices_given_system(
@@ -1304,6 +1304,28 @@ class TestMillerIndexFinder(MatSciTest):
         detected = get_symmetrically_equivalent_miller_indices(struct, miller_index)
         assert len(given) == n_expected
         assert set(given) == set(detected)
+
+    def test_get_symmetrically_equivalent_miller_indices_hexagonal_hkl(self):
+        # Equivalent hkl can have larger components than the input, e.g. (1, 1, 0) and (2, -1, 0)
+        hkl = get_symmetrically_equivalent_miller_indices(self.Mg, (1, 1, 0), return_hkil=False)
+        hkil = get_symmetrically_equivalent_miller_indices(self.Mg, (1, 1, -2, 0), return_hkil=False)
+        assert set(hkl) == set(hkil) == {(1, 1, 0), (-1, 2, 0), (-2, 1, 0), (-1, -1, 0), (1, -2, 0), (2, -1, 0)}
+
+    def test_get_symmetrically_equivalent_miller_indices_trigonal_hexagonal_setting(self):
+        # R-3m LiCoO2 in the hexagonal setting: the basal plane is not equivalent to any prismatic plane
+        assert set(get_symmetrically_equivalent_miller_indices(self.LiCoO2, (0, 0, 1), return_hkil=False)) == {
+            (0, 0, 1),
+            (0, 0, -1),
+        }
+        # -3m symmetry of the rhombohedral lattice, expressed in hexagonal hkl
+        assert set(get_symmetrically_equivalent_miller_indices(self.LiCoO2, (1, 0, 4), return_hkil=False)) == {
+            (1, 0, 4),
+            (0, -1, 4),
+            (-1, 1, 4),
+            (-1, 0, -4),
+            (0, 1, -4),
+            (1, -1, -4),
+        }
 
     def test_get_symmetrically_distinct_miller_indices_invalid_cell(self):
         with pytest.raises(ValueError, match="Unsupported cell type invalid"):

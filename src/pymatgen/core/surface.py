@@ -2064,24 +2064,25 @@ def get_symmetrically_equivalent_miller_indices(
         _miller_index = (miller_index[0], miller_index[1], miller_index[2])
 
     max_idx = max(np.abs(miller_index))
-    idx_range = range(max_idx, -max_idx - 1, -1)
 
     # Skip crystal system analysis if already given
-    if system:
-        spg_analyzer = None
-    else:
-        spg_analyzer = SpacegroupAnalyzer(structure)
-        system = spg_analyzer.get_crystal_system()
+    if not system:
+        system = SpacegroupAnalyzer(structure).get_crystal_system()
 
-    # Get distinct hkl planes from the rhombohedral setting if trigonal
+    # Get distinct hkl planes from the rhombohedral setting if trigonal. The operations of the
+    # primitive lattice are expressed in its own basis, so convert them to the basis of the input
+    # structure (e.g. the hexagonal setting of an R-centered cell) before applying them to its hkl.
     if system == "trigonal":
-        if not spg_analyzer:
-            spg_analyzer = SpacegroupAnalyzer(structure)
-        prim_structure = spg_analyzer.get_primitive_standard_structure()
-        symm_ops = prim_structure.lattice.get_recp_symmetry_operation()
+        prim_lattice = structure.get_primitive_structure().lattice
+        symm_ops = _transform_recp_symm_ops(prim_lattice.get_recp_symmetry_operation(), prim_lattice, structure.lattice)
 
     else:
         symm_ops = structure.lattice.get_recp_symmetry_operation()
+
+    # Equivalent indices can have larger components than the input, e.g. (1, 1, 0) and (2, -1, 0)
+    # in a hexagonal hkl setting, so search up to the largest component of all symmetry images.
+    search_max = max(max_idx, *(int(np.max(np.abs(np.rint(op.operate(_miller_index))))) for op in symm_ops))
+    idx_range = range(search_max, -search_max - 1, -1)
 
     equivalent_millers: list[tuple[int, int, int]] = [_miller_index]  # type: ignore[list-item]
     # Explicit x3 repeat instead of keyword, so mypy understands it correctly
@@ -2302,6 +2303,39 @@ def _is_in_miller_family(
             used to define the indices family.
     """
     return any(in_coord_list(miller_list, op.operate(miller_index)) for op in symm_ops)
+
+
+def _transform_recp_symm_ops(
+    symm_ops: Iterable[SymmOp],
+    from_lattice: Lattice,
+    to_lattice: Lattice,
+) -> list[SymmOp]:
+    """Express reciprocal lattice symmetry operations (acting on hkl) in another lattice basis.
+
+    Both lattices must share the same Cartesian frame. Operations that do not map
+    the hkl of `to_lattice` onto integers (i.e. that are not symmetries of it) are dropped.
+
+    Args:
+        symm_ops (Iterable[SymmOp]): Operations acting on hkl in the basis of `from_lattice`.
+        from_lattice (Lattice): Lattice the operations are expressed in.
+        to_lattice (Lattice): Lattice to express the operations in.
+
+    Returns:
+        list[SymmOp]: Operations acting on hkl in the basis of `to_lattice`.
+    """
+    from_recp = from_lattice.reciprocal_lattice_crystallographic.matrix
+    to_recp = to_lattice.reciprocal_lattice_crystallographic.matrix
+    # Maps hkl in the basis of from_lattice to hkl in the basis of to_lattice
+    basis_change = np.linalg.solve(to_recp.T, from_recp.T)
+    inv_basis_change = np.linalg.inv(basis_change)
+
+    transformed_ops = []
+    for op in symm_ops:
+        rotation = basis_change @ op.rotation_matrix @ inv_basis_change
+        rounded_rotation = np.rint(rotation)
+        if np.allclose(rotation, rounded_rotation, atol=1e-5):
+            transformed_ops.append(SymmOp.from_rotation_and_translation(rounded_rotation, np.zeros(3)))
+    return transformed_ops
 
 
 def _index_transformation(transf: NDArray, index: tuple[int, int, int] | NDArray) -> NDArray[np.int_]:
