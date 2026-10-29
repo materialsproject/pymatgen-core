@@ -35,7 +35,7 @@ from pymatgen.util.coord import find_in_coord_list, pbc_diff
 from pymatgen.util.due import Doi, due
 
 if TYPE_CHECKING:
-    from typing import Any, Literal
+    from typing import Any, Literal, Self
 
     from numpy.typing import NDArray
     from spglib import SpglibDataset
@@ -1786,6 +1786,31 @@ class SpacegroupOperations(list):
 
     def __str__(self) -> str:
         return f"{self.int_symbol} ({self.int_number}) spacegroup"
+
+    def as_dict(self) -> dict[str, Any]:
+        """MSONable-style dict. A plain JSON encoder would serialize this list subclass as a bare list
+        of operations, dropping int_symbol and int_number.
+        """
+        return {
+            "@module": type(self).__module__,
+            "@class": type(self).__name__,
+            "int_symbol": self.int_symbol,
+            "int_number": self.int_number,
+            "symmops": [op.as_dict() for op in self],
+        }
+
+    @classmethod
+    def from_dict(cls, dct: dict[str, Any]) -> Self:
+        """Reconstruct a SpacegroupOperations from the dict made by as_dict.
+
+        Args:
+            dct (dict): Dict representation.
+
+        Returns:
+            SpacegroupOperations
+        """
+        symmops = [op if isinstance(op, SymmOp) else SymmOp.from_dict(op) for op in dct["symmops"]]
+        return cls(dct["int_symbol"], dct["int_number"], symmops)
 
     def are_symmetrically_equivalent(
         self,
