@@ -11,6 +11,7 @@ entries by structure) are also provided.
 from __future__ import annotations
 
 import abc
+import copy
 import collections
 import collections.abc
 import csv
@@ -671,9 +672,9 @@ class ComputedEntry(Entry):
         return ComputedEntry(
             composition=self.composition,
             energy=self.uncorrected_energy,
-            energy_adjustments=self.energy_adjustments.copy(),
-            parameters=self.parameters.copy(),
-            data=self.data.copy(),
+            energy_adjustments=copy.deepcopy(self.energy_adjustments),
+            parameters=copy.deepcopy(self.parameters),
+            data=copy.deepcopy(self.data),
             entry_id=self.entry_id,
         )
 
@@ -816,9 +817,9 @@ class ComputedStructureEntry(ComputedEntry):
             structure=self.structure.copy(),
             energy=self.uncorrected_energy,
             composition=self.composition,
-            energy_adjustments=self.energy_adjustments.copy(),
-            parameters=self.parameters.copy(),
-            data=self.data.copy(),
+            energy_adjustments=copy.deepcopy(self.energy_adjustments),
+            parameters=copy.deepcopy(self.parameters),
+            data=copy.deepcopy(self.data),
             entry_id=self.entry_id,
         )
 
