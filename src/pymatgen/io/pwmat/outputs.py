@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import linecache
 import logging
 from io import StringIO
 from typing import TYPE_CHECKING
@@ -10,7 +9,7 @@ import numpy as np
 from monty.io import zopen
 from monty.json import MSONable
 
-from pymatgen.io.pwmat.inputs import ACstrExtractor, AtomConfig, LineLocator
+from pymatgen.io.pwmat.inputs import ACstrExtractor, AtomConfig, LineLocator, _read_lines
 
 if TYPE_CHECKING:
     from pymatgen.core import Structure
@@ -192,6 +191,7 @@ class Report(MSONable):
             filename (PathLike): The absolute path of REPORT file.
         """
         self.filename: PathLike = filename
+        self._lines: list[str] = _read_lines(filename)
         self._spin, self._num_kpts, self._num_bands = self._parse_band()
         self._eigenvalues = self._parse_eigen()
         self._kpts, self._kpts_weight, self._hsps = self._parse_kpt()
@@ -210,15 +210,15 @@ class Report(MSONable):
         """
         content: str = "SPIN"
         row_idx: int = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        spin = int(linecache.getline(str(self.filename), row_idx).split()[-1].strip())
+        spin = int(self._lines[row_idx - 1].split()[-1].strip())
 
         content = "NUM_KPT"
         row_idx = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        num_kpts = int(linecache.getline(str(self.filename), row_idx).split()[-1].strip())
+        num_kpts = int(self._lines[row_idx - 1].split()[-1].strip())
 
         content = "NUM_BAND"
         row_idx = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        num_bands = int(linecache.getline(str(self.filename), row_idx).split()[-1].strip())
+        num_bands = int(self._lines[row_idx - 1].split()[-1].strip())
         return spin, num_kpts, num_bands
 
     def _parse_eigen(self) -> np.ndarray:
@@ -239,7 +239,7 @@ class Report(MSONable):
             for jj in range(self._num_kpts):
                 tmp_eigenvalues_str = ""
                 for kk in range(num_rows):
-                    tmp_eigenvalues_str += linecache.getline(str(self.filename), rows_array[ii][jj] + kk + 1)
+                    tmp_eigenvalues_str += self._lines[rows_array[ii][jj] + kk]
                 tmp_eigenvalues_array = np.array([float(eigen_value) for eigen_value in tmp_eigenvalues_str.split()])
                 for kk in range(self._num_bands):
                     eigenvalues[ii][jj][kk] = tmp_eigenvalues_array[kk]
@@ -262,7 +262,7 @@ class Report(MSONable):
         hsps: dict[str, np.ndarray] = {}
         for ii in range(num_rows):
             #  0.00000     0.00000    0.00000     0.03704           G
-            tmp_row_lst: list[str] = linecache.getline(str(self.filename), row_idx + ii + 1).split()
+            tmp_row_lst: list[str] = self._lines[row_idx + ii].split()
             for jj in range(3):
                 kpts[ii][jj] = float(tmp_row_lst[jj].strip())
             kpts_weight[ii] = float(tmp_row_lst[3].strip())
@@ -344,12 +344,10 @@ class DosSpin(MSONable):
             labels (list[str]): The label of DOS, e.g. Total, Cr-3S, ...
             dos (NDArray): Value of density of state.
         """
-        labels: list[str] = []
-        labels = linecache.getline(str(self.filename), 1).split()[1:]
         dos_str: str = ""
         with zopen(self.filename, mode="rt", encoding="utf-8") as file:
-            file.readline()
-            dos_str = file.read()
+            labels: list[str] = file.readline().split()[1:]  # type:ignore[union-attr]
+            dos_str = file.read()  # type:ignore[assignment]
         dos: np.ndarray = np.loadtxt(StringIO(dos_str))
         return labels, dos
 

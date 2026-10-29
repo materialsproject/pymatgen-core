@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 
 import pymatgen
-from pymatgen.core import Composition, Structure
+from pymatgen.core import Composition, Lattice, Structure
 from pymatgen.io.pwmat.inputs import (
     ACExtractor,
     ACstrExtractor,
@@ -59,6 +59,17 @@ class TestACstrExtractor(MatSciTest):
             assert ac_extractor.coords[idx * 3 + 1] == ac_str_extractor.get_coords()[idx * 3 + 1]
             assert ac_extractor.coords[idx * 3 + 2] == ac_str_extractor.get_coords()[idx * 3 + 2]
             assert ac_extractor.magmoms[idx] == ac_str_extractor.get_magmoms()[idx]
+
+    def test_extract_rewritten_file(self):
+        # ACExtractor used linecache for n_atoms/lattice, which returned stale data for a rewritten file
+        filepath = self.tmp_path / "atom.config"
+        AtomConfig(Structure(Lattice.cubic(3), ["Si"], [[0, 0, 0]])).write_file(filepath)
+        assert ACExtractor(filepath).n_atoms == 1
+        AtomConfig(Structure(Lattice.cubic(5), ["Si", "Ge"], [[0, 0, 0], [0.5, 0.5, 0.5]])).write_file(filepath)
+        ac_extractor = ACExtractor(filepath)
+        assert ac_extractor.n_atoms == 2
+        assert_allclose(ac_extractor.lattice, [5, 0, 0, 0, 5, 0, 0, 0, 5])
+        assert list(ac_extractor.types) == [14, 32]
 
 
 class TestAtomConfig(MatSciTest):

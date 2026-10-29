@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import shutil
 from typing import TYPE_CHECKING
 
 import pytest
@@ -81,6 +83,17 @@ class TestReport(MatSciTest):
         assert report.kpoints_weight.shape == (1,)
         assert report.hsps == {}
 
+    def test_compressed(self):
+        # REPORT used to be read with linecache, which cannot read compressed files
+        gz_path = self.tmp_path / "REPORT.gz"
+        with open(f"{TEST_DIR}/REPORT", "rb") as fin, gzip.open(gz_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+        report = Report(gz_path)
+        ref = Report(f"{TEST_DIR}/REPORT")
+        assert report.n_bands == ref.n_bands == 10
+        assert report.eigenvalues == approx(ref.eigenvalues)
+        assert report.kpoints == approx(ref.kpoints)
+
 
 class TestDosSpin(MatSciTest):
     def test_init_and_properties(self):
@@ -110,3 +123,12 @@ class TestDosSpin(MatSciTest):
             "I-5Px",
             "I-5Py",
         ]
+
+    def test_compressed(self):
+        # labels used to be read with linecache, which silently returned [] for compressed files
+        gz_path = self.tmp_path / "DOS.spinup_projected.gz"
+        with open(f"{TEST_DIR}/DOS.spinup_projected", "rb") as fin, gzip.open(gz_path, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+        dos_spin = DosSpin(gz_path)
+        assert dos_spin.labels == DosSpin(f"{TEST_DIR}/DOS.spinup_projected").labels
+        assert dos_spin.get_partial_dos("Cr-3S").shape == (20,)

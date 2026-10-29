@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import linecache
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import TYPE_CHECKING
@@ -21,6 +20,16 @@ if TYPE_CHECKING:
 __author__ = "Hanyu Liu"
 __email__ = "domainofbuaa@gmail.com"
 __date__ = "2024-1-16"
+
+
+def _read_lines(file_path: PathLike) -> list[str]:
+    """Read all lines of a (possibly compressed) file.
+
+    Used instead of linecache, which serves stale content for files rewritten
+    in the same process and cannot read compressed files.
+    """
+    with zopen(file_path, mode="rt", encoding="utf-8") as file:
+        return file.readlines()  # type:ignore[return-value]
 
 
 class LineLocator(MSONable):
@@ -102,6 +111,7 @@ class ACExtractor(ACExtractorBase):
             file_path (str): The absolute path of atom.config file.
         """
         self.atom_config_path = file_path
+        self._lines = _read_lines(file_path)
         self.n_atoms = self.get_n_atoms()
         self.lattice = self.get_lattice()
         self.types = self.get_types()
@@ -110,7 +120,7 @@ class ACExtractor(ACExtractorBase):
 
     def get_n_atoms(self) -> int:
         """Return the number of atoms in the structure."""
-        first_row = linecache.getline(str(self.atom_config_path), 1)
+        first_row = self._lines[0]
         return int(first_row.split()[0])
 
     def get_lattice(self) -> np.ndarray:
@@ -123,7 +133,7 @@ class ACExtractor(ACExtractorBase):
         content: str = "LATTICE"
         idx_row: int = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[0]
         for row_idx in [idx_row + 1, idx_row + 2, idx_row + 3]:
-            row_content: list[str] = linecache.getline(str(self.atom_config_path), row_idx).split()[:3]
+            row_content: list[str] = self._lines[row_idx - 1].split()[:3]
             basis_vectors.extend(float(value) for value in row_content)
 
         return np.array(basis_vectors)
@@ -136,8 +146,7 @@ class ACExtractor(ACExtractorBase):
         """
         content = "POSITION"
         idx_row = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[0]
-        with open(self.atom_config_path, encoding="utf-8") as file:
-            atom_config_content = file.readlines()
+        atom_config_content = self._lines
         atomic_numbers_content = atom_config_content[idx_row : idx_row + self.n_atoms]
         atomic_numbers_lst = [int(row.split()[0]) for row in atomic_numbers_content]  # convert str to int
         return np.array(atomic_numbers_lst)
@@ -151,8 +160,7 @@ class ACExtractor(ACExtractorBase):
         coords_lst: list[np.ndarray] = []
         content: str = "POSITION"
         idx_row: int = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[0]
-        with open(self.atom_config_path, encoding="utf-8") as file:
-            atom_config_content = file.readlines()
+        atom_config_content = self._lines
         """
         row_content:
             '29         0.377262291145329         0.128590184800933         0.257759805813488     1  1  1'
@@ -173,10 +181,7 @@ class ACExtractor(ACExtractorBase):
         magnetic_moments_lst: list[float] = []
         try:  # Error: not containing magmoms info.
             idx_row = LineLocator.locate_all_lines(file_path=self.atom_config_path, content=content)[-1]
-
-            with open(self.atom_config_path, encoding="utf-8") as file:
-                atom_config_content = file.readlines()
-
+            atom_config_content = self._lines
             magnetic_moments_content = atom_config_content[idx_row : idx_row + self.n_atoms]
             # MAGNETIC
             # 3 0.0 # atomic_number magmom
