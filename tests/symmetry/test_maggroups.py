@@ -3,9 +3,11 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from pymatgen.core.lattice import Lattice
+from pymatgen.core.structure import Structure
 from pymatgen.symmetry.groups import SpaceGroup
 from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 from pymatgen.util.testing import MatSciTest
@@ -75,6 +77,32 @@ class TestMagneticSpaceGroup(MatSciTest):
         assert msg.is_compatible(ortho)
         assert msg.is_compatible(rhom)
         assert msg.is_compatible(hexagonal)
+
+    def test_is_compatible_trigonal(self):
+        # ISO-MAG gives all trigonal groups, including R-centered ones, in hexagonal axes
+        hexagonal = Lattice.hexagonal(3, 5)
+        rhom = Lattice.rhombohedral(3, 80)
+        for label in ("P3", "P-31m", "R3", "R-3m"):
+            msg = MagneticSpaceGroup(label)
+            assert msg.crystal_system == "trigonal"
+            assert msg.is_compatible(hexagonal)
+            assert not msg.is_compatible(rhom)
+
+        struct = Structure.from_magnetic_spacegroup("R-3m", hexagonal, ["Fe"], [[0, 0, 0]], {"magmom": [[0, 0, 1]]})
+        assert len(struct) == 3  # R-centering in hexagonal axes
+
+    def test_eq_setting_transformation(self):
+        msg = MagneticSpaceGroup([2, 7])
+        assert msg == MagneticSpaceGroup([2, 7], "a,b,c;0,0,0")
+        assert msg != self.msg_4
+
+    def test_init_bad_label(self):
+        with pytest.raises(ValueError, match="not found"):
+            MagneticSpaceGroup("Not-a-label")
+        with pytest.raises(ValueError, match="not found"):
+            MagneticSpaceGroup([231, 1])
+        with pytest.raises(ValueError, match="not found"):
+            MagneticSpaceGroup.from_og("Not-a-label")
 
     def test_symmetry_ops(self):
         _msg_1_symmops = "\n".join(map(str, self.msg_1.symmetry_ops))
