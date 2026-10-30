@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import warnings
 
 import orjson
@@ -795,6 +796,23 @@ class TestCombinedIcohp:
             -0.05756
         )
 
+    def test_as_from_dict_without_orbital_icohps(self):
+        # as_dict used to iterate over list_orb_icohp=None and raise TypeError
+        for collection in (self.icohpcollection_KF, self.icohpcollection_Fe):
+            dct = collection.as_dict()
+            assert dct["list_orb_icohp"] is None
+            new_collection = IcohpCollection.from_dict(dct)
+            assert new_collection.as_dict() == collection.as_dict()
+            assert new_collection.extremum_icohpvalue() == approx(collection.extremum_icohpvalue())
+
+    def test_from_dict_does_not_mutate_input(self):
+        dct = self.icohpcollection_orbitalwise.as_dict()
+        dct_copy = copy.deepcopy(dct)
+        IcohpCollection.from_dict(dct)
+        assert dct == dct_copy
+        # so the same dict can be deserialized more than once
+        assert IcohpCollection.from_dict(dct).as_dict() == self.icohpcollection_orbitalwise.as_dict()
+
 
 class TestCompleteCohp(MatSciTest):
     def setup_method(self):
@@ -1090,6 +1108,22 @@ class TestCompleteCohp(MatSciTest):
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1", "1"]).cohp[Spin.up][300] == approx(0.03392 * 2.0)
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1", "1"], divisor=2).cohp[Spin.up][300] == approx(0.03392)
 
+    def test_population_type_is_propagated(self):
+        summed_cobi = self.cobi.get_summed_cohp_by_label_list(["1"])
+        assert summed_cobi.are_cobis
+        assert not summed_cobi.are_coops
+        summed_coop = self.coop_lobster.get_summed_cohp_by_label_list(["1"])
+        assert summed_coop.are_coops
+        assert not summed_coop.are_cobis
+
+        # from_file dropped are_multi_center_cobis
+        assert self.cobi_multi.are_multi_center_cobis
+        assert not self.cobi_multi.are_cobis
+        label = next(iter(self.cobi_multi.all_cohps))
+        assert self.cobi_multi.get_cohp_by_label(label).are_multi_center_cobis
+        assert self.cobi_multi.get_summed_cohp_by_label_list([label]).are_multi_center_cobis
+        assert CompleteCohp.from_dict(self.cobi_multi.as_dict()).are_multi_center_cobis
+
     def test_get_summed_cohp_by_label_list_summed_spin(self):
         # files without spin polarization
         assert self.cohp_orb.get_summed_cohp_by_label_list(["1"], summed_spin_channels=True).energies[0] == approx(
@@ -1247,6 +1281,19 @@ class TestCompleteCohp(MatSciTest):
         cohps = [self.cohp_orb.get_orbital_resolved_cohp("1", [[4, orb[0]], [4, orb[1]]]) for orb in orbitals]
         for cohp in cohps:
             assert cohp.as_dict() == cohp_label.as_dict()
+
+    def test_from_dict_total_from_orbital_resolved(self):
+        # Like from_file, from_dict must rebuild missing total COHPs/ICOHPs from the
+        # orbital-resolved ones. It used to compute them and then discard the result.
+        dct = self.cohp_orb.as_dict()
+        del dct["COHP"]["1"], dct["ICOHP"]["1"]
+        cohp = CompleteCohp.from_dict(dct)
+        orb_res = self.cohp_orb.orb_res_cohp["1"].values()
+
+        assert_allclose(cohp.all_cohps["1"].cohp[Spin.up], sum(orb["COHP"][Spin.up] for orb in orb_res))
+        assert_allclose(cohp.all_cohps["1"].icohp[Spin.up], sum(orb["ICOHP"][Spin.up] for orb in orb_res))
+        assert_allclose(cohp.all_cohps["1"].cohp[Spin.up], self.cohp_orb.all_cohps["1"].cohp[Spin.up], atol=1e-3)
+        assert_allclose(cohp.all_cohps["1"].icohp[Spin.up], self.cohp_orb.all_cohps["1"].icohp[Spin.up], atol=1e-3)
 
     def test_orbital_resolved_cohp_summed_spin_channels(self):
         ref = self.cohp_orb.orb_res_cohp["1"]["4s-4px"]
