@@ -9,7 +9,7 @@ import numpy as np
 from monty.io import zopen
 from monty.json import MSONable
 
-from pymatgen.io.pwmat.inputs import ACstrExtractor, AtomConfig, LineLocator, _read_lines
+from pymatgen.io.pwmat.inputs import ACstrExtractor, AtomConfig, LineLocator, ListLocator, _read_lines
 
 if TYPE_CHECKING:
     from pymatgen.core import Structure
@@ -138,18 +138,17 @@ class Movement(MSONable):
         with zopen(self.filename, mode="rt", encoding="utf-8") as mvt:
             for ii in range(self.n_ionic_steps):
                 tmp_step: dict = {}
-                tmp_chunk: str = ""
-                for _ in range(self.chunk_sizes[ii]):
-                    tmp_chunk += mvt.readline()
+                tmp_chunk: str = "".join(mvt.readline() for _ in range(self.chunk_sizes[ii]))
+                extractor = ACstrExtractor(tmp_chunk)
                 tmp_step["atom_config"] = AtomConfig.from_str(tmp_chunk)
-                tmp_step["e_tot"] = ACstrExtractor(tmp_chunk).get_e_tot()[0]
-                tmp_step["atom_forces"] = ACstrExtractor(tmp_chunk).get_atom_forces().reshape(-1, 3)
-                e_atoms: np.ndarray | None = ACstrExtractor(tmp_chunk).get_atom_energies()
+                tmp_step["e_tot"] = extractor.get_e_tot()[0]
+                tmp_step["atom_forces"] = extractor.get_atom_forces().reshape(-1, 3)
+                e_atoms: np.ndarray | None = extractor.get_atom_energies()
                 if e_atoms is not None:
                     tmp_step["atom_energies"] = e_atoms
                 else:
                     logger.info(f"Ionic step #{ii} : Energy deposition is turn down.")
-                virial: np.ndarray | None = ACstrExtractor(tmp_chunk).get_virial()
+                virial: np.ndarray | None = extractor.get_virial()
                 if virial is not None:
                     tmp_step["virial"] = virial.reshape(3, 3)
                 else:
@@ -208,17 +207,10 @@ class Report(MSONable):
                 num_kpts (int): The number of kpoints.
                 num_bands (int): The number of bands.
         """
-        content: str = "SPIN"
-        row_idx: int = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        spin = int(self._lines[row_idx - 1].split()[-1].strip())
-
-        content = "NUM_KPT"
-        row_idx = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        num_kpts = int(self._lines[row_idx - 1].split()[-1].strip())
-
-        content = "NUM_BAND"
-        row_idx = LineLocator.locate_all_lines(file_path=self.filename, content=content)[0]
-        num_bands = int(self._lines[row_idx - 1].split()[-1].strip())
+        spin, num_kpts, num_bands = (
+            int(self._lines[ListLocator.locate_all_lines(self._lines, content)[0]].split()[-1].strip())
+            for content in ("SPIN", "NUM_KPT", "NUM_BAND")
+        )
         return spin, num_kpts, num_bands
 
     def _parse_eigen(self) -> np.ndarray:
@@ -231,7 +223,7 @@ class Report(MSONable):
         """
         num_rows: int = int(np.ceil(self._num_bands / 5))
         content: str = "eigen energies, in eV"
-        rows_lst: list[int] = LineLocator.locate_all_lines(file_path=self.filename, content=content)
+        rows_lst: list[int] = [idx + 1 for idx in ListLocator.locate_all_lines(self._lines, content)]
         rows_array: np.ndarray = np.array(rows_lst).reshape(self._spin, -1)
         eigenvalues: np.ndarray = np.zeros((self._spin, self._num_kpts, self._num_bands))
 
@@ -256,7 +248,7 @@ class Report(MSONable):
         """
         num_rows: int = int(self._num_kpts)
         content: str = "total number of K-point:"
-        row_idx: int = LineLocator.locate_all_lines(self.filename, content)[0]
+        row_idx: int = ListLocator.locate_all_lines(self._lines, content)[0] + 1
         kpts: np.ndarray = np.zeros((self._num_kpts, 3))
         kpts_weight: np.ndarray = np.zeros(self._num_kpts)
         hsps: dict[str, np.ndarray] = {}
