@@ -573,54 +573,56 @@ class VaspInputSet(InputGenerator, abc.ABC):
         comp = structure.composition
         elements = sorted((el for el in comp.elements if comp[el] > 0), key=lambda e: e.X)
         most_electro_neg = elements[-1].symbol
-        poscar = Poscar(structure)
+        site_symbols = _get_poscar_site_symbols(structure)
         hubbard_u = settings.get("LDAU", False)
         incar = Incar()
 
         for key, setting in settings.items():
             if key == "MAGMOM":
                 mag = []
+                user_magmoms = self.user_incar_settings.get("MAGMOM", {})
                 for site in structure:
+                    specie = site.specie
                     # Compare to None so that a user-specified magmom of 0 is honored
-                    if (uic_magmom := self.user_incar_settings.get("MAGMOM", {}).get(site.species_string)) is not None:
+                    if (uic_magmom := user_magmoms.get(site.species_string)) is not None:
                         mag.append(uic_magmom)
                     elif hasattr(site, "magmom"):
                         mag.append(site.magmom)
-                    elif getattr(site.specie, "spin", None) is not None:
-                        mag.append(site.specie.spin)
-                    elif str(site.specie) in setting:
-                        if site.specie.symbol == "Co" and setting[str(site.specie)] <= 1.0:
+                    elif getattr(specie, "spin", None) is not None:
+                        mag.append(specie.spin)
+                    elif str(specie) in setting:
+                        if specie.symbol == "Co" and setting[str(specie)] <= 1.0:
                             warnings.warn(
                                 "Co without an oxidation state is initialized as low spin by default in Pymatgen. "
                                 "If this default behavior is not desired, please set the spin on the magmom on the "
                                 "site directly to ensure correct initialization.",
                                 stacklevel=2,
                             )
-                        mag.append(setting.get(str(site.specie)))
+                        mag.append(setting.get(str(specie)))
                     else:
-                        if site.specie.symbol == "Co":
+                        if specie.symbol == "Co":
                             warnings.warn(
                                 "Co without an oxidation state is initialized as low spin by default in Pymatgen. "
                                 "If this default behavior is not desired, please set the spin on the magmom on the "
                                 "site directly to ensure correct initialization.",
                                 stacklevel=2,
                             )
-                        mag.append(setting.get(site.specie.symbol, 0.6))
+                        mag.append(setting.get(specie.symbol, 0.6))
                 incar[key] = mag
 
             elif key in {"LDAUU", "LDAUJ", "LDAUL"}:
                 if hubbard_u:
                     if hasattr(structure[0], key.lower()):
                         m = {site.specie.symbol: getattr(site, key.lower()) for site in structure}
-                        incar[key] = [m[sym] for sym in poscar.site_symbols]
+                        incar[key] = [m[sym] for sym in site_symbols]
                         # Lookup specific LDAU if specified for most_electroneg atom
                     elif most_electro_neg in setting and isinstance(setting[most_electro_neg], dict):
-                        incar[key] = [setting[most_electro_neg].get(sym, 0) for sym in poscar.site_symbols]
+                        incar[key] = [setting[most_electro_neg].get(sym, 0) for sym in site_symbols]
                         # Else, use fallback LDAU value if it exists
                     else:
                         incar[key] = [
                             (setting.get(sym, 0) if isinstance(setting.get(sym, 0), float | int) else 0)
-                            for sym in poscar.site_symbols
+                            for sym in site_symbols
                         ]
 
             elif key.startswith("EDIFF") and key != "EDIFFG":
@@ -655,10 +657,10 @@ class VaspInputSet(InputGenerator, abc.ABC):
         # Thanks to Andrew Rosen for investigating and reporting.
         if "LMAXMIX" not in settings:
             # contains f-electrons
-            if any(el.Z > 56 for el in structure.composition):
+            if any(el.Z > 56 for el in comp):
                 incar["LMAXMIX"] = 6
             # contains d-electrons
-            elif any(el.Z > 20 for el in structure.composition):
+            elif any(el.Z > 20 for el in comp):
                 incar["LMAXMIX"] = 4
 
         # Warn user about LASPH for +U, meta-GGAs, hybrids, and vdW-DF
@@ -775,7 +777,7 @@ class VaspInputSet(InputGenerator, abc.ABC):
         ismear = incar.get("ISMEAR", 1)
         sigma = incar.get("SIGMA", 0.2)
         if (
-            all(elem.is_metal for elem in structure.composition)
+            all(elem.is_metal for elem in comp)
             and incar.get("NSW", 0) > 0
             and (ismear < 0 or (ismear == 0 and sigma > 0.05))
         ):
@@ -3482,6 +3484,19 @@ def _get_ispin(vasprun: Vasprun | None, outcar: Outcar | None) -> Literal[1, 2]:
 def _get_recommended_lreal(structure: Structure) -> Literal["Auto", False]:
     """Get recommended LREAL flag based on the structure."""
     return "Auto" if structure.num_sites > 16 else False
+
+
+def _get_poscar_site_symbols(structure: Structure) -> list[str]:
+    """Get the element symbols as grouped on the POSCAR symbols line.
+
+    Equivalent to ``Poscar(structure).site_symbols`` without the cost of building a Poscar.
+
+    Raises:
+        ValueError: If the structure is disordered (same as the Poscar constructor).
+    """
+    if not structure.is_ordered:
+        raise ValueError("Disordered structure with partial occupancies cannot be converted into POSCAR!")
+    return [symbol for symbol, _ in itertools.groupby(site.specie.symbol for site in structure)]
 
 
 def _combine_kpoints(*kpoints_objects: Kpoints | None) -> Kpoints:

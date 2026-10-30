@@ -156,8 +156,10 @@ class Poscar(MSONable):
             if predictor_corrector.any():
                 site_properties["predictor_corrector"] = predictor_corrector
 
+        # from_sites already returns a new (mutable) Structure, so only copy again when
+        # site properties need to be merged in.
         structure = Structure.from_sites(structure)
-        self.structure = structure.copy(site_properties=site_properties)
+        self.structure = structure.copy(site_properties=site_properties) if site_properties else structure
         if sort_structure:
             self.structure = self.structure.get_sorted_structure()
 
@@ -645,17 +647,25 @@ class Poscar(MSONable):
             lines.append(" ".join(self.site_symbols))
         lines.append(" ".join(map(str, self.natoms)))
 
-        if self.selective_dynamics:
+        # Each site-property accessor rebuilds Structure.site_properties (O(N)),
+        # so fetch them once instead of once per site.
+        site_properties = self.structure.site_properties
+        selective_dynamics = site_properties.get("selective_dynamics")
+        velocities = site_properties.get("velocities")
+        predictor_corrector = site_properties.get("predictor_corrector")
+
+        if selective_dynamics:
             lines.append("Selective dynamics")
 
         lines.append("direct" if direct else "cartesian")
 
         # Add ion positions and selective dynamics
+        coords_fmt = " ".join([format_str] * 3)
+        all_coords = self.structure.frac_coords if direct else self.structure.cart_coords
         for idx, site in enumerate(self.structure):
-            coords: ArrayLike = site.frac_coords if direct else site.coords
-            line: str = " ".join(format_str.format(c) for c in coords)
-            if self.selective_dynamics is not None:
-                sd: list[str] = ["T" if j else "F" for j in self.selective_dynamics[idx]]  # type:ignore[index]
+            line: str = coords_fmt.format(*all_coords[idx])
+            if selective_dynamics is not None:
+                sd: list[str] = ["T" if j else "F" for j in selective_dynamics[idx]]
                 line += f" {sd[0]} {sd[1]} {sd[2]}"
             line += f" {site.species_string}"
             lines.append(line)
@@ -672,10 +682,10 @@ class Poscar(MSONable):
                     stacklevel=2,
                 )
 
-        if self.velocities:
+        if velocities:
             try:
                 lines.append("")
-                lines.extend(" ".join(format_str.format(val) for val in velo) for velo in self.velocities)
+                lines.extend(" ".join(format_str.format(val) for val in velo) for velo in velocities)
             except Exception:
                 warnings.warn(
                     "Velocities are missing or corrupted.",
@@ -683,11 +693,11 @@ class Poscar(MSONable):
                     stacklevel=2,
                 )
 
-        if self.predictor_corrector:
+        if predictor_corrector:
             lines.append("")
             if self.predictor_corrector_preamble:
                 lines.append(self.predictor_corrector_preamble)
-                pred = np.asarray(self.predictor_corrector)
+                pred = np.asarray(predictor_corrector)
                 lines.extend(" ".join(format_str.format(i) for i in z) for col in range(3) for z in pred[:, col])
             else:
                 warnings.warn(
@@ -759,16 +769,21 @@ class Poscar(MSONable):
         # mean 0 variance 1
         velocities = np.random.default_rng().standard_normal((len(self.structure), 3))
 
-        # In AMU, (N, 1) array
-        atomic_masses = np.array([site.specie.atomic_mass.to("kg") for site in self.structure])
+        # In kg, (N,) array. Unit conversion is slow, so do it once per species.
+        species_masses: dict[Any, float] = {}
+        for site in self.structure:
+            if site.specie not in species_masses:
+                species_masses[site.specie] = float(site.specie.atomic_mass.to("kg"))
+        atomic_masses = np.array([species_masses[site.specie] for site in self.structure])
         dof = 3 * len(self.structure) - 3
-
-        # Remove linear drift (net momentum)
-        velocities -= np.mean(atomic_masses[:, None] * velocities, axis=0) / np.mean(atomic_masses)
 
         # Scale velocities due to atomic masses
         # mean 0 std proportional to sqrt(1/m)
         velocities /= atomic_masses[:, None] ** (1 / 2)
+
+        # Remove linear drift (net momentum). This must come after the mass scaling,
+        # which would otherwise reintroduce a net momentum for multi-element structures.
+        velocities -= np.mean(atomic_masses[:, None] * velocities, axis=0) / np.mean(atomic_masses)
 
         # Scale velocities to get correct temperature
         energy = np.sum(1 / 2 * atomic_masses * np.sum(velocities**2, axis=1))
@@ -894,9 +909,11 @@ class Incar(UserDict, MSONable):
         Returns:
             Incar
         """
-        if dct.get("MAGMOM") and isinstance(dct["MAGMOM"][0], dict):
-            dct["MAGMOM"] = [Magmom.from_dict(m) for m in dct["MAGMOM"]]
-        return cls({k: v for k, v in dct.items() if k not in ("@module", "@class")})
+        params = {k: v for k, v in dct.items() if k not in ("@module", "@class")}
+        # Decode into the new dict so the caller's dict is not mutated
+        if params.get("MAGMOM") and isinstance(params["MAGMOM"][0], dict):
+            params["MAGMOM"] = [Magmom.from_dict(m) for m in params["MAGMOM"]]
+        return cls(params)
 
     def copy(self) -> Self:
         return type(self)(self)  # type:ignore[arg-type]
@@ -2290,49 +2307,21 @@ class PotcarSingle:
 
             tol is then used to match statistical values within a tolerance
         """
-        possible_potcar_matches = []
         # Some POTCARs have an LEXCH (functional used to generate the POTCAR)
         # with the expected functional, e.g. the C_d POTCAR for PBE is actually an
         # LDA pseudopotential.
 
         # Thus we have to look for matches in all POTCAR dirs, not just the ones with
         # consistent values of LEXCH
-        for func in self.functional_dir:
-            for titel_no_spc in _load_potcar_summary_stats()[func]:
-                if self.TITEL.replace(" ", "") == titel_no_spc:
-                    for potcar_subvariant in _load_potcar_summary_stats()[func][titel_no_spc]:
-                        if self.VRHFIN.replace(" ", "") == potcar_subvariant["VRHFIN"]:
-                            possible_match = {
-                                "POTCAR_FUNCTIONAL": func,
-                                "TITEL": titel_no_spc,
-                                **potcar_subvariant,
-                            }
-                            possible_potcar_matches.append(possible_match)
-
-        def parse_fortran_style_str(input_str: str) -> str | bool | float | int:
-            """Parse any input string as bool, int, float, or failing that, str.
-            Used to parse FORTRAN-generated POTCAR files where it's unknown
-            a priori what type of data will be encountered.
-            """
-            input_str = input_str.strip()
-
-            if input_str.lower() in {"t", "f", "true", "false"}:
-                return input_str[0].lower() == "t"
-
-            if input_str.upper() == input_str.lower() and input_str[0].isnumeric():
-                # NB: fortran style floats always include a decimal point.
-                #     While you can set, e.g. x = 1E4, you cannot print/write x without
-                #     a decimal point:
-                #         `write(6,*) x`          -->   `10000.0000` in stdout
-                #         `write(6,'(E10.0)') x`  -->   segfault
-                #     The (E10.0) means write an exponential-format number with 10
-                #         characters before the decimal, and 0 characters after
-                return float(input_str) if "." in input_str else int(input_str)
-
-            try:
-                return float(input_str)
-            except ValueError:
-                return input_str
+        summary_stats = _load_potcar_summary_stats()
+        titel_no_spc = self.TITEL.replace(" ", "")
+        vrhfin_no_spc = self.VRHFIN.replace(" ", "")
+        possible_potcar_matches = [
+            {"POTCAR_FUNCTIONAL": func, "TITEL": titel_no_spc, **potcar_subvariant}
+            for func in self.functional_dir
+            for potcar_subvariant in summary_stats[func].get(titel_no_spc, [])
+            if potcar_subvariant["VRHFIN"] == vrhfin_no_spc
+        ]
 
         psp_keys, psp_vals = [], []
         # Tolerate CRLF line endings: a hardcoded "\n" delimiter raises IndexError
@@ -2342,11 +2331,24 @@ class PotcarSingle:
         for row in re.split(r"\n+|;", potcar_body):  # FORTRAN allows ; to delimit multiple lines merged into 1 line
             tmp_str = ""
             for raw_val in row.split():
-                parsed_val = parse_fortran_style_str(raw_val)
-                if isinstance(parsed_val, str):
-                    tmp_str += parsed_val.strip()
-                elif isinstance(parsed_val, float | int):
-                    psp_vals.append(parsed_val)
+                # Parse each token as bool, int, float, or failing that, str. Used to parse
+                # FORTRAN-generated POTCAR files where it's unknown a priori what type of
+                # data will be encountered. Nearly all tokens are numbers, so try that first.
+                try:
+                    num = float(raw_val)
+                except ValueError:
+                    if raw_val.lower() in {"t", "f", "true", "false"}:
+                        psp_vals.append(raw_val[0].lower() == "t")
+                    else:
+                        tmp_str += raw_val
+                    continue
+
+                # NB: fortran style floats always include a decimal point, so letter-free
+                # tokens starting with a digit and without one are integers.
+                if "." not in raw_val and raw_val[0].isnumeric() and raw_val.upper() == raw_val.lower():
+                    psp_vals.append(int(raw_val))
+                else:
+                    psp_vals.append(num)
             if len(tmp_str) > 0:
                 psp_keys.append(tmp_str.lower())
 

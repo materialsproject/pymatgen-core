@@ -520,6 +520,66 @@ direct
         temperature = struct[0].specie.atomic_mass.to("kg") * np.sum(v**2) / (3 * const.k) * 1e10
         assert temperature == approx(700, abs=1e-4), "Temperature instantiated incorrectly"
 
+    def test_set_temperature_multi_element(self):
+        # The net momentum must vanish (and the temperature be exact) when the masses differ
+        struct = Structure.from_file(f"{VASP_IN_DIR}/POSCAR_LiFePO4") * (2, 1, 1)
+        poscar = Poscar(struct)
+        poscar.set_temperature(500)
+
+        velocities = np.array(poscar.velocities)
+        masses = np.array([site.specie.atomic_mass.to("kg") for site in struct])
+        momentum = masses @ velocities
+        assert_allclose(momentum / np.sum(masses * np.linalg.norm(velocities, axis=1)), 0, atol=1e-12)
+
+        dof = 3 * len(struct) - 3
+        kinetic_energy = 0.5 * np.sum(masses * np.sum(velocities**2, axis=1)) * 1e10
+        assert 2 * kinetic_energy / (dof * const.k) == approx(500)
+
+    def test_get_str_with_md_data(self):
+        """Pin the POSCAR string written with selective dynamics, velocities and predictor-corrector data."""
+        struct = Structure(np.eye(3) * 3, ["Si", "O"], [[0, 0, 0], [0.25, 0.5, 0.75]])
+        poscar = Poscar(
+            struct,
+            comment="test",
+            selective_dynamics=[[True, False, True], [False, False, False]],
+            velocities=[[0.1, -0.2, 0.3], [0.4, 0.5, -0.6]],
+            predictor_corrector=[[[1, 2, 3]] * 3, [[4, 5, 6]] * 3],
+            predictor_corrector_preamble="preamble",
+            lattice_velocities=np.full((6, 3), 0.5),
+        )
+        expected = """test
+1.0
+   3.0000000000000000    0.0000000000000000    0.0000000000000000
+   0.0000000000000000    3.0000000000000000    0.0000000000000000
+   0.0000000000000000    0.0000000000000000    3.0000000000000000
+Si O
+1 1
+Selective dynamics
+cartesian
+   0.0000000000000000    0.0000000000000000    0.0000000000000000 T F T Si
+   0.7500000000000000    1.5000000000000000    2.2500000000000000 F F F O
+Lattice velocities and vectors
+  1
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+  5.0000000E-01   5.0000000E-01   5.0000000E-01
+
+   0.1000000000000000   -0.2000000000000000    0.3000000000000000
+   0.4000000000000000    0.5000000000000000   -0.6000000000000000
+
+preamble
+   1.0000000000000000    2.0000000000000000    3.0000000000000000
+   4.0000000000000000    5.0000000000000000    6.0000000000000000
+   1.0000000000000000    2.0000000000000000    3.0000000000000000
+   4.0000000000000000    5.0000000000000000    6.0000000000000000
+   1.0000000000000000    2.0000000000000000    3.0000000000000000
+   4.0000000000000000    5.0000000000000000    6.0000000000000000
+"""
+        assert poscar.get_str(direct=False) == expected
+
     def test_init_md_data_as_ndarray(self):
         # numpy arrays (not only lists) must be accepted for MD data
         struct = Structure(np.eye(3) * 3, ["Si", "Si"], [[0, 0, 0], [0.25, 0.25, 0.25]])
@@ -879,9 +939,13 @@ SIGMA = 0.05"""
         dct = self.incar.as_dict()
         incar2 = Incar.from_dict(dct)
         assert self.incar == incar2
-        dct["MAGMOM"] = [Magmom([1, 2, 3]).as_dict()]
+        magmom_dicts = [Magmom([1, 2, 3]).as_dict()]
+        dct["MAGMOM"] = magmom_dicts
         incar3 = Incar.from_dict(dct)
         assert incar3["MAGMOM"] == [Magmom([1, 2, 3])]
+        # from_dict must not mutate the input dict (the serialized MAGMOMs stay dicts)
+        assert dct["MAGMOM"] is magmom_dicts
+        assert isinstance(dct["MAGMOM"][0], dict)
 
     def test_from_file_and_from_dict(self):
         """
