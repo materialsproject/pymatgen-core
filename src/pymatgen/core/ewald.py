@@ -187,7 +187,16 @@ class EwaldSummation(MSONable):
             if matching_site:
                 new_charge = compute_average_oxidation_state(matching_site)
                 old_charge = self._oxi_states[idx]
-                scaling_factor = new_charge / old_charge
+                if old_charge == 0:
+                    # the interactions of an uncharged site are all zero and cannot be rescaled
+                    if new_charge != 0:
+                        raise ValueError(
+                            f"Cannot compute the Ewald sum of a sub structure that charges site {idx}, "
+                            "which is uncharged in the original structure."
+                        )
+                    scaling_factor = 1
+                else:
+                    scaling_factor = new_charge / old_charge
                 matches.append(matching_site)
             else:
                 scaling_factor = 0
@@ -552,8 +561,9 @@ class EwaldMinimizer:
                 self._matrix[ii, jj] = value
                 self._matrix[jj, ii] = value
 
-        # sort the m_list based on number of permutations
-        self._m_list = sorted(m_list, key=lambda x: comb(len(x[2]), x[1]), reverse=True)
+        # sort the m_list based on number of permutations. The recursion consumes the index
+        # lists in place, so work on a copy to leave the caller's m_list untouched.
+        self._m_list = sorted(deepcopy(m_list), key=lambda x: comb(len(x[2]), x[1]), reverse=True)
 
         for mlist in self._m_list:
             if mlist[0] > 1:

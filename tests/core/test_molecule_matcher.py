@@ -852,3 +852,20 @@ if __name__ == "__main__":
     # Run the following code to generate test cases:
     # generate_Si_cluster()
     # generate_Si2O_cluster()
+
+
+@pytest.mark.parametrize("vec", [[0, 1, 0], [1, 0, 0], [1, 1, 1], [0.3, -0.2, 0.9]])
+def test_rotation_matrix_vectors_antiparallel(vec):
+    # the antiparallel case used a fixed rotation around the y-axis, which only inverts xz-plane vectors
+    vec = np.array(vec, dtype=float) / np.linalg.norm(vec)
+    rot = HungarianOrderMatcher.rotation_matrix_vectors(vec, -vec)
+    assert rot @ vec == approx(-vec)
+    assert rot @ rot.T == approx(np.eye(3))
+    assert np.linalg.det(rot) == approx(1)
+
+
+def test_genetic_order_matcher_single_atom():
+    mol = Molecule(["He"], [[0, 0, 0]])
+    matches = GeneticOrderMatcher(mol, threshold=0.1).fit(mol)
+    assert len(matches) == 1
+    assert matches[0][1] == approx(0)

@@ -102,7 +102,8 @@ class VoronoiAnalyzer:
 
         for key in voro.ridge_dict:
             if 0 in key:  # This means if the center atom is in key
-                if -1 in key:  # This means if an infinity point is in key
+                # infinite Voronoi vertices are labeled -1 among the ridge vertices (never in the key)
+                if -1 in voro.ridge_dict[key]:
                     raise ValueError("Cutoff too short.")
                 try:
                     vor_index[len(voro.ridge_dict[key]) - 3] += 1

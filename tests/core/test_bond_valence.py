@@ -144,3 +144,17 @@ class TestModuleHelpers(MatSciTest):
         struct[0].species = Composition("Li0.5Na0.5")
         with pytest.raises(ValueError, match="Oxidation state of all sites must be specified"):
             add_oxidation_state_by_site_fraction(struct, [[1, 1]])
+
+
+def test_get_valences_no_probable_oxidation_state():
+    struct = Structure.from_spacegroup(
+        "Fm-3m", [[5.6, 0, 0], [0, 5.6, 0], [0, 0, 5.6]], ["Na", "Cl"], [[0, 0, 0], [0.5] * 3]
+    )
+    # all ICSD oxidation states of Na are forbidden -> clear error instead of "min() arg is an empty sequence"
+    with pytest.raises(ValueError, match="Valences cannot be assigned! No probable oxidation state for Na"):
+        BVAnalyzer(forbidden_species=["Na+"]).get_valences(struct)
+
+    disordered = struct.copy()
+    disordered.replace_species({"Na": {"Na": 0.5, "K": 0.5}})
+    with pytest.raises(ValueError, match="Valences cannot be assigned! No probable oxidation state for K"):
+        BVAnalyzer(forbidden_species=["K+"]).get_valences(disordered)
