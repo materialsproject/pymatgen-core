@@ -47,12 +47,12 @@ def get_pmg_structure(phonopy_structure: PhonopyAtoms) -> Structure:
 
 
 @requires(Phonopy is not None, "phonopy not installed!")
-def get_phonopy_structure(pmg_structure: Structure) -> PhonopyAtoms:
+def get_phonopy_structure(pmg_structure: Structure | IStructure) -> PhonopyAtoms:
     """
     Convert a pymatgen Structure object to a PhonopyAtoms object.
 
     Args:
-        pmg_structure (pymatgen Structure): A Pymatgen structure object.
+        pmg_structure (Structure | IStructure): A Pymatgen structure object.
     """
     symbols = [site.specie.symbol for site in pmg_structure]
 
