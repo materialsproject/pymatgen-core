@@ -673,7 +673,7 @@ class AdfOutput:
 
                 elif self.run_type == "SinglePoint":
                     if match := coord_patt.search(line):
-                        sites.append([match.groups()[0], list(map(float, match.groups()[2:]))])
+                        sites.append([match.groups()[1], list(map(float, match.groups()[2:]))])
                     elif match := final_energy_patt.search(line):
                         self.final_energy = float(match[1])
                         self.final_structure = self._sites_to_mol(sites)

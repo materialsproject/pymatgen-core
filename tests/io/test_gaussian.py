@@ -535,3 +535,58 @@ class TestGaussianOutput:
         assert gout.title == "H4 C3 O3"
         assert gout.charge == 0
         assert gout.spin_multiplicity == 1
+
+    def test_mulliken_charges(self):
+        gau = GaussianOutput(f"{TEST_DIR}/methane.log")
+        # the last Mulliken block in the file is kept
+        assert gau.Mulliken_charges == {
+            1: ["C", approx(-0.793976)],
+            2: ["H", approx(0.198494)],
+            3: ["H", approx(0.198494)],
+            4: ["H", approx(0.198494)],
+            5: ["H", approx(0.198494)],
+        }
+
+    def test_spectre_plot(self):
+        gau = GaussianOutput(f"{TEST_DIR}/so2_td.log")
+        data, ax = gau.get_spectre_plot()
+        assert ax is not None
+        assert len(data["energies"]) == len(data["lambda"]) == len(data["xas"])
+        assert max(data["xas"]) == approx(1)
+
+    def test_oniom_energy(self, tmp_path):
+        with open(f"{TEST_DIR}/methane.log", encoding="utf-8") as file:
+            lines = file.readlines()
+        idx = next(ii for ii, line in enumerate(lines) if "Charge =" in line)
+        lines.insert(idx + 1, " ONIOM: extrapolated energy =  -40.123456789\n")
+        log_path = tmp_path / "oniom.log"
+        log_path.write_text("".join(lines), encoding="utf-8")
+
+        gau = GaussianOutput(str(log_path))
+        assert gau.energies[0] == approx(-40.123456789)
+
+    def test_raman_frequency_symmetries(self, tmp_path):
+        with open(f"{TEST_DIR}/H2O_gau_vib.out", encoding="utf-8") as file:
+            lines = file.readlines()
+        idx = next(ii for ii, line in enumerate(lines) if "IR Inten    --" in line)
+        lines[idx + 1 : idx + 1] = [
+            " Raman Activ --      2.1093                23.5345                 6.7584\n",  # codespell:ignore activ
+            " Depolar (P) --      0.6973                 0.1814                 0.3743\n",
+            " Depolar (U) --      0.8216                 0.3071                 0.5447\n",
+        ]
+        log_path = tmp_path / "raman.out"
+        log_path.write_text("".join(lines), encoding="utf-8")
+
+        gau = GaussianOutput(str(log_path))
+        assert [freq["symmetry"] for freq in gau.frequencies[0]] == ["A'", "A'", "A'"]
+        assert gau.frequencies[0][0]["IR_intensity"] == approx(97.3057)
+
+
+class TestGaussianInputSerialization:
+    def test_as_from_dict_keeps_dieze_tag_and_gen_basis(self):
+        mol = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.74]])
+        gau_inp = GaussianInput(mol, functional="B3LYP", basis_set="Gen", dieze_tag="#N", gen_basis="H 0\n6-31G\n****")
+        round_tripped = GaussianInput.from_dict(gau_inp.as_dict())
+        assert round_tripped.dieze_tag == "#N"
+        assert round_tripped.gen_basis == "H 0\n6-31G\n****"
+        assert str(round_tripped) == str(gau_inp)
