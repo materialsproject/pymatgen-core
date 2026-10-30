@@ -178,7 +178,8 @@ class Spectrum(MSONable):
         else:
             raise ValueError(f"Unsupported normalization {mode=}!")
 
-        self.y /= factor / value
+        # not in place: that fails for an integer y
+        self.y = self.y / (factor / value)
 
     def smear(
         self,
@@ -206,6 +207,8 @@ class Spectrum(MSONable):
         else:
             raise ValueError(f"Invalid {func=}")
         weights /= np.sum(weights)
+        # convolve1d keeps the input dtype, which truncates (and then fails to rescale) an integer y
+        self.y = np.asarray(self.y, dtype=np.result_type(self.y, float))
         if len(self.ydim) == 1:
             total = np.sum(self.y)
             self.y = convolve1d(self.y, weights)

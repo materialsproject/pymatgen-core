@@ -127,11 +127,10 @@ class ZeoCssr(Cssr):
         lengths = [float(i) for i in tokens]
         tokens = lines[1].split()
         angles = [float(i) for i in tokens[:3]]
-        # Zeo++ takes x-axis along a and pymatgen takes z-axis along c
-        a = lengths.pop(-1)
-        lengths.insert(0, a)
-        alpha = angles.pop(-1)
-        angles.insert(0, alpha)
+        # Zeo++ takes x-axis along a and pymatgen takes z-axis along c: the file stores
+        # (c, a, b) and (gamma, alpha, beta), so rotate back to (a, b, c) and (alpha, beta, gamma)
+        lengths.append(lengths.pop(0))
+        angles.append(angles.pop(0))
         lattice = Lattice.from_parameters(*lengths, *angles)
 
         sp = []
@@ -139,7 +138,7 @@ class ZeoCssr(Cssr):
         charge = []
         for line in lines[4:]:
             if match := re.match(
-                r"\d+\s+(\w+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+(?:0\s+){8}([0-9\-\.]+)",
+                r"\d+\s+(\S+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+(?:0\s+){8}([0-9\-\.]+)",
                 line.strip(),
             ):
                 sp.append(match[1])

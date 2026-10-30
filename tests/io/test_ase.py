@@ -7,7 +7,7 @@ import pytest
 from monty.json import MontyDecoder, jsanitize
 
 from pymatgen.core import Composition, Lattice, Molecule, Structure
-from pymatgen.core.structure import StructureError
+from pymatgen.core.structure import IMolecule, StructureError
 from pymatgen.io.ase import AseAtomsAdaptor, MSONAtoms
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR
 
@@ -83,6 +83,41 @@ def test_get_atoms_from_structure_oxi_states():
     STRUCTURE.add_oxidation_state_by_site(oxi_states)
     atoms = AseAtomsAdaptor.get_atoms(STRUCTURE)
     assert atoms.get_array("oxi_states").tolist() == oxi_states
+
+
+def test_get_atoms_oxi_states_zero_round_trip():
+    struct = Structure(Lattice.cubic(3), ["Fe0+", "O0+"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    atoms = AseAtomsAdaptor.get_atoms(struct)
+    assert atoms.get_array("oxi_states").tolist() == [0, 0]
+    back = AseAtomsAdaptor.get_structure(atoms)
+    assert [getattr(sp, "oxi_state", None) for sp in back.species] == [0, 0]
+
+
+def test_velocities_round_trip():
+    # pymatgen velocities are in A/fs (the POSCAR convention); ASE stores momenta in its own units
+    struct = Structure(Lattice.cubic(3), ["Fe", "O"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    velocities = [[0.01, 0.0, -0.02], [0.0, 0.03, 0.0]]
+    struct.add_site_property("velocities", velocities)
+    atoms = AseAtomsAdaptor.get_atoms(struct)
+    assert not atoms.has("velocities")
+    assert atoms.get_velocities() * ase.units.fs == pytest.approx(np.array(velocities))
+    # Fe at 0.01 A/fs = 1000 m/s and O at 0.03 A/fs: 1/2 m v^2 in eV
+    amu_kms2_to_ev = 1.66053906660e-27 * 1e6 / 1.602176634e-19
+    expected_ke = 0.5 * amu_kms2_to_ev * (atoms.get_masses() @ (np.array(velocities) * 100) ** 2).sum()
+    assert atoms.get_kinetic_energy() == pytest.approx(expected_ke)
+
+    back = AseAtomsAdaptor.get_structure(atoms)
+    assert "momenta" not in back.site_properties
+    assert np.array(back.site_properties["velocities"]) == pytest.approx(np.array(velocities))
+
+
+def test_get_structure_velocities_from_ase_momenta():
+    atoms = ase.Atoms("Cu2", positions=[[0, 0, 0], [1.8, 0, 0]], cell=[5, 5, 5], pbc=True)
+    atoms.set_velocities([[1, 0, 0], [0, -2, 0]])  # ASE units
+    struct = AseAtomsAdaptor.get_structure(atoms)
+    assert np.array(struct.site_properties["velocities"]) == pytest.approx(
+        np.array([[1, 0, 0], [0, -2, 0]]) * ase.units.fs
+    )
 
 
 def test_get_atoms_from_structure_dyn():
@@ -276,6 +311,29 @@ def test_get_molecule():
     molecule = AseAtomsAdaptor.get_molecule(atoms)
     assert molecule.charge == 2
     assert molecule.spin_multiplicity == 3
+
+
+def test_imolecule_charge_spin_round_trip():
+    # get_atoms used to ignore IMolecule charge/spin, and get_molecule(cls=IMolecule)
+    # crashed on the Molecule-only set_charge_and_spin
+    imol = IMolecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 0.96], [0.93, 0, -0.24]], charge=1, spin_multiplicity=2)
+    atoms = AseAtomsAdaptor.get_atoms(imol)
+    assert atoms.charge == 1
+    assert atoms.spin_multiplicity == 2
+
+    imol_back = AseAtomsAdaptor.get_molecule(atoms, cls=IMolecule)
+    assert type(imol_back) is IMolecule
+    assert imol_back.charge == 1
+    assert imol_back.spin_multiplicity == 2
+
+
+def test_msonable_atoms_charge_spin_round_trip():
+    # MSONAtoms.as_dict used to drop the charge/spin_multiplicity patched in by get_atoms
+    mol = Molecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 0.96], [0.93, 0, -0.24]], charge=1, spin_multiplicity=2)
+    atoms_back = MSONAtoms.from_dict(AseAtomsAdaptor.get_atoms(mol).as_dict())
+    mol_back = AseAtomsAdaptor.get_molecule(atoms_back)
+    assert mol_back.charge == 1
+    assert mol_back.spin_multiplicity == 2
 
 
 @pytest.mark.parametrize("filename", ["io/vasp/outputs/OUTCAR.gz", "cif/V2O3.cif"])

@@ -142,7 +142,7 @@ SUPPORTED_UNIT_NAMES: tuple[str, ...] = tuple(i for d in ALL_UNITS.values() for 
 _UNAME2UTYPE: dict[str, str] = {uname: utype for utype, dct in ALL_UNITS.items() for uname in dct}
 
 
-class UnitError(BaseException):
+class UnitError(Exception):
     """Exception class for unit errors."""
 
 
@@ -263,6 +263,11 @@ class Unit(collections.abc.Mapping):
 
         old_base, old_factor = self.as_base_units
         new_base, new_factor = type(self)(_new_unit).as_base_units
+
+        # Both sides are now in SI base units, so they are compatible only if identical. Checking here
+        # also avoids a KeyError (m -> s) or a zip() ValueError (m -> m s^-1) in the loop below.
+        if old_base != new_base:
+            raise UnitError(f"Units {self} and {_new_unit} are not compatible!")
 
         units_new = sorted(new_base.items(), key=lambda d: _UNAME2UTYPE[d[0]])
         units_old = sorted(old_base.items(), key=lambda d: _UNAME2UTYPE[d[0]])
@@ -467,14 +472,15 @@ class FloatWithUnit(float):
         Example usage:
             Memory.from_str("1. MB").
         """
-        # Extract num and unit string
+        # Extract num and unit string. The number may use scientific notation ("1e-3 eV"),
+        # so it cannot simply end at the first letter.
         string = string.strip()
-        for _idx, char in enumerate(string):
-            if char.isalpha() or char.isspace():
-                break
-        else:
+        match = re.match(r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(.*)$", string)
+        if match is None:
+            raise ValueError(f"Cannot parse a number from string {string}")
+        if not match[2]:
             raise ValueError(f"Unit is missing in string {string}")
-        num, unit = float(string[:_idx]), string[_idx:].strip()
+        num, unit = float(match[1]), match[2]
 
         # Find unit type (set it to None if it cannot be detected)
         for unit_type, dct in BASE_UNITS.items():
@@ -656,6 +662,18 @@ class ArrayWithUnit(np.ndarray):
             np.array(self) / np.array(other),
             unit=self.unit / other.unit,
         )
+
+    def __rtruediv__(self, other: Any) -> Self:
+        # without this, ndarray's ufunc path kept self's unit: 1 / [1, 2] eV gave [1, 0.5] eV
+        if self._unit is None:
+            return NotImplemented
+        return type(self)(np.array(other) / np.array(self), unit=self.unit**-1)
+
+    def __pow__(self, i: float) -> Self:  # type: ignore[override]
+        # as for FloatWithUnit, the unit is raised too (the ufunc path kept it unchanged)
+        if self._unit is None:
+            return NotImplemented
+        return type(self)(np.array(self) ** i, unit=self.unit**i)
 
     def __neg__(self) -> Self:
         return type(self)(-np.array(self), unit_type=self.unit_type, unit=self.unit)

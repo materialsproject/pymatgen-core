@@ -126,6 +126,8 @@ class TransformedStructure(MSONable):
             input_structure = self.final_structure.as_dict()
             alts = []
             for x in ranked_list[1:]:
+                # copy so that the transformation's own stored results are not mutated
+                x = dict(x)
                 struct = x.pop("structure")
                 actual_transformation = x.pop("transformation", transformation)
                 h_dict = actual_transformation.as_dict()
@@ -137,11 +139,12 @@ class TransformedStructure(MSONable):
                 dct["final_structure"] = struct.as_dict()
                 alts.append(TransformedStructure.from_dict(dct))
 
-            x = ranked_list[0]
+            x = dict(ranked_list[0])
             struct = x.pop("structure")
             actual_transformation = x.pop("transformation", transformation)
             h_dict = actual_transformation.as_dict()
-            h_dict["input_structure"] = self.final_structure.as_dict()
+            # self.final_structure was overwritten by the alternatives above
+            h_dict["input_structure"] = input_structure
             h_dict["output_parameters"] = x
             self.history.append(h_dict)
             self.final_structure = struct
@@ -224,9 +227,8 @@ class TransformedStructure(MSONable):
             "\nHistory",
             "------------",
         ]
-        for hist in self.history:
-            hist.pop("input_structure", None)
-            output.append(str(hist))
+        # don't mutate the history (input_structure is needed for undo and structures)
+        output.extend(str({key: val for key, val in hist.items() if key != "input_structure"}) for hist in self.history)
         output += ("\nOther parameters", "------------", str(self.other_parameters))
         return "\n".join(output)
 
@@ -366,12 +368,14 @@ class TransformedStructure(MSONable):
             )
         history = []
         for hist in self.history:
-            snl_metadata = hist.pop("_snl", {})
+            # copy so that self.history is not mutated
+            description = dict(hist)
+            snl_metadata = dict(description.pop("_snl", {}))
             history += [
                 {
                     "name": snl_metadata.pop("name", "pymatgen"),
                     "url": snl_metadata.pop("url", "http://pypi.python.org/pypi/pymatgen"),
-                    "description": hist,
+                    "description": description,
                 }
             ]
 
@@ -389,7 +393,8 @@ class TransformedStructure(MSONable):
         """
         history: list = []
         for hist in snl.history:
-            dct = hist.description
+            # copy so that the SNL history is not mutated
+            dct = dict(hist.description)  # type:ignore[arg-type]
             dct["_snl"] = {"url": hist.url, "name": hist.name}  # type:ignore[index]
             history.append(dct)  # type:ignore[arg-type]
         return cls(snl.structure, history=history)  # type:ignore[arg-type]

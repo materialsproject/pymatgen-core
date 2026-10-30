@@ -161,6 +161,16 @@ loop_
   CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"""
         assert str(CifBlock(data, loops, "test")) == cif_str
 
+    def test_loop_item_count(self):
+        # A loop with no values used to raise ZeroDivisionError
+        cb = CifBlock.from_str("data_test\nloop_\n_foo\n_bar\nloop_\n_baz\n1\n2")
+        assert cb.data["_foo"] == cb.data["_bar"] == []
+        assert cb.data["_baz"] == ["1", "2"]
+
+        # 8 values for 3 columns used to slip past the check and fail in zip()
+        with pytest.raises(ValueError, match=r"len\(items\)=8 is not a multiple of len\(columns\)=3"):
+            CifBlock.from_str("data_test\nloop_\n_a\n_b\n_c\n1 2 3 4 5 6 7 8")
+
 
 class TestCifIO(MatSciTest):
     def test_cif_parser(self):
@@ -396,6 +406,36 @@ class TestCifIO(MatSciTest):
         parser = CifParser(f"{TEST_FILES_DIR}/cif/PF_sd_1601634.cif")
         for struct in parser.parse_structures():
             assert struct.formula == "Zn2.58 Fe1.38 As4 Pb2.04 O16"
+
+    def test_springer_pauling_fix_keeps_other_loops(self):
+        # Removing a Pauling-style mixed row (index 1) used to also delete entry 1 of every
+        # other loop, here dropping the inversion op and halving the Na sites
+        cif_str = """data_test
+_cell_length_a 4.0
+_cell_length_b 4.0
+_cell_length_c 4.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_symmetry_equiv_pos_as_xyz
+'x, y, z'
+'-x, -y, -z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Na1 Na 0.1 0.2 0.3 1
+Nb,Zr '0.8Nb + 0.2Zr' 0 0 0 1
+"""
+        parser = CifParser.from_str(cif_str)
+        assert "Pauling file corrections applied." in parser.warnings
+        assert parser._cif.data["test"]["_symmetry_equiv_pos_as_xyz"] == ["x, y, z", "-x, -y, -z"]
+        struct = parser.parse_structures(on_error="raise")[0]
+        assert struct.composition == Composition({"Na": 2, "Nb": 0.8, "Zr": 0.2})
 
     def test_cif_parser_cod(self):
         """Parsing problematic CIF files from the COD database."""
@@ -785,6 +825,39 @@ loop_
         sm = StructureMatcher(stol=0.05, ltol=0.01, angle_tol=0.1)
         assert sm.fit(struct, s_test)
 
+    @pytest.mark.parametrize("key", ["_symmetry_cell_setting", "_space_group_crystal_system"])
+    def test_get_lattice_from_crystal_system(self, key):
+        cif_str = f"""data_test
+{key} cubic
+_cell_length_a 4.0
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Na1 0 0 0
+"""
+        struct = CifParser.from_str(cif_str).parse_structures(on_error="raise")[0]
+        assert struct.lattice.parameters == approx((4, 4, 4, 90, 90, 90))
+
+    def test_get_lattice_incomplete_crystal_system_params(self):
+        # Crystal system given but its required parameter is missing: used to raise an
+        # uncaught TypeError from Lattice.cubic() instead of a parse error
+        cif_str = """data_test
+_symmetry_cell_setting cubic
+_cell_length_b 4.0
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Na1 0 0 0
+"""
+        parser = CifParser.from_str(cif_str)
+        assert parser.get_lattice(parser._cif.data["test"]) is None
+        with pytest.raises(ValueError, match="Cannot determine lattice"):
+            parser.parse_structures(on_error="raise")
+
     def test_empty(self):
         # single line
         cb = CifBlock.from_str("data_mwe\nloop_\n_tag\n ''")
@@ -1036,6 +1109,18 @@ Si1 Si 0 0 0 1 0.0
         assert "Fe  Fe0  1  0.21872822  0.75000000  0.47486711  1  1.0" in cif_str
         assert "O  O23  1  0.95662769  0.25000000  0.29286233  1  -1.0" in cif_str
 
+    def test_cif_writer_non_numeric_site_properties(self):
+        # Non-float site properties used to raise "Unknown format code 'f'"
+        struct = Structure(
+            Lattice.cubic(3),
+            ["Na", "Cl"],
+            [[0, 0, 0], [0.5, 0.5, 0.5]],
+            site_properties={"tag": ["a", "b"], "charge": [1, -1]},
+        )
+        block = CifBlock.from_str(str(CifWriter(struct, write_site_properties=True)))
+        assert block["_atom_site_tag"] == ["a", "b"]
+        assert block["_atom_site_charge"] == ["1.00000000", "-1.00000000"]
+
     def test_write_spin_species(self):
         """Test that a Species with spin and oxidation state writes correctly."""
         lattice = Lattice.cubic(3.0)
@@ -1150,6 +1235,15 @@ Gd1 5.05 5.05 0.0"""
         assert not Magmom.are_collinear(s_ncl.site_properties["magmom"])
 
         assert s_ncl.matches(s_ncl_from_msg)
+
+    def test_parse_structures_no_check_occu_site_properties(self):
+        # check_occu=False used to assign the whole site_properties dict of lists to every site
+        ref = self.mcif.parse_structures(primitive=False, symmetrized=True)[0]
+        struct = self.mcif.parse_structures(primitive=False, check_occu=False)[0]
+        assert len(struct) == len(ref)
+        for site, ref_site in zip(struct, ref, strict=True):
+            assert isinstance(site.properties["magmom"], Magmom)
+            assert site.properties["magmom"] == ref_site.properties["magmom"]
 
     def test_axial_moment_transform_non_orthogonal_cell(self):
         # MAGNDATA 1.34 (HoAuGe): child cell of a hexagonal parent (a doubled, so

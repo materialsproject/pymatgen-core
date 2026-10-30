@@ -113,7 +113,8 @@ class GruneisenParameter(MSONable):
             acoustic_debye_freq = self.acoustic_debye_temp * const.value("Boltzmann constant in Hz/K") / const.tera
             ind = np.where((w >= 0) & (w <= acoustic_debye_freq))
         elif limit_frequencies == "acoustic":
-            w_acoustic = w[:, :3]
+            # w has shape (n_bands, n_qpoints): the acoustic modes are the first three bands
+            w_acoustic = w[:3]
             ind = np.where(w_acoustic >= 0)
         elif limit_frequencies is None:
             ind = np.where(w >= 0)
@@ -123,7 +124,8 @@ class GruneisenParameter(MSONable):
         weights = self.multiplicities
         if weights is None:
             raise ValueError("Multiplicities are not defined.")
-        g = np.dot(weights[ind[0]], np.multiply(cv, gamma)[ind]).sum() / np.dot(weights[ind[0]], cv[ind]).sum()
+        # multiplicities are per q-point, i.e. along the second axis
+        g = np.dot(weights[ind[1]], np.multiply(cv, gamma)[ind]).sum() / np.dot(weights[ind[1]], cv[ind]).sum()
 
         if squared:
             g = np.sqrt(g)

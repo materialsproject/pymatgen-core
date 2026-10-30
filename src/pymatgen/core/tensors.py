@@ -100,7 +100,7 @@ class Tensor(np.ndarray, MSONable):
 
     def __hash__(self) -> int:  # type:ignore[override]
         """Define a hash function, since numpy arrays have their own __eq__ method."""
-        return hash(self.tostring())
+        return hash(self.tobytes())  # ndarray.tostring was removed in NumPy 2.3
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self})"
@@ -446,10 +446,12 @@ class Tensor(np.ndarray, MSONable):
 
         # IEEE rules: a=b in length; c,a || x3, x1
         elif xtal_sys == "tetragonal":
-            rotation = np.array(
-                [vec / mag for (mag, vec) in sorted(zip(lengths, vecs, strict=True), key=lambda x: x[0])]
-            )
-            if abs(lengths[2] - lengths[1]) < abs(lengths[1] - lengths[0]):
+            sorted_lv = sorted(zip(lengths, vecs, strict=True), key=lambda x: x[0])
+            rotation = np.array([vec / mag for (mag, vec) in sorted_lv])
+            # compare the sorted lengths (the rows of rotation): with the unsorted ones the
+            # unique axis was never moved to x3 when c < a
+            sorted_lengths = [mag for mag, _ in sorted_lv]
+            if abs(sorted_lengths[2] - sorted_lengths[1]) < abs(sorted_lengths[1] - sorted_lengths[0]):
                 rotation[0], rotation[2] = rotation[2], rotation[0].copy()
             rotation[1] = get_uvec(np.cross(rotation[2], rotation[0]))
 
@@ -986,7 +988,7 @@ class SquareTensor(Tensor):
             include_improper (bool): whether to include improper
                 rotations in the determination of validity
         """
-        det = np.abs(np.linalg.det(self))
+        det = np.linalg.det(self)
         if include_improper:
             det = np.abs(det)
         return np.allclose(self.inv, self.trans, atol=tol, rtol=0) and np.allclose(det, 1.0, atol=tol, rtol=0)
@@ -1125,6 +1127,8 @@ class TensorMapping(collections.abc.MutableMapping):
 
     def __delitem__(self, key) -> None:
         index = self._get_item_index(key)
+        if index is None:
+            raise KeyError(f"{key} not found in mapping.")
         self._tensor_list.pop(index)
         self._value_list.pop(index)
 

@@ -127,6 +127,20 @@ class TestGrainBoundary(MatSciTest):
         c_coords = sorted_gb.frac_coords[:, 2]
         assert np.all(np.diff(c_coords) <= 1e-8)
 
+    def test_get_sorted_structure_site_properties(self):
+        # Site properties must follow their sites when sorting
+        labels = {tuple(np.round(site.frac_coords, 6)): site.properties["grain_label"] for site in self.Cu_GB1}
+        sorted_gb = self.Cu_GB1.get_sorted_structure(key=lambda site: site.frac_coords[2], reverse=True)
+        for site in sorted_gb:
+            assert site.properties["grain_label"] == labels[tuple(np.round(site.frac_coords, 6))]
+
+    def test_properties_preserved(self):
+        gb = self.Cu_GB1.copy()
+        gb.properties["energy"] = -1.0
+        assert gb.copy().properties == {"energy": -1.0}
+        assert GrainBoundary.from_dict(gb.as_dict()).properties == {"energy": -1.0}
+        assert gb.get_sorted_structure().properties == {"energy": -1.0}
+
     def test_sigma_from_site_prop(self):
         assert self.Cu_GB1.sigma_from_site_prop == 9
         assert self.Cu_GB2.sigma_from_site_prop == 9
@@ -406,6 +420,14 @@ class TestGrainBoundaryGenerator(MatSciTest):
         assert_allclose(generator.initial_structure.lattice.angles, (90, 90, 120))
         assert_allclose(generator.initial_structure.lattice.abc, (3, 3, 5))
 
+    def test_init_does_not_modify_input(self):
+        hex_struct = Structure(Lattice.hexagonal(3, 5), ["Mg"], [[0, 0, 0]])
+        hex_struct.make_supercell([[0, 1, 0], [0, 0, 1], [1, 0, 0]])  # alpha = 120
+        abc = hex_struct.lattice.abc
+        generator = GrainBoundaryGenerator(hex_struct)
+        assert_allclose(generator.initial_structure.lattice.abc, (3, 3, 5))
+        assert hex_struct.lattice.abc == abc
+
     def test_gb_from_parameters_bcc_primitive(self):
         bcc_prim = Structure(Lattice.cubic(2.87), ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]]).get_primitive_structure()
         assert len(bcc_prim) == 1
@@ -485,6 +507,39 @@ class TestGrainBoundaryGenerator(MatSciTest):
         assert gb.join_plane == tuple(axis)
         # A 180 degree twist about a principal axis of an orthorhombic cell is a symmetry operation
         assert gb.sigma == 1
+
+    def test_get_trans_mat_orthorhombic_irrational_twist(self):
+        # The default (twist) plane must not replace the irrational (None) axis ratio by 1:
+        # no CSL exists for an irrational c2 and a [1, 0, 1] rotation axis
+        ratio = [None, 2, 1]
+        with pytest.raises(RuntimeError, match="For irrational c2, CSL only exist"):
+            GrainBoundaryGenerator.get_trans_mat((1, 0, 1), 180.0, lat_type="o", ratio=ratio)
+        assert ratio == [None, 2, 1]
+
+    def test_gb_from_parameters_does_not_modify_ratio(self):
+        ratio = [None, 20, 5]
+        gb = self.GB_Br.gb_from_parameters([0, 0, 1], 180.0, ratio=ratio, expand_times=1)
+        assert gb.gb_plane == (0, 0, 1)
+        assert ratio == [None, 20, 5]
+
+    def test_gb_from_parameters_four_index_rhombohedral_plane(self):
+        # The basal plane (0001) in hexagonal axes is (111) in rhombohedral axes
+        angle = GrainBoundaryGenerator.get_rotation_angle_from_sigma(7, [1, 1, 1], lat_type="r", ratio=[15, 4])[0]
+        kwargs = {"ratio": [15, 4], "expand_times": 1, "max_search": 5}
+        gb_4idx = self.GB_Bi.gb_from_parameters([0, 0, 0, 1], angle, plane=[0, 0, 0, 1], **kwargs)
+        gb_3idx = self.GB_Bi.gb_from_parameters([1, 1, 1], angle, plane=[1, 1, 1], **kwargs)
+        assert gb_4idx.gb_plane == gb_3idx.gb_plane == (1, 1, 1)
+        assert gb_4idx.sigma == gb_3idx.sigma == 7
+        assert len(gb_4idx) == len(gb_3idx)
+
+        t1_4, t2_4 = GrainBoundaryGenerator.get_trans_mat(
+            (0, 0, 0, 1), angle, lat_type="r", ratio=[15, 4], surface=(0, 0, 0, 1)
+        )
+        t1_3, t2_3 = GrainBoundaryGenerator.get_trans_mat(
+            (1, 1, 1), angle, lat_type="r", ratio=[15, 4], surface=(1, 1, 1)
+        )
+        assert_allclose(t1_4, t1_3)
+        assert_allclose(t2_4, t2_3)
 
     @pytest.mark.parametrize(
         ("index_none", "expected"),
@@ -901,3 +956,16 @@ def test_count_layers():
         [[0, 0, 0.1], [0.5, 0.5, 0.1], [0, 0, 0.4], [0, 0, 0.7]],
     )
     assert count_layers(layered, Element("Si")) == 2
+
+    # Sites of other elements come first, so cluster indices must map to the selected sites only
+    reordered = Structure(
+        Lattice.tetragonal(3, 20),
+        ["O", "O", "Ti", "Ti"],
+        [[0, 0, 0.2], [0.5, 0.5, 0.2], [0, 0, 0.1], [0, 0, 0.4]],
+    )
+    assert count_layers(reordered, Element("Ti")) == 2
+
+    # An element matches its oxidation-state decorated species
+    reordered.add_oxidation_state_by_element({"O": -2, "Ti": 4})
+    assert count_layers(reordered, Element("Ti")) == 2
+    assert count_layers(reordered, reordered.species[2]) == 2

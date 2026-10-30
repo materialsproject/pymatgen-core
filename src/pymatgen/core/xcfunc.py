@@ -230,7 +230,12 @@ class XcFunc(MSONable):
     @classmethod
     def from_dict(cls, dct: dict) -> Self:
         """Deserialize from MSONable dict representation."""
-        return cls(xc=dct.get("xc"), x=dct.get("x"), c=dct.get("c"))
+        # as_dict stores each LibxcFunc as a dict, so decode those back to LibxcFunc
+
+        def decode(val):
+            return LibxcFunc.from_dict(val) if isinstance(val, dict) else val
+
+        return cls(xc=decode(dct.get("xc")), x=decode(dct.get("x")), c=decode(dct.get("c")))
 
     @lazy_property
     def type(self) -> str | None:

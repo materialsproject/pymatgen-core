@@ -221,7 +221,8 @@ class Dos(MSONable):
             raise ValueError("Energies of both DOS are not compatible!")
 
         densities = {spin: self.densities[spin] + other.densities[spin] for spin in self.densities}
-        return type(self)(self.efermi, self.energies, densities)
+        # Subclasses (CompleteDos, FermiDos) have incompatible constructors, so always return a plain Dos
+        return Dos(self.efermi, self.energies, densities)
 
     def __str__(self) -> str:
         """A string which can be easily plotted."""
@@ -621,7 +622,8 @@ class FermiDos(Dos, MSONable):
             f_new = self.get_fermi_interextrapolated(concentration / 10.0, temperature, warn=False, **kwargs)
             clog = np.sign(concentration) * np.log(abs(concentration))
             c_new_log = np.sign(concentration) * np.log(abs(self.get_doping(f_new, temperature)))
-            slope = (f_new - f_ref) / (c_new_log - np.sign(concentration) * 10.0)
+            # natural log of the reference concentration, consistent with clog and c_new_log
+            slope = (f_new - f_ref) / (c_new_log - np.sign(concentration) * np.log(c_ref))
             return f_new + slope * (clog - c_new_log)
 
     @classmethod
@@ -642,7 +644,7 @@ class FermiDos(Dos, MSONable):
             "efermi": self.efermi,
             "energies": self.energies.tolist(),
             "densities": {str(spin): dens.tolist() for spin, dens in self.densities.items()},
-            "structure": self.structure,
+            "structure": self.structure.as_dict(),
             "nelecs": self.nelecs,
         }
 

@@ -283,7 +283,8 @@ class ElementBase(Enum):
         return self.symbol < other.symbol
 
     def __deepcopy__(self, memo) -> Element:
-        return Element(self.symbol)
+        # name, not symbol: a named isotope such as D has symbol "H"
+        return Element(self.name)
 
     @cached_property
     def X(self) -> float:
@@ -834,7 +835,7 @@ class ElementBase(Enum):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "element": self.symbol,
+            "element": self.name,  # not symbol, which is "H" for D and T
         }
 
     @staticmethod
@@ -1095,9 +1096,12 @@ class Species(MSONable, Stringify):
             # There are cases where the Pauling electronegativity are exactly equal.
             # We then sort by symbol.
             return self.symbol < other.symbol
-        if self.oxi_state:
-            other_oxi = 0 if (isinstance(other, Element) or other.oxi_state is None) else other.oxi_state
-            return self.oxi_state < other_oxi
+        # a None oxidation state sorts as 0 (as it did before), but both sides must be
+        # checked: testing only self.oxi_state made Fe0+ and Fe2+ mutually not-less-than
+        self_oxi = self.oxi_state or 0
+        other_oxi = other.oxi_state or 0
+        if self_oxi != other_oxi:
+            return self_oxi < other_oxi
         if self.spin is not None:
             return self.spin < other.spin if other.spin is not None else False
 
@@ -1122,7 +1126,7 @@ class Species(MSONable, Stringify):
         return output
 
     def __deepcopy__(self, memo) -> Self:
-        return type(self)(self.symbol, self.oxi_state, spin=self._spin)
+        return type(self)(self._el.name, self.oxi_state, spin=self._spin)
 
     @property
     def element(self) -> Element:
@@ -1275,6 +1279,8 @@ class Species(MSONable, Stringify):
             properties = {}
             if match[4]:  # has Spin properties
                 tokens = match[4].replace(",", "").split("=")
+                if len(tokens) != 2:  # e.g. "Fe2+!": raise ValueError, not IndexError
+                    raise ValueError(f"Invalid species string {species_string!r}")
                 properties = {tokens[0]: ast.literal_eval(tokens[1])}
 
             # But we need either an oxidation state or a property
@@ -1414,7 +1420,7 @@ class Species(MSONable, Stringify):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "element": self.symbol,
+            "element": self._el.name,  # not symbol, which is "H" for D and T
             "oxidation_state": self._oxi_state,
             "spin": self._spin,
         }
@@ -1516,7 +1522,7 @@ class DummySpecies(Species):
         return output
 
     def __deepcopy__(self, memo) -> Self:
-        return type(self)(self.symbol, self._oxi_state)
+        return type(self)(self.symbol, self._oxi_state, spin=self._spin)
 
     @property
     def Z(self) -> int:
@@ -1580,7 +1586,8 @@ class DummySpecies(Species):
                 oxi = -oxi if match[3] == "-" else oxi
             properties = {}
             if match[4]:  # has Spin property
-                tokens = match[4].split("=")
+                # str() writes e.g. "X2+,spin=5": drop the comma as Species.from_str does
+                tokens = match[4].replace(",", "").split("=")
                 properties = {tokens[0]: float(tokens[1])}
             return cls(sym, oxi, **properties)
         raise ValueError("Invalid DummySpecies String")

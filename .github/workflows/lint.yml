@@ -15,6 +15,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          # setuptools-scm needs the vYYYY.M.D tags to version the project; a tagless shallow
+          # clone gives 0.1.devN, which cannot satisfy matgl's pymatgen-core>=2026.x requirement.
+          fetch-depth: 0
 
       - name: Install uv with python version.
         uses: astral-sh/setup-uv@v8.1.0

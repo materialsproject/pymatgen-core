@@ -216,7 +216,8 @@ class MultipleSubstitutionTransformation:
         outputs = []
         for charge, el_list in self.substitution_dict.items():
             sign = "+" if charge > 0 else "-"
-            dummy_sp = f"X{charge}{sign}"
+            # use the magnitude of the charge so that negative charges give e.g. "X2-", not "X-2-"
+            dummy_sp = f"X{abs(charge)}{sign}"
             mapping = {
                 self.sp_to_replace: {
                     self.sp_to_replace: 1 - self.r_fraction,
@@ -232,8 +233,7 @@ class MultipleSubstitutionTransformation:
                 dummy_structure = OrderDisorderedStructureTransformation().apply_transformation(dummy_structure)  # type:ignore[assignment]
 
             for el in el_list:
-                sign = "+" if charge > 0 else "-"
-                st = SubstitutionTransformation({f"X{charge}+": f"{el}{charge}{sign}"})
+                st = SubstitutionTransformation({dummy_sp: f"{el}{abs(charge)}{sign}"})
                 new_structure = st.apply_transformation(dummy_structure)
                 outputs.append({"structure": new_structure})
         return outputs
@@ -302,8 +302,8 @@ class EnumerateStructureTransformation(AbstractTransformation):
                 this parameter.
             sort_criteria (str or callable): Sort by Ewald energy ("ewald", must have oxidation states and slow) or
                 M3GNet relaxed energy ("m3gnet_relax", which is the most accurate but most expensive and provides
-                pre-relaxed structures - needs m3gnet package installed) or by M3GNet static energy ("m3gnet_static")
-                or by number of sites ("nsites", the fastest, the default). The expense of m3gnet_relax or m3gnet_static
+                pre-relaxed structures - needs matgl installed) or by M3GNet static energy ("m3gnet")
+                or by number of sites ("nsites", the fastest, the default). The expense of m3gnet_relax or m3gnet
                 can be worth it if it significantly reduces the number of structures to be considered. m3gnet_relax
                 speeds up the subsequent DFT calculations. Alternatively, a callable can be supplied that returns a
                 (Structure, energy) tuple.
@@ -370,11 +370,14 @@ class EnumerateStructureTransformation(AbstractTransformation):
             )
             structures = [structure.copy()]
 
-        if self.max_disordered_sites:
+        if structures is not None:
+            # ordered structure: nothing to enumerate
+            max_cell_sizes: Iterable[int] = []
+        elif self.max_disordered_sites:
             n_disordered = sum(1 for site in structure if not site.is_ordered)
             if n_disordered > self.max_disordered_sites:
                 raise ValueError(f"Too many disordered sites! ({n_disordered} > {self.max_disordered_sites})")
-            max_cell_sizes: Iterable[int] = range(
+            max_cell_sizes = range(
                 self.min_cell_size,
                 math.floor(self.max_disordered_sites / n_disordered) + 1,
             )
@@ -413,11 +416,11 @@ class EnumerateStructureTransformation(AbstractTransformation):
             from matgl.ext.ase import M3GNetCalculator, Relaxer
 
             if self.sort_criteria == "m3gnet_relax":
-                potential = matgl.load_model("M3GNet-MP-2021.2.8-PES")
+                potential = matgl.load_model("M3GNet-PES-MatPES-r2SCAN-2025.2")
                 m3gnet_model = Relaxer(potential=potential)
             elif self.sort_criteria == "m3gnet":
-                potential = matgl.load_model("M3GNet-MP-2021.2.8-PES")
-                m3gnet_model = M3GNetCalculator(potential=potential, stress_weight=0.01)
+                potential = matgl.load_model("M3GNet-PES-MatPES-r2SCAN-2025.2")
+                m3gnet_model = M3GNetCalculator(potential=potential, stress_weight=1 / 160.21766208)
 
         def _get_stats(struct):
             if callable(self.sort_criteria):
@@ -457,7 +460,9 @@ class EnumerateStructureTransformation(AbstractTransformation):
 
             return {"num_sites": len(struct), "structure": struct}
 
-        all_structures = Parallel(n_jobs=self.n_jobs)(delayed(_get_stats)(struct) for struct in structures)
+        # A worker pool for a single structure (e.g. ordered input) is pure overhead
+        n_jobs = self.n_jobs if len(structures) > 1 else 1
+        all_structures = Parallel(n_jobs=n_jobs)(delayed(_get_stats)(struct) for struct in structures)
 
         def sort_func(struct):
             return (

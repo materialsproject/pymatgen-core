@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pytest import approx
 
+from pymatgen.io.feff.inputs import Tags
 from pymatgen.io.feff.outputs import LDos, Xmu
 from pymatgen.util.testing import TEST_FILES_DIR
 
@@ -65,3 +66,6 @@ class TestXmu:
         x2 = Xmu.from_dict(dct)
         data2 = x2.data.tolist()
         assert data == data2, "Xmu to and from dict does not match"
+        assert isinstance(x2.parameters, Tags)
+        assert x2.parameters == x.parameters
+        assert x2.edge == x.edge

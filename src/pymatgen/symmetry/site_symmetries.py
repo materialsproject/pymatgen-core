@@ -30,15 +30,12 @@ def get_site_symmetries(struct: Structure, precision: float = 0.1) -> list[list[
     for idx1 in range(len(struct)):
         temp_struct = struct.copy()
 
-        # Place the origin of the cell at each atomic site
+        # Place the origin of the cell at each atomic site. Translating (rather than rebuilding the
+        # sites) keeps site properties such as magmom, which SpacegroupAnalyzer uses.
         point_ops.append([])
-
-        for idx2, site2 in enumerate(struct):
-            temp_struct.replace(
-                idx2,
-                site2.specie,
-                temp_struct.frac_coords[idx2] - struct.frac_coords[idx1],
-            )
+        temp_struct.translate_sites(
+            list(range(len(temp_struct))), -struct.frac_coords[idx1], frac_coords=True, to_unit_cell=False
+        )
 
         sga_struct = SpacegroupAnalyzer(temp_struct, symprec=precision)
         ops = sga_struct.get_symmetry_operations(cartesian=True)

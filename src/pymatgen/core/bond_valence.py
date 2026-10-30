@@ -243,6 +243,10 @@ class BVAnalyzer:
                 prob = self._calc_site_probabilities(test_site, nn)
                 all_prob.append(prob)
                 val = list(prob)
+                if not val or max(prob.values()) <= 0:
+                    raise ValueError(
+                        f"Valences cannot be assigned! No probable oxidation state for {test_site.species_string}."
+                    )
                 # Sort valences in order of decreasing probability.
                 val = sorted(val, key=lambda v: -prob[v])
                 # Retain probabilities that are at least 1/100 of highest prob.
@@ -258,6 +262,8 @@ class BVAnalyzer:
                 vals = []
                 for elem, _ in get_z_ordered_elmap(test_site.species):
                     val = list(prob[elem.symbol])
+                    if not val or max(prob[elem.symbol].values()) <= 0:
+                        raise ValueError(f"Valences cannot be assigned! No probable oxidation state for {elem.symbol}.")
                     # Sort valences in order of decreasing probability.
                     val = sorted(val, key=lambda v: -prob[elem.symbol][v])
                     # Retain probabilities that are at least 1/100 of highest prob.

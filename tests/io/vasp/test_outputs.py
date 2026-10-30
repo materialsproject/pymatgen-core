@@ -421,6 +421,10 @@ class TestVasprun(MatSciTest):
     def test_uniform(self):
         vasprun_uniform = Vasprun(f"{VASP_OUT_DIR}/vasprun.uniform.xml.gz", parse_potcar_file=False)
         assert vasprun_uniform.kpoints.style == Kpoints.supported_modes.Reciprocal
+        # Explicit k-points: num_kpts must match the k-point list so the KPOINTS round-trips
+        kpoints = vasprun_uniform.kpoints
+        assert kpoints.num_kpts == len(kpoints.kpts) == len(vasprun_uniform.actual_kpoints) == 220
+        assert len(Kpoints.from_str(str(kpoints)).kpts) == 220
 
     def test_no_projected(self):
         vasprun_no_pdos = Vasprun(f"{VASP_OUT_DIR}/vasprun_Li_no_projected.xml.gz", parse_potcar_file=False)
@@ -884,6 +888,17 @@ class TestVasprun(MatSciTest):
             # Since the fake POTCARs modify the TITEL (to indicate fakeness), can't compare
             for ipot in range(len(potcar)):
                 assert vrun.potcar_spec[ipot]["summary_stats"] == potcar[ipot]._summary_stats
+
+    def test_parse_potcar_with_ionic_step_skip(self):
+        # POTCAR spec and structure charge must also be set when skipping ionic steps
+        copyfile(f"{VASP_OUT_DIR}/vasprun.charged.xml.gz", "vasprun.xml.gz")
+        copyfile(f"{FAKE_POTCAR_DIR}/POT_GGA_PAW_PBE/POTCAR.Si.gz", "POTCAR.gz")
+        potcar = Potcar.from_file("POTCAR.gz")
+
+        vrun = Vasprun("vasprun.xml.gz", ionic_step_skip=2, ionic_step_offset=1, parse_potcar_file=True)
+        assert vrun.potcar_spec[0]["summary_stats"] == potcar[0]._summary_stats
+        assert vrun.final_structure.charge == -1
+        assert all(struct.charge == -1 for struct in vrun.structures)
 
 
 class TestOutcar:
@@ -1533,6 +1548,21 @@ class TestOutcar:
         with pytest.warns(UserWarning, match="Table in .* is truncated"):
             outcar = Outcar(f"{VASP_OUT_DIR}/OUTCAR.truncated.gz")
         assert outcar.data["nplwvs_at_kpoints"] == []
+
+    def test_running_outcar_reports_last_values(self, tmp_path):
+        # An OUTCAR of a running/killed job has no final timing block. efermi, nelect
+        # and total_mag must still come from the last ionic step, not the first one.
+        with zopen(f"{VASP_OUT_DIR}/OUTCAR.gz", mode="rt", encoding="utf-8") as file:
+            text = file.read()
+        (tmp_path / "OUTCAR").write_text(text[: text.index("General timing and accounting")], encoding="utf-8")
+
+        full = Outcar(f"{VASP_OUT_DIR}/OUTCAR.gz")
+        running = Outcar(tmp_path / "OUTCAR")
+        assert full.efermi == approx(2.0112)
+        assert running.efermi == approx(full.efermi)
+        assert running.total_mag == approx(full.total_mag)
+        assert running.nelect == approx(full.nelect)
+        assert running.final_energy == approx(full.final_energy)
 
 
 class TestBSVasprun(MatSciTest):
@@ -3716,6 +3746,14 @@ class TestVasprunEdgeCases(MatSciTest):
         vasprun.potcar_symbols = ["PAW Cu 22Jun2005"]
         vasprun.incar["IVDW"] = 99
         assert vasprun.run_type == "LDA+vdW-unknown"
+
+    def test_run_type_dft_d4(self):
+        # IVDW = 13 is DFT-D4 (e.g. MP24RelaxSet with dispersion="D4")
+        vasprun = self.vasprun
+        vasprun.parameters.update({"GGA": "", "LUSE_VDW": False})
+        vasprun.potcar_symbols = ["PAW Cu 22Jun2005"]
+        vasprun.incar["IVDW"] = 13
+        assert vasprun.run_type == "LDA+vdW-DFT-D4"
 
     def test_hubbards(self):
         vasprun = self.vasprun

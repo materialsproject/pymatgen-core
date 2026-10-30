@@ -12,6 +12,7 @@ DOI: 10.1002/cplu.202200123.
 
 from __future__ import annotations
 
+import copy
 import re
 import sys
 import warnings
@@ -410,6 +411,7 @@ class CompleteCohp(Cohp):
             cohp=final_cohp,
             are_coops=self.are_coops,
             are_cobis=self.are_cobis,
+            are_multi_center_cobis=self.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -469,7 +471,8 @@ class CompleteCohp(Cohp):
             energies=first_cohpobject.energies,
             cohp=final_cohp,
             are_coops=first_cohpobject.are_coops,
-            are_cobis=first_cohpobject.are_coops,
+            are_cobis=first_cohpobject.are_cobis,
+            are_multi_center_cobis=first_cohpobject.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -538,6 +541,7 @@ class CompleteCohp(Cohp):
             cohp=final_cohp,
             are_coops=first_cohpobject.are_coops,
             are_cobis=first_cohpobject.are_cobis,
+            are_multi_center_cobis=first_cohpobject.are_multi_center_cobis,
             icohp=final_icohp,
         )
 
@@ -612,6 +616,7 @@ class CompleteCohp(Cohp):
             icohp=final_icohp,
             are_coops=self.are_coops,
             are_cobis=self.are_cobis,
+            are_multi_center_cobis=self.are_multi_center_cobis,
         )
 
     @classmethod
@@ -642,6 +647,8 @@ class CompleteCohp(Cohp):
             bonds = None
 
         for label in dct["COHP"]:
+            if dct["COHP"][label] is None:
+                continue  # rebuilt from the orbital-resolved COHPs below
             cohp = {Spin(int(spin)): np.array(dct["COHP"][label][spin]) for spin in dct["COHP"][label]}
             try:
                 icohp = {Spin(int(spin)): np.array(dct["ICOHP"][label][spin]) for spin in dct["ICOHP"][label]}
@@ -691,7 +698,8 @@ class CompleteCohp(Cohp):
                 # COHPs from the single-orbital populations.
                 # Total COHPs may not be present when the COHP generator keyword
                 # is used in LOBSTER versions 2.2.0 and earlier.
-                if label not in dct["COHP"] or dct["COHP"][label] is None:
+                total_cohp = cohp_dict.get(label)
+                if total_cohp is None:
                     cohp = {
                         Spin.up: np.sum(
                             np.array([orb_cohp[label][orb]["COHP"][Spin.up] for orb in orb_cohp[label]]),
@@ -705,9 +713,10 @@ class CompleteCohp(Cohp):
                         )
                     except KeyError:
                         pass
+                    total_cohp = cohp_dict[label] = Cohp(efermi, energies, cohp)
 
-                orb_res_icohp = None in [orb_cohp[label][orb]["ICOHP"] for orb in orb_cohp[label]]
-                if (label not in dct["ICOHP"] or dct["ICOHP"][label] is None) and orb_res_icohp:
+                has_orb_res_icohp = None not in [orb_cohp[label][orb]["ICOHP"] for orb in orb_cohp[label]]
+                if total_cohp.icohp is None and has_orb_res_icohp:
                     icohp = {
                         Spin.up: np.sum(
                             np.array([orb_cohp[label][orb]["ICOHP"][Spin.up] for orb in orb_cohp[label]]),
@@ -721,6 +730,7 @@ class CompleteCohp(Cohp):
                         )
                     except KeyError:
                         pass
+                    total_cohp.icohp = icohp
         else:
             orb_cohp = {}
 
@@ -932,6 +942,7 @@ class CompleteCohp(Cohp):
             bonds=bond_dict,
             are_coops=are_coops,
             are_cobis=are_cobis,
+            are_multi_center_cobis=are_multi_center_cobis,
             orb_res_cohp=orb_res_cohp,
         )
 
@@ -1334,11 +1345,11 @@ class IcohpCollection(MSONable):
             atomnumber1 = int(re.split(r"(\d+)", value._atom1)[1]) - 1
             atomnumber2 = int(re.split(r"(\d+)", value._atom2)[1]) - 1
             if site in (atomnumber1, atomnumber2):
-                # Swap order of atoms so that searched one is always atom1
+                # Swap order of atoms so that searched one is always atom1.
+                # Swap on a shallow copy so the stored IcohpValue is not mutated.
                 if site == atomnumber2:
-                    save = value._atom1
-                    value._atom1 = value._atom2
-                    value._atom2 = save
+                    value = copy.copy(value)
+                    value._atom1, value._atom2 = value._atom2, value._atom1
 
                 second_test = True if only_bonds_to is None else re.split("(\\d+)", value._atom2)[0] in only_bonds_to
                 if minbondlength <= value._length <= maxbondlength and second_test:
@@ -1426,7 +1437,9 @@ class IcohpCollection(MSONable):
             "list_num": self._list_num,
             "list_icohp": [{str(spin): value for spin, value in icohp.items()} for icohp in self._list_icohp],
             "is_spin_polarized": self._is_spin_polarized,
-            "list_orb_icohp": [
+            "list_orb_icohp": None
+            if self._list_orb_icohp is None
+            else [
                 {
                     key: {
                         "icohp": {str(spin): value for spin, value in val["icohp"].items()},
@@ -1456,8 +1469,11 @@ class IcohpCollection(MSONable):
                 new_icohp_dict[spin_enum] = value
             list_icohp.append(new_icohp_dict)
 
-        new_list_orb = [{orb_label: {} for orb_label in bond} for bond in dct["list_orb_icohp"]]  # type:ignore[var-annotated]
-        for bond_num, lab_orb_icohp in enumerate(dct["list_orb_icohp"]):
+        list_orb_icohp = dct.get("list_orb_icohp")
+        new_list_orb: list[dict[str, dict]] | None = (
+            None if list_orb_icohp is None else [{orb_label: {} for orb_label in bond} for bond in list_orb_icohp]
+        )
+        for bond_num, lab_orb_icohp in enumerate(list_orb_icohp or []):
             for orb in lab_orb_icohp:
                 for key in lab_orb_icohp[orb]:
                     sub_dict = {}
@@ -1476,18 +1492,17 @@ class IcohpCollection(MSONable):
                         for item in lab_orb_icohp[orb][key]:
                             # Handle LCFO orbitals
                             if isinstance(item, (list, tuple)):
-                                item[1] = Orbital(item[1])
-                                orb_temp.append(tuple(item))
+                                # build a new tuple rather than assigning into the input dict's list
+                                orb_temp.append((item[0], Orbital(item[1]), *item[2:]))
                             else:
                                 orb_temp.append(item)
                         sub_dict[key] = orb_temp  # type: ignore[assignment]
 
-                    new_list_orb[bond_num][orb].update(sub_dict)
-
-        dct["list_icohp"] = list_icohp
-        dct["list_orb_icohp"] = new_list_orb
+                    new_list_orb[bond_num][orb].update(sub_dict)  # type:ignore[index]
 
         init_dict = {k: v for k, v in dct.items() if "@" not in k}
+        init_dict["list_icohp"] = list_icohp
+        init_dict["list_orb_icohp"] = new_list_orb
 
         return cls(**init_dict)
 

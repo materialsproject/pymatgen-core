@@ -195,3 +195,20 @@ class TestMoleculeStructureComparator:
             (6, 8),
             (6, 10),
         )
+
+
+def test_as_dict_round_trip_keeps_all_settings():
+    msc = MoleculeStructureComparator(ignore_ionic_bond=False, bond_13_cap=0.2, priority_bonds=[(0, 1)])
+    msc2 = MoleculeStructureComparator.from_dict(msc.as_dict())
+    assert msc2.ignore_ionic_bond is False
+    assert msc2.bond_13_cap == 0.2
+    assert msc2.as_dict() == msc.as_dict()
+
+
+def test_get_bonds_oxidation_state_decorated_molecule():
+    water = Molecule(["O", "H", "H"], [[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]])
+    msc = MoleculeStructureComparator()
+    bonds = msc._get_bonds(water)
+    water.add_oxidation_state_by_element({"O": -2, "H": 1})
+    # used to raise "The covalent radius for element {'O2-', 'H+'} is not available"
+    assert msc._get_bonds(water) == bonds == [(0, 1), (0, 2)]

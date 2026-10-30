@@ -1161,8 +1161,13 @@ class HungarianOrderMatcher(KabschMatcher):
             return np.eye(3)
 
         if np.allclose(v1, -v2):
-            # opposite direction: return a rotation of pi around the y-axis
-            return np.array([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+            # opposite direction: return a rotation of pi around an axis perpendicular to v1
+            # (a fixed rotation around the y-axis only inverts vectors in the xz-plane)
+            perp = np.cross(v1, [1.0, 0.0, 0.0])
+            if np.linalg.norm(perp) < 1e-8 * np.linalg.norm(v1):
+                perp = np.cross(v1, [0.0, 1.0, 0.0])
+            perp /= np.linalg.norm(perp)
+            return 2 * np.outer(perp, perp) - np.eye(3)
 
         v = np.cross(v1, v2)
         norm = np.linalg.norm(v)
@@ -1279,7 +1284,8 @@ class GeneticOrderMatcher(KabschMatcher):
 
         # starting matches (only based on element)
         partial_matches = [[j] for j in range(self.N) if p_atoms[j] == q_atoms[0]]
-        matches: list = []
+        # a single-atom molecule is fully matched by the starting matches
+        matches: list = partial_matches
 
         for idx in range(1, self.N):
             # extending the target fragment with then next atom

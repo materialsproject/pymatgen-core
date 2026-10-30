@@ -8,7 +8,7 @@ import pytest
 from pytest import approx
 
 from pymatgen.analysis.reaction_calculator import BalancedReaction, ComputedReaction, Reaction, ReactionError
-from pymatgen.core.composition import Composition
+from pymatgen.core.composition import Composition, Element
 from pymatgen.core.entries import ComputedEntry
 
 
@@ -334,6 +334,32 @@ class TestBalancedReaction:
         )
 
         assert "Na" not in rxn.all_comp
+
+    def test_elements(self):
+        rxn = BalancedReaction({"Li": 4, "O2": 1, "Na": 1}, {"Li2O": 2, "Na": 1})
+        # spectator Na is not part of the net reaction
+        assert rxn.elements == [Element("Li"), Element("O")]
+
+    def test_equals_symmetric(self):
+        rxn = BalancedReaction({"Li": 4, "O2": 1}, {"Li2O": 2})
+        # same Li/O2/Li2O coefficients plus an extra (non-cancelling) FeO -> Fe2O2 pair
+        rxn_extra = BalancedReaction({"Li": 4, "O2": 1, "FeO": 2}, {"Li2O": 2, "Fe2O2": 1})
+        assert rxn != rxn_extra
+        assert rxn_extra != rxn
+
+    def test_hash(self):
+        rxn = BalancedReaction({"Li": 4, "O2": 1}, {"Li2O": 2})
+        # equal reactions (spectator species do not count) must have equal hashes
+        rxn_spectator = BalancedReaction({"Li": 4, "O2": 1, "Na": 1}, {"Li2O": 2, "Na": 1})
+        assert rxn == rxn_spectator
+        assert hash(rxn) == hash(rxn_spectator)
+
+        # Reaction does not call BalancedReaction.__init__ and used to raise AttributeError
+        rxn1 = Reaction([Composition("Li"), Composition("O2")], [Composition("Li2O")])
+        rxn2 = Reaction([Composition("O2"), Composition("Li")], [Composition("Li2O")])
+        assert rxn1 == rxn2
+        assert hash(rxn1) == hash(rxn2)
+        assert len({rxn1, rxn2}) == 1
 
 
 class TestComputedReaction:

@@ -541,6 +541,91 @@ CELL_PARAMETERS angstrom
         pw_str = str(pw)
         assert pw_str.strip() == str(PWInput.from_str(pw_str)).strip()
 
+    SI_INPUT = """&CONTROL
+  calculation = 'scf',
+/
+&SYSTEM
+  ecutwfc = 30,
+  {system}
+/
+&ELECTRONS
+/
+&IONS
+/
+&CELL
+/
+ATOMIC_SPECIES
+  Si  28.0855 Si.pbe-n-kjpaw_psl.1.0.0.UPF
+ATOMIC_POSITIONS {pos_unit}
+  Si {pos0}
+  Si {pos1}
+K_POINTS {kpts_mode}
+  4 4 4 1 1 1
+CELL_PARAMETERS {cell_unit}
+  {a} 0.0 {a}
+  0.0 {a} {a}
+  {a} {a} 0.0
+"""
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param({}, id="angstrom"),
+            # Bracketed card options used to be compared verbatim, so Cartesian positions were
+            # read as fractional and K_POINTS {automatic} lost its grid on writing
+            pytest.param(
+                {"pos_unit": "(angstrom)", "cell_unit": "{angstrom}", "kpts_mode": "{automatic}"}, id="brackets"
+            ),
+            # bohr/alat units used to be ignored (lattice) or read as fractional (positions)
+            pytest.param({"cell_unit": "bohr", "a": "5.130603"}, id="bohr-cell"),
+            pytest.param({"pos_unit": "bohr", "pos1": "2.565302 2.565302 2.565302"}, id="bohr-positions"),
+            pytest.param(
+                {"system": "celldm(1) = 10.261206,", "cell_unit": "alat", "a": "0.5", "pos_unit": "alat"}
+                | {"pos1": "0.25 0.25 0.25"},
+                id="alat-celldm",
+            ),
+            pytest.param({"system": "A = 5.43,", "cell_unit": "alat", "a": "0.5"}, id="alat-A"),
+            # Indexed namelist variables used to add an empty site property -> IndexError
+            pytest.param({"system": "starting_magnetization(1) = 0.5,"}, id="indexed-key"),
+            # Integer / Fortran-exponent coordinates used to be dropped or crash
+            pytest.param({"pos0": "0 0 0"}, id="int-coords"),
+            pytest.param({"pos0": "0.0d0 0.0E+00 0"}, id="exp-coords"),
+        ],
+    )
+    def test_read_str_units_and_formats(self, params):
+        fields = {
+            "system": "nbnd = 8,",
+            "pos_unit": "angstrom",
+            "pos0": "0.0 0.0 0.0",
+            "pos1": "1.3575 1.3575 1.3575",
+            "kpts_mode": "automatic",
+            "cell_unit": "angstrom",
+            "a": "2.715",
+        }
+        pw_in = PWInput.from_str(self.SI_INPUT.format(**(fields | params)))
+        struct = pw_in.structure
+
+        assert_allclose(struct.lattice.matrix, [[2.715, 0, 2.715], [0, 2.715, 2.715], [2.715, 2.715, 0]], atol=1e-5)
+        assert_allclose(struct.cart_coords, [[0, 0, 0], [1.3575, 1.3575, 1.3575]], atol=1e-5)
+        assert pw_in.kpoints_mode == "automatic"
+        assert pw_in.kpoints_grid == (4, 4, 4)
+        assert pw_in.kpoints_shift == (1, 1, 1)
+        assert "K_POINTS automatic\n  4 4 4 1 1 1" in str(pw_in)
+
+    def test_read_str_indexed_key(self):
+        string = self.SI_INPUT.format(
+            system="starting_magnetization(1) = 0.5,",
+            pos_unit="crystal",
+            pos0="0.0 0.0 0.0",
+            pos1="0.25 0.25 0.25",
+            kpts_mode="automatic",
+            cell_unit="angstrom",
+            a="2.715",
+        )
+        pw_in = PWInput.from_str(string)
+        assert pw_in.sections["system"]["starting_magnetization"][0] == approx(0.5)
+        assert "starting_magnetization(1) = 0.5" in str(pw_in)
+
 
 class TestPWOutput(MatSciTest):
     def setup_method(self):

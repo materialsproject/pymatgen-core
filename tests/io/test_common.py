@@ -26,6 +26,19 @@ def test_cube_io_faithful(tmp_path: Path) -> None:
     assert cube_file.structure == out_cube.structure
 
 
+def test_to_cube_oxidation_states(tmp_path: Path) -> None:
+    # to_cube used to call Element(site.species_string), failing on e.g. "Na+"
+    struct = Structure(Lattice.cubic(3), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    struct.add_oxidation_state_by_element({"Na": 1, "Cl": -1})
+    vol_data = VolumetricData(struct, {"total": np.arange(64, dtype=float).reshape(4, 4, 4)})
+    out_path = f"{tmp_path}/oxi.cube"
+    vol_data.to_cube(out_path)
+
+    cube = VolumetricData.from_cube(out_path)
+    assert [site.specie.symbol for site in cube.structure] == ["Na", "Cl"]
+    np.testing.assert_allclose(cube.data["total"], vol_data.data["total"])
+
+
 def test_cube_nonzero_origin() -> None:
     """Regression test for gh-4607: from_cube must account for the grid origin on line 3."""
     vd = VolumetricData.from_cube(f"{TEST_FILES_DIR}/electronic_structure/boltztrap/fermi/boltztrap_BZ.cube")

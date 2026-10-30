@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 from glob import glob
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import numpy as np
@@ -52,6 +53,7 @@ from pymatgen.io.vasp.sets import (
     NEBSet,
     VaspInputGenerator,
     VaspInputSet,
+    _get_ispin,
     batch_write_input,
     get_structure_from_prev_run,
     get_valid_magmom_struct,
@@ -519,6 +521,25 @@ class TestMITMPRelaxSet(MatSciTest):
             mp_set = set_cls(struct, user_incar_settings=None, user_kpoints_settings=None)
             assert mp_set.kpoints is not None
             assert mp_set.incar is not None
+
+    def test_user_magmom_zero_overrides_site_magmom(self):
+        # A user-specified magmom of 0 must take precedence over site magmoms, like any other value
+        lattice = [[3.84, 0, 0], [1.92, 3.33, 0], [0, -2.22, 3.14]]
+        coords = [[0, 0, 0], [0.75, 0.5, 0.75]]
+        struct = Structure(lattice, ["Fe", "Mn"], coords, site_properties={"magmom": (5.2, -4.5)})
+        user_set = MPRelaxSet(struct, user_incar_settings={"MAGMOM": {"Fe": 0, "Mn": 3}})
+        # Sorted by electronegativity: Mn, Fe
+        assert_allclose(user_set.incar["MAGMOM"], [3, 0])
+
+    def test_ediff_per_atom_not_written_to_incar(self):
+        # EDIFF_PER_ATOM is a pymatgen config key and must never end up as an INCAR tag
+        user_set = MPScanRelaxSet(self.structure, user_incar_settings={"EDIFF_PER_ATOM": 1e-6})
+        assert "EDIFF_PER_ATOM" not in user_set.incar
+        assert user_set.incar["EDIFF"] == approx(1e-5)
+
+        user_set = MPRelaxSet(self.structure, user_incar_settings={"EDIFF_PER_ATOM": 1e-6})
+        assert "EDIFF_PER_ATOM" not in user_set.incar
+        assert user_set.incar["EDIFF"] == approx(1e-6 * len(self.structure))
 
     def test_get_kpoints(self):
         kpoints = MPRelaxSet(self.structure).kpoints
@@ -1235,6 +1256,7 @@ class TestMITMDSet(MatSciTest):
         incar = param.incar
         assert "LDAUU" not in incar
         assert incar["EDIFF"] == approx(1e-5)
+        assert "EDIFF_PER_ATOM" not in incar
         assert incar["ALGO"] == "Fast"
         assert incar["ISMEAR"] == 0
         assert incar["IBRION"] == 0
@@ -2222,6 +2244,18 @@ class TestMPAbsorptionSet(MatSciTest):
 
 def test_vasp_input_set_alias():
     assert VaspInputSet is VaspInputGenerator
+
+
+def test_get_ispin_falls_back_to_vasprun():
+    # Outcar.magnetization is an empty tuple when no site moments are printed (e.g. no LORBIT)
+    outcar_no_mag = SimpleNamespace(magnetization=())
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_no_mag) == 2
+    assert _get_ispin(SimpleNamespace(is_spin=False), outcar_no_mag) == 1
+
+    outcar_mag = SimpleNamespace(magnetization=({"tot": 0.001}, {"tot": 0.5}))
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_mag) == 2
+    outcar_mag = SimpleNamespace(magnetization=({"tot": 0.001}, {"tot": -0.01}))
+    assert _get_ispin(SimpleNamespace(is_spin=True), outcar_mag) == 1
 
 
 class TestMP24Sets:

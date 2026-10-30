@@ -390,6 +390,14 @@ class Atoms(MSONable):
         self._cluster = self._set_cluster()
         self.pot_dict = get_atom_map(self._cluster, self.absorbing_atom)
 
+    def as_dict(self) -> dict:
+        """MSONable dict. The absorbing atom is stored by site index so that
+        from_dict reproduces the same (possibly inequivalent) absorbing site.
+        """
+        dct = super().as_dict()
+        dct["absorbing_atom"] = self.center_index
+        return dct
+
     def _set_cluster(self):
         """
         Compute and set the cluster of atoms as a Molecule object. The site
@@ -444,7 +452,10 @@ class Atoms(MSONable):
                     find_atoms = line.find("ATOMS")
                     if find_atoms >= 0:
                         coords = 1
-                if coords == 1 and "END" not in line:
+                if coords == 1:
+                    # FEFF ignores everything after the END card
+                    if "END" in line:
+                        break
                     atoms_str.append(line.replace("\r", ""))
 
         return "".join(atoms_str)
@@ -730,7 +741,7 @@ class Tags(dict):
 
         try:
             if key.lower() == "cif":
-                return re.search(r"\w+.cif", val)[0]
+                return re.search(r"\S+\.cif", val)[0]
 
             if key in list_type_keys:
                 output = []
@@ -820,6 +831,14 @@ class Potential(MSONable):
         atom_sym = get_absorbing_atom_symbol_index(absorbing_atom, struct)[0]
         self._cluster = self._set_cluster()
         self.pot_dict = get_atom_map(self._cluster, atom_sym)
+
+    def as_dict(self) -> dict:
+        """MSONable dict. The absorbing atom is stored by site index so that
+        from_dict reproduces the same (possibly inequivalent) absorbing site.
+        """
+        dct = super().as_dict()
+        dct["absorbing_atom"] = self.center_index
+        return dct
 
     def _set_cluster(self):
         """
@@ -1048,6 +1067,6 @@ def get_absorbing_atom_symbol_index(absorbing_atom, structure):
     """
     if isinstance(absorbing_atom, str):
         return absorbing_atom, structure.indices_from_symbol(absorbing_atom)[0]
-    if isinstance(absorbing_atom, int):
-        return str(structure[absorbing_atom].specie), absorbing_atom
+    if isinstance(absorbing_atom, int | np.integer):
+        return structure[absorbing_atom].specie.symbol, int(absorbing_atom)
     raise ValueError("absorbing_atom must be either specie symbol or site index")

@@ -840,7 +840,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
         optimizer: str | Optimizer = "FIRE",
         steps: int = 500,
         fmax: float = 0.1,
-        stress_weight: float = 0.01,
+        stress_weight: float = 1 / 160.21766208,
         opt_kwargs: dict | None = None,
         return_trajectory: bool = False,
         verbose: bool = False,
@@ -856,8 +856,8 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
             steps (int): max number of steps for relaxation. Defaults to 500.
             fmax (float): total force tolerance for relaxation convergence.
                 Here fmax is a sum of force and stress forces. Defaults to 0.1.
-            stress_weight (float): the stress weight for relaxation with M3GNet.
-                Defaults to 0.01.
+            stress_weight (float): factor applied to the MatGL stress (in GPa) for relaxation. Defaults to
+                1 / 160.21766208, which converts GPa to eV/A^3, the stress unit ASE expects.
             opt_kwargs (dict): kwargs for the ASE optimizer class.
             return_trajectory (bool): Whether to return the trajectory of relaxation.
                 Defaults to False.
@@ -963,7 +963,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
                 from matgl.ext.ase import PESCalculator
             except ImportError:
                 raise ImportError("matgl not installed. Try `pip install matgl`.")
-            calculator = "M3GNet-MP-2021.2.8-PES" if calculator.lower() == "m3gnet" else calculator
+            calculator = "M3GNet-PES-MatPES-r2SCAN-2025.2" if calculator.lower() == "m3gnet" else calculator
             potential = matgl.load_model(calculator)
             return PESCalculator(potential=potential, **params)
 
@@ -1178,7 +1178,9 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 )
                 new_sites.append(periodic_site)
 
-        new_charge = self._charge * np.linalg.det(scale_matrix) if self._charge is not None else None
+        # Number of primitive cells in the supercell is |det|; a left-handed scaling matrix must not flip the charge
+        n_cells = round(abs(np.linalg.det(scale_matrix)))
+        new_charge = self._charge * n_cells if self._charge is not None else None
         return Structure.from_sites(new_sites, charge=new_charge, to_unit_cell=True).relabel_sites(ignore_uniq=True)
 
     def __rmul__(self, scaling_matrix):
@@ -1830,9 +1832,12 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         try:
             from pymatgen.optimization.neighbors import find_points_in_spheres
         except ImportError:
-            if sites is None:
-                return self._get_neighbor_list_py(r, None, exclude_self=exclude_self)
-            return self._get_neighbor_list_py(r, list(sites), exclude_self=exclude_self)
+            return self._get_neighbor_list_py(
+                r,
+                None if sites is None else list(sites),
+                numerical_tol=numerical_tol,
+                exclude_self=exclude_self,
+            )
 
         else:
             if sites is None:
@@ -2081,7 +2086,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             r=r, sites=sites, numerical_tol=numerical_tol
         )
         if len(points_indices) < 1:
-            return [[]] * len(sites)
+            return [[] for _ in sites]
         f_coords = self.frac_coords[points_indices] + images
         neighbor_dict: dict[int, list] = defaultdict(list)
         lattice = self.lattice
@@ -2385,7 +2390,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         new_site_props = self.site_properties
         if site_properties:
             new_site_props.update(site_properties)
-        props = self.properties
+        props = dict(self.properties)
         if properties:
             props.update(properties)
         if not sanitize:
@@ -3406,7 +3411,13 @@ class IMolecule(SiteCollection[Site], MSONable):
         Returns:
             IMolecule
         """
-        return type(self).from_sites(self, properties=self.properties)
+        return type(self).from_sites(
+            self,
+            charge=self._charge,
+            spin_multiplicity=self._spin_multiplicity,
+            charge_spin_check=self._charge_spin_check,
+            properties=dict(self.properties),
+        )
 
     @classmethod
     def from_sites(
@@ -3441,10 +3452,11 @@ class IMolecule(SiteCollection[Site], MSONable):
         """
         if len(sites) < 1:
             raise ValueError(f"You need at least 1 site to make a {cls.__name__}")
-        props = defaultdict(list)
-        for site in sites:
-            for k, v in site.properties.items():
-                props[k].append(v)
+        props: dict[str, list] = {}
+        for idx, site in enumerate(sites):
+            for key, val in site.properties.items():
+                # Sites missing a property get None so values stay aligned with their sites
+                props.setdefault(key, [None] * len(sites))[idx] = val
         labels = [site.label for site in sites]
         return cls(
             [site.species for site in sites],
@@ -3718,6 +3730,12 @@ class IMolecule(SiteCollection[Site], MSONable):
 
         centered_coords = self.cart_coords - self.center_of_mass + offset
         rng = np.random.default_rng()
+        half_box = np.array([a, b, c]) / 2
+
+        def crosses_box(coords: NDArray, box_center: list[float]) -> bool:
+            # Each image has its own a x b x c sub-box centered on box_center
+            rel = coords - box_center
+            return bool(np.any(rel > half_box) or np.any(rel < -half_box))
 
         for i, j, k in itertools.product(
             list(range(images[0])),
@@ -3734,12 +3752,8 @@ class IMolecule(SiteCollection[Site], MSONable):
                     )
                     rot_mat = op.rotation_matrix
                     new_coords = np.dot(rot_mat, centered_coords.T).T + box_center
-                    if no_cross:
-                        x_max, x_min = max(new_coords[:, 0]), min(new_coords[:, 0])
-                        y_max, y_min = max(new_coords[:, 1]), min(new_coords[:, 1])
-                        z_max, z_min = max(new_coords[:, 2]), min(new_coords[:, 2])
-                        if x_max > a or x_min < 0 or y_max > b or y_min < 0 or z_max > c or z_min < 0:
-                            raise ValueError("Molecule crosses boundary of box")
+                    if no_cross and crosses_box(new_coords, box_center):
+                        raise ValueError("Molecule crosses boundary of box")
                     if not all_coords:
                         break
                     distances = lattice.get_all_distances(
@@ -3750,12 +3764,8 @@ class IMolecule(SiteCollection[Site], MSONable):
                         break
             else:
                 new_coords = centered_coords + box_center
-                if no_cross:
-                    x_max, x_min = max(new_coords[:, 0]), min(new_coords[:, 0])
-                    y_max, y_min = max(new_coords[:, 1]), min(new_coords[:, 1])
-                    z_max, z_min = max(new_coords[:, 2]), min(new_coords[:, 2])
-                    if x_max > a or x_min < 0 or y_max > b or y_min < 0 or z_max > c or z_min < 0:
-                        raise ValueError("Molecule crosses boundary of box")
+                if no_cross and crosses_box(new_coords, box_center):
+                    raise ValueError("Molecule crosses boundary of box")
             all_coords.extend(new_coords)
 
         site_props = {key: sequence * nimages for key, sequence in self.site_properties.items()}  # type: ignore[operator]
@@ -3861,7 +3871,13 @@ class IMolecule(SiteCollection[Site], MSONable):
         mol = dispatch_read_str(handler, input_string)
         if isinstance(mol, dict):  # pragma: no cover — defensive; readers should return Molecules
             return cls.from_dict(mol)
-        return cls.from_sites(mol, properties=mol.properties)
+        return cls.from_sites(
+            mol,
+            charge=mol.charge,
+            spin_multiplicity=mol.spin_multiplicity,
+            charge_spin_check=mol._charge_spin_check,
+            properties=mol.properties,
+        )
 
     @classmethod
     def from_file(cls, filename: PathLike) -> IMolecule | Molecule:  # type:ignore[override]
@@ -4242,7 +4258,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
 
         # Pass value of functional group--either from user-defined or from
         # functional.json
-        if isinstance(func_group, Molecule):
+        if isinstance(func_group, IMolecule):
             fgroup = func_group
 
         else:
@@ -4261,8 +4277,9 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         except TypeError:
             bl = None
 
+        # Work on a copy so neither the caller's molecule nor the shared FunctionalGroups template is mutated
+        fgroup = Molecule.from_sites(fgroup)
         if bl is not None:
-            fgroup = fgroup.copy()
             vec = fgroup[0].coords - fgroup[1].coords
             vec /= np.linalg.norm(vec)
             fgroup[0] = "X", fgroup[1].coords + float(bl) * vec
@@ -4411,7 +4428,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
             Structure: self if inplace=True else new structure with strain applied.
         """
         strain_matrix = (1 + np.array(strain)) * np.eye(3)
-        new_lattice = Lattice(np.dot(self._lattice.matrix.T, strain_matrix).T)
+        new_lattice = Lattice(np.dot(self._lattice.matrix.T, strain_matrix).T, pbc=self._lattice.pbc)
         struct = self if inplace else self.copy()
         struct.lattice = new_lattice
         return struct
@@ -4537,8 +4554,9 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         Args:
             distance (float): The maximum distance for the translation of each site. The corresponding
                 random vector's magnitude will not exceed this distance.
-            min_distance (float | None): Minimum distance for the perturbation range. Defaults to None,
-                which means all perturbations are the same magnitude.
+            min_distance (float | None): Minimum distance for the perturbation range. Defaults to 0.0, i.e.
+                magnitudes are drawn uniformly from [0, distance]. None means all perturbations have
+                magnitude equal to distance.
             seed (int | None): Seed for the random number generator to ensure reproducibility. If None
                 (the default for numpy's generator), the generator will be initialized without a specific seed.
 
@@ -4597,6 +4615,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
                 site.to_unit_cell(in_place=True)
         struct.sites = supercell.sites
         struct.lattice = supercell.lattice
+        struct._charge = supercell._charge
 
         return struct
 
@@ -4692,12 +4711,12 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
 
     def relax(
         self,
-        calculator: str | Calculator = "TensorNet-MatPES-PBE-v2025.1-PES",
+        calculator: str | Calculator = "TensorNet-PES-MatPES-r2SCAN-2025.2",
         relax_cell: bool = True,
         optimizer: str | Optimizer = "FIRE",
         steps: int = 500,
         fmax: float = 0.1,
-        stress_weight: float = 0.01,
+        stress_weight: float = 1 / 160.21766208,
         opt_kwargs: dict | None = None,
         return_trajectory: bool = False,
         verbose: bool = False,
@@ -4706,15 +4725,16 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """Perform a crystal structure relaxation using an ASE calculator.
 
         Args:
-            calculator: An ASE Calculator or a string from the following options: "TensorNet-MatPES-PBE-v2025.1-PES".
-                Defaults to 'TensorNet-MatPES-PBE-v2025.1-PES' universal potential.
+            calculator: An ASE Calculator or the name of a MatGL pre-trained potential, e.g.
+                "TensorNet-PES-MatPES-r2SCAN-2025.2". Defaults to the r2SCAN-level
+                "TensorNet-PES-MatPES-r2SCAN-2025.2" foundation potential.
             relax_cell (bool): whether to relax the lattice cell. Defaults to True.
             optimizer (str): name of the ASE optimizer class to use
             steps (int): max number of steps for relaxation. Defaults to 500.
             fmax (float): total force tolerance for relaxation convergence.
                 Here fmax is a sum of force and stress forces. Defaults to 0.1.
-            stress_weight (float): the stress weight for relaxation with M3GNet.
-                Defaults to 0.01.
+            stress_weight (float): factor applied to the MatGL stress (in GPa) for relaxation. Defaults to
+                1 / 160.21766208, which converts GPa to eV/A^3, the stress unit ASE expects.
             opt_kwargs (dict): kwargs for the ASE optimizer class.
             return_trajectory (bool): Whether to return the trajectory of relaxation.
                 Defaults to False.
@@ -4740,14 +4760,15 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
 
     def calculate(
         self,
-        calculator: str | Calculator = "TensorNet-MatPES-PBE-v2025.1-PES",
+        calculator: str | Calculator = "TensorNet-PES-MatPES-r2SCAN-2025.2",
         verbose: bool = False,
     ) -> Calculator:
         """Perform an ASE calculation.
 
         Args:
-            calculator: An ASE Calculator or a string from the following options: "TensorNet-MatPES-PBE-v2025.1-PES".
-                Defaults to 'TensorNet-MatPES-PBE-v2025.1-PES' universal potential.
+            calculator: An ASE Calculator or the name of a MatGL pre-trained potential, e.g.
+                "TensorNet-PES-MatPES-r2SCAN-2025.2". Defaults to the r2SCAN-level
+                "TensorNet-PES-MatPES-r2SCAN-2025.2" foundation potential.
             verbose (bool): whether to print stdout. Defaults to False.
 
         Returns:
@@ -4755,7 +4776,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """
         return self._calculate(calculator, verbose=verbose)
 
-    def calc_property(self, prop: str, calculator="TensorNet-MatPES-PBE-v2025.1-PES", **kwargs) -> dict:
+    def calc_property(self, prop: str, calculator="TensorNet-PES-MatPES-r2SCAN-2025.2", **kwargs) -> dict:
         """Calculate the specified material property using the provided calculation method or default calculator.
 
         Dynamically maps the property to its corresponding calculation class and performs the computation.
@@ -4763,7 +4784,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         Args:
             prop (str): The material property to calculate. Expected values are "elastic", "phonon", or "eos".
             calculator (str): The specific calculator to use for the computation. Defaults to
-                "TensorNet-MatPES-PBE-v2025.1-PES".
+                "TensorNet-PES-MatPES-r2SCAN-2025.2".
             **kwargs: Additional keyword arguments passed to the calculation method.
 
         Returns:

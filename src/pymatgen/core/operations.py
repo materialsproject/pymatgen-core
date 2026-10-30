@@ -238,9 +238,17 @@ class SymmOp(MSONable):
         from_c %= 1
         to_c %= 1
 
-        if np.allclose(from_b, from_c, atol=tol) and np.allclose(to_b, to_c) and np.allclose(r_b, r_c, atol=tol):
+        if (
+            np.allclose(from_b, from_c, atol=tol)
+            and np.allclose(to_b, to_c, atol=tol)
+            and np.allclose(r_b, r_c, atol=tol)
+        ):
             return True, False
-        if np.allclose(to_b, from_c, atol=tol) and np.allclose(from_b, to_c) and np.allclose(r_b, -r_c, atol=tol):
+        if (
+            np.allclose(to_b, from_c, atol=tol)
+            and np.allclose(from_b, to_c, atol=tol)
+            and np.allclose(r_b, -r_c, atol=tol)
+        ):
             return True, True
         return False, False
 

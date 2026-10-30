@@ -396,9 +396,10 @@ class QChemDictSet(QCInput):
 
         plots_defaults = {"grid_spacing": "0.05", "total_density": "0"}
 
-        opt = {} if self.opt_variables is None else self.opt_variables
+        # copy user-supplied dicts so that the in-place updates below do not mutate them
+        opt = {} if self.opt_variables is None else dict(self.opt_variables)
 
-        scan = {} if self.scan_variables is None else self.scan_variables
+        scan = {} if self.scan_variables is None else dict(self.scan_variables)
 
         pcm: dict = {}
         solvent: dict = {}
@@ -497,7 +498,8 @@ class QChemDictSet(QCInput):
             svp["dielst"] = CMIRS_SETTINGS[self.cmirs_solvent]["dielst"]
             svp["idefesr"] = "1"  # this flag enables the CMIRS part
             svp["ipnrf"] = "1"  # this flag is also required for some undocumented reason
-            pcm_nonels = CMIRS_SETTINGS[self.cmirs_solvent][svp["rhoiso"]]
+            # copy so that the module-level CMIRS_SETTINGS are never modified
+            pcm_nonels = dict(CMIRS_SETTINGS[self.cmirs_solvent][svp["rhoiso"]])
             pcm_nonels["delta"] = "7"  # as recommended by Q-Chem. See manual.
             pcm_nonels["gaulag_n"] = "40"  # as recommended by Q-Chem. See manual.
 
@@ -519,7 +521,7 @@ class QChemDictSet(QCInput):
                 if key != "version":
                     nbo[key] = self.nbo_params[key]
 
-        tmp_geom_opt = self.geom_opt
+        tmp_geom_opt = None if self.geom_opt is None else dict(self.geom_opt)
         geom_opt = self.geom_opt
         if (self.job_type.lower() in ["opt", "optimization"] and self.qchem_version == 6) or (
             self.qchem_version == 5 and self.geom_opt is not None

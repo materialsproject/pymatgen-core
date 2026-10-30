@@ -450,6 +450,8 @@ class TestOrderDisorderedStructureTransformation:
 
         output = trafo.apply_transformation(struct * [2, 2, 2], return_ranked_list=False)
         assert output.composition.reduced_formula == struct.composition.reduced_formula
+        # no_oxi_states=True must strip the dummy 0+ oxidation states (as the Ewald algos do)
+        assert all(isinstance(sp, Element) for sp in output.composition)
 
     # TODO: This test is not supposed to require StandardTransmuter. Needs to be rewritten.
     # def test_occ_tol_with_supercell(self):
@@ -608,6 +610,22 @@ class TestDeformStructureTransformation:
 
 
 class TestDiscretizeOccupanciesTransformation:
+    def test_preserves_site_properties_and_charge(self):
+        # site properties, labels and charge used to be silently dropped
+        struct_orig = Structure(
+            Lattice.cubic(4),
+            [{"Li": 0.19, "Na": 0.81}, {"O": 1}],
+            [[0, 0, 0], [0.5, 0.5, 0.5]],
+            charge=1,
+            site_properties={"magmom": [0.5, -0.5]},
+            labels=["A", "X"],
+        )
+        struct = DiscretizeOccupanciesTransformation(max_denominator=5).apply_transformation(struct_orig)
+        assert dict(struct[0].species) == {Element("Li"): 0.2, Element("Na"): 0.8}
+        assert struct.site_properties == {"magmom": [0.5, -0.5]}
+        assert struct.labels == ["A", "X"]
+        assert struct.charge == 1
+
     def test_apply_transformation(self):
         lattice = Lattice.cubic(4)
         struct_orig = Structure(
@@ -690,3 +708,13 @@ class TestScaleToRelaxedTransformation:
         assert (Fe_init.lattice.a < Fe_fin.lattice.a) == (Mo_init.lattice.a < Mo_fin.lattice.a)
         assert (Fe_init.lattice.b < Fe_fin.lattice.b) == (Mo_init.lattice.b < Mo_fin.lattice.b)
         assert (Fe_init.lattice.c < Fe_fin.lattice.c) == (Mo_init.lattice.c < Mo_fin.lattice.c)
+
+    @pytest.mark.parametrize("species_map", [{"Na": "K", "Cl": "Br"}, [("Na", "K"), ("Cl", "Br")]])
+    def test_species_map(self, species_map):
+        # string-keyed dicts and lists of tuples (as documented) used to raise KeyError/TypeError
+        nacl_init = Structure(Lattice.cubic(5.6), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        nacl_fin = Structure(Lattice.cubic(5.7), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        kbr = Structure(Lattice.cubic(6.6), ["K", "Br"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        kbr_fin = ScaleToRelaxedTransformation(nacl_init, nacl_fin, species_map).apply_transformation(kbr)
+        assert [site.species_string for site in kbr_fin] == ["K", "Br"]
+        assert kbr_fin.lattice.a == approx(6.6 * 5.7 / 5.6)

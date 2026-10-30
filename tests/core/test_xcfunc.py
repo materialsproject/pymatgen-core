@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from pymatgen.core.xcfunc import XcFunc
 from pymatgen.util.testing import MatSciTest
 
@@ -53,11 +51,13 @@ class TestLibxcFunc(MatSciTest):
         # Test if object can be serialized with Pickle
         self.serialize_with_pickle(self.ixc_11)
 
-    @pytest.mark.xfail(reason="TODO:")
     def test_msonable(self):
-        # Test if object supports MSONable
+        # from_dict passed the serialized LibxcFunc dicts straight to __init__
         self.ixc_11.x.as_dict()
         self.assert_msonable(self.ixc_11)
+        assert XcFunc.from_dict(self.ixc_11.as_dict()) == self.ixc_11
+        teter = XcFunc.from_abinit_ixc(1)
+        assert XcFunc.from_dict(teter.as_dict()) == teter
 
     def test_from(self):
         # GGA-PBE from ixc given in abinit-libxc mode

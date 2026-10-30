@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import asdict
 
@@ -301,6 +302,37 @@ class TestSpacegroupAnalyzer(MatSciTest):
         for site in primitive_structure:
             expected_magmom = 1.0 if site.specie.name == "Na" else -1.0
             assert math.isclose(expected_magmom, site.properties["magmom"])
+
+    def test_keep_site_properties_inequivalent_same_species(self):
+        """Site properties must follow the matching input site, not the first site of that species."""
+        # P4mm perovskite-like cell: the apical O (index 2) is not equivalent to the equatorial O's
+        structure = Structure(
+            Lattice.tetragonal(4, 4.3),
+            ["Sr", "Ti", "O", "O", "O"],
+            [[0, 0, 0], [0.5, 0.5, 0.52], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5]],
+            site_properties={"tag": ["Sr", "Ti", "apical", "equatorial", "equatorial"]},
+        )
+        spga = SpacegroupAnalyzer(structure)
+        assert spga.get_space_group_symbol() == "P4mm"
+        for struct in (
+            spga.get_refined_structure(keep_site_properties=True),
+            spga.find_primitive(keep_site_properties=True),
+        ):
+            tags = sorted(site.properties["tag"] for site in struct)
+            assert tags == ["Sr", "Ti", "apical", "equatorial", "equatorial"]
+            for site in struct:
+                if site.properties["tag"] == "apical":
+                    # apical O is directly below Ti along c
+                    assert site.frac_coords[:2] == approx([0.5, 0.5])
+
+    def test_find_primitive_uses_angle_tolerance(self):
+        """find_primitive must idealize with the same angle_tolerance used to detect the space group."""
+        lattice = Lattice.from_parameters(3, 3, 3, 90, 90, 90.3)
+        structure = Structure(lattice, ["Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        spga = SpacegroupAnalyzer(structure, symprec=0.01, angle_tolerance=5)
+        assert spga.get_space_group_symbol() == "Im-3m"
+        # idealized bcc primitive cell
+        assert spga.find_primitive().lattice.angles == approx([109.4712206] * 3)
 
     def test_get_ir_reciprocal_mesh(self):
         grid = self.sg.get_ir_reciprocal_mesh()
@@ -680,6 +712,12 @@ class TestSpacegroup:
         sites2 = [self.structure[idx] for idx in (0, 2)]
         assert not self.sg1.are_symmetrically_equivalent(sites1, sites2, 1e-3)
 
+    def test_are_symmetrically_equivalent_different_sizes(self):
+        # op(sites2) being a subset of sites1 is not equivalence: the sets must also be the same size
+        sites1 = [self.structure[idx] for idx in (0, 1)]
+        assert not self.sg1.are_symmetrically_equivalent(sites1, sites1[:1], 1e-3)
+        assert not self.sg1.are_symmetrically_equivalent(sites1, [], 1e-3)
+
 
 H2O2 = Molecule(
     ["O", "O", "H", "H"],
@@ -790,6 +828,18 @@ class TestPointGroupAnalyzer(MatSciTest):
         pg_analyzer = PointGroupAnalyzer(mol, 0.1)
         assert pg_analyzer.sch_symbol == "Oh"
 
+    def test_spherical_th(self):
+        # Pyritohedral Th cluster: cyclic permutations of (0, +-1, +-2.5). Its mirrors do not contain
+        # the 3-fold axes, which used to make detection of Th depend on the order of the atoms.
+        coords = []
+        for s1, s2 in itertools.product((1, -1), repeat=2):
+            coords += [[0, s1, 2.5 * s2], [2.5 * s2, 0, s1], [s1, 2.5 * s2, 0]]
+        for ordered_coords in (coords, coords[::-1], sorted(coords)):
+            mol = Molecule(["Mo"] + ["N"] * 12, [[0, 0, 0], *ordered_coords])
+            pg_analyzer = PointGroupAnalyzer(mol)
+            assert pg_analyzer.sch_symbol == "Th"
+            assert len(pg_analyzer.get_pointgroup()) == 24
+
     def test_tricky(self):
         mol = Molecule.from_file(f"{TEST_DIR}/dh.xyz")
         pg_analyzer = PointGroupAnalyzer(mol, 0.1)
@@ -894,6 +944,70 @@ class TestPointGroupAnalyzer(MatSciTest):
         assert len(pg_analyzer.get_symmetry_operations()) == 2
         assert len(pg_analyzer.get_pointgroup()) == 2
         assert all(order > 1 for _axis, order in pg_analyzer.rot_sym)
+
+    def test_find_mirror_contains_axis(self):
+        """A v/d mirror about an axis must contain it, whatever the sign or length of the axis."""
+        # CH4 with its S4 axes along x, y, z: the sigma_d planes swapping H1/H2 are at 45 deg to z
+        h_pos = 0.629
+        ch4 = Molecule(
+            ["C", "H", "H", "H", "H"],
+            [
+                [0, 0, 0],
+                [h_pos, h_pos, h_pos],
+                [h_pos, -h_pos, -h_pos],
+                [-h_pos, h_pos, -h_pos],
+                [-h_pos, -h_pos, h_pos],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(ch4)
+        assert pg_analyzer.sch_symbol == "Td"
+        for axis in ([0, 0, 1], [0, 0, -1], [0, 0, -10]):
+            n_ops = len(pg_analyzer.symmops)
+            assert pg_analyzer._find_mirror(np.array(axis, dtype=float)) == "d"
+            assert len(pg_analyzer.symmops) == n_ops + 1
+            # the mirror normal is the eigenvector of the reflection with eigenvalue -1
+            eigvals, eigvecs = np.linalg.eigh(pg_analyzer.symmops[-1].rotation_matrix)
+            normal = eigvecs[:, np.argmin(eigvals)]
+            assert np.dot(normal, axis) == approx(0, abs=1e-8)
+
+    def test_accidental_spherical_top_c2_counted_once(self):
+        """Isotropic inertia tensor with a single C2 axis: the axis found by the spherical search
+        must not be counted again by the symmetric top search (which gave D2)."""
+        mol = Molecule(
+            ["H"] * 8,
+            [
+                [-1.729637, 0.667025, -0.750622],
+                [1.729637, -0.667025, -0.750622],
+                [-0.126047, 0.956108, 1.752133],
+                [0.126047, -0.956108, 1.752133],
+                [1.453775, 1.343358, 0.28623],
+                [-1.453775, -1.343358, 0.28623],
+                [-0.460779, 1.472969, -1.272024],
+                [0.460779, -1.472969, -1.272024],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol)
+        assert pg_analyzer.eigvals.max() - pg_analyzer.eigvals.min() < 0.01
+        assert pg_analyzer.sch_symbol == "C2"
+        assert len(pg_analyzer.rot_sym) == 1
+
+    def test_accidental_spherical_top_c2_from_two_site_cluster(self):
+        """Isotropic inertia tensor whose equidistant sets have only two sites: the C2 swapping
+        them must still be found (the spherical search used to need three sites)."""
+        mol = Molecule(
+            ["H"] * 6,
+            [
+                [-0.2884377780571245, 1.6734349300907385, 1.0566073929997244],
+                [0.2884377780571245, -1.6734349300907385, 1.0566073929997244],
+                [-0.7655843049086493, 0.6712775368814153, 1.7214142849866096],
+                [0.7655843049086493, -0.6712775368814153, 1.7214142849866096],
+                [1.7092787911603025, 0.5830537444134493, -0.8593103893326506],
+                [-1.7092787911603025, -0.5830537444134493, -0.8593103893326506],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol)
+        assert pg_analyzer.eigvals.max() - pg_analyzer.eigvals.min() < 0.01
+        assert pg_analyzer.sch_symbol == "C2"
 
     def test_accidental_spherical_top_without_rotation_symmetry(self):
         """An isotropic inertia tensor with no rotational symmetry is C1, not an error."""
