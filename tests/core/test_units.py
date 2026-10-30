@@ -107,11 +107,19 @@ class TestUnit(MatSciTest):
         factor = u.get_conversion_factor("J")
         assert factor == pytest.approx(1.0)
 
-        # incompatible conversion
-        # TODO: `UnitError` in implementation doesn't work
+        # incompatible conversion (used to raise KeyError for equal powers, ValueError for
+        # a different number of base units)
         u = Unit("m")
-        with pytest.raises(KeyError):
+        with pytest.raises(UnitError, match="Units m and s are not compatible"):
             u.get_conversion_factor("s")
+        with pytest.raises(UnitError, match="are not compatible"):
+            u.get_conversion_factor("m s^-1")
+
+    def test_unit_error_is_exception(self):
+        # UnitError derived from BaseException, escaping `except Exception` handlers
+        assert issubclass(UnitError, Exception)
+        with pytest.raises(Exception, match="are not compatible"):
+            Length(1, "m").to("eV")
 
 
 class TestFloatWithUnit(MatSciTest):
@@ -186,6 +194,16 @@ class TestFloatWithUnit(MatSciTest):
 
         with pytest.raises(ValueError, match="Unit is missing in string 1"):
             Memory.from_str("1")
+
+    @pytest.mark.parametrize(
+        ("string", "value", "unit"),
+        [("1e3 MB", 1000, "MB"), ("1.5E-2 eV", 0.015, "eV"), ("-2e+1Ha", -20, "Ha"), (".5 eV", 0.5, "eV")],
+    )
+    def test_from_str_scientific_notation(self, string, value, unit):
+        # parsing stopped at the "e" of the exponent: "1e3 MB" was 1.0 with unit "e^3 MB"
+        parsed = FloatWithUnit.from_str(string)
+        assert parsed == approx(value)
+        assert str(parsed.unit) == unit
 
     def test_unitized(self):
         @unitized("eV")
@@ -314,6 +332,16 @@ class TestFloatWithUnit(MatSciTest):
 
 
 class TestArrayWithUnit(MatSciTest):
+    def test_rtruediv_and_pow_units(self):
+        # the ndarray ufunc path kept the unit unchanged: 1 / [1, 2] eV was "[1, 0.5] eV"
+        energies = EnergyArray([1.0, 2.0], "eV")
+        inv = 1 / energies
+        assert_array_equal(inv, [1.0, 0.5])
+        assert str(inv.unit) == "eV^-1"
+        squared = energies**2
+        assert_array_equal(squared, [1.0, 4.0])
+        assert str(squared.unit) == "eV^2"
+
     def test_neg(self):
         arr = LengthArray([1.0, 2.0, 3.0], "m")
         neg_arr = -arr
@@ -440,6 +468,7 @@ class TestArrayWithUnit(MatSciTest):
                 Unit("s^-1"),
                 Unit("Ha s"),
                 Unit("Ha eV^-1"),
+                Unit("Ha^-1"),  # 3 / ene_ha
             )
 
         # Here we could return a FloatWithUnit object but I prefer this

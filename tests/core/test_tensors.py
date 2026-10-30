@@ -10,6 +10,7 @@ from monty.serialization import loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.tensors import SquareTensor, Tensor, TensorCollection, TensorMapping, itertools, symmetry_reduce
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -299,6 +300,29 @@ class TestTensor(MatSciTest):
         empty[tkey] = 1
         assert empty[tkey] == 1
 
+    def test_tensor_mapping_del_missing_key(self):
+        # del of a missing key raised TypeError from list.pop(None)
+        mapping = TensorMapping([np.eye(3)], [1])
+        with pytest.raises(KeyError, match="not found in mapping"):
+            del mapping[np.zeros((3, 3))]
+        assert len(mapping) == 1
+        del mapping[np.eye(3)]
+        assert len(mapping) == 0
+
+    def test_hash(self):
+        # ndarray.tostring was removed in NumPy 2.3
+        assert hash(Tensor(np.eye(3))) == hash(Tensor(np.eye(3)))
+        assert hash(Tensor(np.eye(3))) != hash(Tensor(2 * np.eye(3)))
+
+    @pytest.mark.parametrize("c_length", [3.0, 6.0])
+    def test_get_ieee_rotation_tetragonal_c_along_x3(self, c_length):
+        # IEEE: c || x3 for tetragonal. With c < a the unsorted lengths were compared and the
+        # b axis ended up along x3.
+        struct = Structure(Lattice.tetragonal(4.0, c_length), ["Si", "Si"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        rotation = Tensor.get_ieee_rotation(struct)
+        assert rotation.is_rotation(include_improper=False)
+        assert_allclose(np.abs(rotation @ struct.lattice.matrix[2]), [0, 0, c_length], atol=1e-8)
+
     def test_populate(self):
         toec_path = TEST_FILES_DIR / "core" / "elasticity" / "test_toec_data.json"
         if not toec_path.exists():
@@ -549,6 +573,13 @@ class TestSquareTensor(MatSciTest):
         assert not self.symm_sqtensor.is_rotation()
         assert self.low_val_2.is_rotation()
         assert not self.low_val_2.is_rotation(tol=1e-8)
+
+    def test_is_rotation_improper(self):
+        # include_improper=False was ignored because det was always abs()'d
+        inversion = SquareTensor(-np.eye(3))
+        assert inversion.is_rotation()
+        assert not inversion.is_rotation(include_improper=False)
+        assert self.rotation.is_rotation(include_improper=False)
 
     def test_refine_rotation(self):
         assert_allclose(self.rotation, self.rotation.refine_rotation())
