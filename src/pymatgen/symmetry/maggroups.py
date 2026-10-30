@@ -316,6 +316,11 @@ class MagneticSpaceGroup(SymmetryGroup):
         # the setting transformation changes the symmetry operations
         return self._data == other._data and self.jf == other.jf
 
+    def __hash__(self) -> int:
+        # Defining __eq__ removes the inherited __hash__. jf compares with a tolerance, so only
+        # the BNS number is hashed; groups that compare equal therefore hash equal.
+        return hash(tuple(self._data["bns_number"]))
+
     @property
     def crystal_system(self):
         """Crystal system, e.g. cubic, hexagonal, etc."""

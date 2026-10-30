@@ -96,6 +96,12 @@ class TestMagneticSpaceGroup(MatSciTest):
         assert msg == MagneticSpaceGroup([2, 7], "a,b,c;0,0,0")
         assert msg != self.msg_4
 
+    def test_hash(self):
+        # defining __eq__ used to remove __hash__, so groups could not go in sets or dict keys
+        msg = MagneticSpaceGroup([2, 7])
+        assert hash(msg) == hash(MagneticSpaceGroup([2, 7], "a,b,c;0,0,0"))
+        assert len({msg, MagneticSpaceGroup([2, 7]), self.msg_4}) == 2
+
     def test_init_bad_label(self):
         with pytest.raises(ValueError, match="not found"):
             MagneticSpaceGroup("Not-a-label")
