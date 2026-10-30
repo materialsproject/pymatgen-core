@@ -2506,30 +2506,30 @@ direct
         assert traj[0] != traj[-1]
         assert os.path.isfile(traj_file)
 
-    @pytest.mark.xfail(reason="TODO: #3958 wait for matgl resolve of torch dependency")
     def test_calculate_matgl(self):
         pytest.importorskip("matgl")
         calculator = self.get_structure("Si").calculate()
         assert {*calculator.results} >= {"stress", "energy", "free_energy", "forces"}
         # Check the errors of predicted energy, forces and stress to be within
         # 0.1 eV/atom, 0.2 eV/Å, and 2 GPa.
-        # The reference values here are predicted by M3GNet-MP-2021.2.8-DIRECT-PES in matgl.
-        assert calculator.results["energy"] / self.get_structure("Si").num_sites == approx(-5.4146976, abs=0.1)
-        assert np.linalg.norm(calculator.results["forces"]) == approx(7.8123485e-06, abs=0.2)
-        assert np.linalg.norm(calculator.results["stress"]) == approx(1.7861567, abs=2)
+        # The reference values here are predicted by TensorNet-PES-MatPES-r2SCAN-2025.2 in matgl.
+        assert calculator.results["energy"] / self.get_structure("Si").num_sites == approx(-8.6559486, abs=0.1)
+        assert np.linalg.norm(calculator.results["forces"]) == approx(3.0495353e-06, abs=0.2)
+        assert np.linalg.norm(calculator.results["stress"]) == approx(0.3202055, abs=2)
 
     def test_relax_matgl(self):
         matgl = pytest.importorskip("matgl")
         struct = self.get_structure("Si")
+        # default is the r2SCAN-level TensorNet-PES-MatPES-r2SCAN-2025.2 potential
         relaxed = struct.relax()
-        assert relaxed.lattice.a == approx(3.860516230545545, rel=0.01)  # allow 1% error
+        assert relaxed.lattice.a == approx(3.8401979337, abs=0.01)  # allow 0.01 error
         assert isinstance(relaxed.calc, matgl.ext.ase.PESCalculator)
         for key, val in {"type": "optimization", "optimizer": "FIRE"}.items():
             actual = relaxed.dynamics[key]
             assert actual == val, f"expected {key} to be {val}, {actual=}"
-        relaxed_r2scan = struct.relax("TensorNet-MatPES-r2SCAN-v2025.1-PES")
-        assert relaxed_r2scan.lattice.a != relaxed.lattice.a
-        assert relaxed_r2scan.lattice.a == approx(3.837727005405847, abs=0.01)  # allow 0.01 error
+        relaxed_pbe = struct.relax("TensorNet-PES-MatPES-PBE-2025.2")
+        assert relaxed_pbe.lattice.a != relaxed.lattice.a
+        assert relaxed_pbe.lattice.a == approx(3.8468923784822, rel=0.01)  # allow 1% error
 
     def test_relax_m3gnet_fixed_lattice(self):
         matgl = pytest.importorskip("matgl")
@@ -2777,7 +2777,7 @@ Sites (8)
             relaxed, traj = self.cu_structure.relax(calculator="m3gnet", steps=2, return_trajectory=True)
 
         load_model.assert_called_once_with("M3GNet-MP-2021.2.8-PES")
-        pes_calculator.assert_called_once_with(potential="potential", stress_weight=0.01)
+        pes_calculator.assert_called_once_with(potential="potential", stress_weight=1 / 160.21766208)
         assert isinstance(traj, FakeTrajectoryObserver)
         assert len(observer_calls) == 1
         assert isinstance(relaxed, Structure)
