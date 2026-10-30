@@ -840,7 +840,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
         optimizer: str | Optimizer = "FIRE",
         steps: int = 500,
         fmax: float = 0.1,
-        stress_weight: float = 0.01,
+        stress_weight: float = 1 / 160.21766208,
         opt_kwargs: dict | None = None,
         return_trajectory: bool = False,
         verbose: bool = False,
@@ -856,8 +856,8 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
             steps (int): max number of steps for relaxation. Defaults to 500.
             fmax (float): total force tolerance for relaxation convergence.
                 Here fmax is a sum of force and stress forces. Defaults to 0.1.
-            stress_weight (float): the stress weight for relaxation with M3GNet.
-                Defaults to 0.01.
+            stress_weight (float): factor applied to the MatGL stress (in GPa) for relaxation. Defaults to
+                1 / 160.21766208, which converts GPa to eV/A^3, the stress unit ASE expects.
             opt_kwargs (dict): kwargs for the ASE optimizer class.
             return_trajectory (bool): Whether to return the trajectory of relaxation.
                 Defaults to False.
@@ -4711,12 +4711,12 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
 
     def relax(
         self,
-        calculator: str | Calculator = "TensorNet-MatPES-PBE-v2025.1-PES",
+        calculator: str | Calculator = "TensorNet-PES-MatPES-r2SCAN-2025.2",
         relax_cell: bool = True,
         optimizer: str | Optimizer = "FIRE",
         steps: int = 500,
         fmax: float = 0.1,
-        stress_weight: float = 0.01,
+        stress_weight: float = 1 / 160.21766208,
         opt_kwargs: dict | None = None,
         return_trajectory: bool = False,
         verbose: bool = False,
@@ -4725,15 +4725,16 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """Perform a crystal structure relaxation using an ASE calculator.
 
         Args:
-            calculator: An ASE Calculator or a string from the following options: "TensorNet-MatPES-PBE-v2025.1-PES".
-                Defaults to 'TensorNet-MatPES-PBE-v2025.1-PES' universal potential.
+            calculator: An ASE Calculator or the name of a MatGL pre-trained potential, e.g.
+                "TensorNet-PES-MatPES-r2SCAN-2025.2". Defaults to the r2SCAN-level
+                "TensorNet-PES-MatPES-r2SCAN-2025.2" foundation potential.
             relax_cell (bool): whether to relax the lattice cell. Defaults to True.
             optimizer (str): name of the ASE optimizer class to use
             steps (int): max number of steps for relaxation. Defaults to 500.
             fmax (float): total force tolerance for relaxation convergence.
                 Here fmax is a sum of force and stress forces. Defaults to 0.1.
-            stress_weight (float): the stress weight for relaxation with M3GNet.
-                Defaults to 0.01.
+            stress_weight (float): factor applied to the MatGL stress (in GPa) for relaxation. Defaults to
+                1 / 160.21766208, which converts GPa to eV/A^3, the stress unit ASE expects.
             opt_kwargs (dict): kwargs for the ASE optimizer class.
             return_trajectory (bool): Whether to return the trajectory of relaxation.
                 Defaults to False.
@@ -4759,14 +4760,15 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
 
     def calculate(
         self,
-        calculator: str | Calculator = "TensorNet-MatPES-PBE-v2025.1-PES",
+        calculator: str | Calculator = "TensorNet-PES-MatPES-r2SCAN-2025.2",
         verbose: bool = False,
     ) -> Calculator:
         """Perform an ASE calculation.
 
         Args:
-            calculator: An ASE Calculator or a string from the following options: "TensorNet-MatPES-PBE-v2025.1-PES".
-                Defaults to 'TensorNet-MatPES-PBE-v2025.1-PES' universal potential.
+            calculator: An ASE Calculator or the name of a MatGL pre-trained potential, e.g.
+                "TensorNet-PES-MatPES-r2SCAN-2025.2". Defaults to the r2SCAN-level
+                "TensorNet-PES-MatPES-r2SCAN-2025.2" foundation potential.
             verbose (bool): whether to print stdout. Defaults to False.
 
         Returns:
@@ -4774,7 +4776,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """
         return self._calculate(calculator, verbose=verbose)
 
-    def calc_property(self, prop: str, calculator="TensorNet-MatPES-PBE-v2025.1-PES", **kwargs) -> dict:
+    def calc_property(self, prop: str, calculator="TensorNet-PES-MatPES-r2SCAN-2025.2", **kwargs) -> dict:
         """Calculate the specified material property using the provided calculation method or default calculator.
 
         Dynamically maps the property to its corresponding calculation class and performs the computation.
@@ -4782,7 +4784,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         Args:
             prop (str): The material property to calculate. Expected values are "elastic", "phonon", or "eos".
             calculator (str): The specific calculator to use for the computation. Defaults to
-                "TensorNet-MatPES-PBE-v2025.1-PES".
+                "TensorNet-PES-MatPES-r2SCAN-2025.2".
             **kwargs: Additional keyword arguments passed to the calculation method.
 
         Returns:
