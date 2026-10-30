@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import copy
 import os
 
 import pytest
 
 from pymatgen.io.qchem.sets import (
+    CMIRS_SETTINGS,
     ForceSet,
     FreqSet,
     OptSet,
@@ -1172,3 +1174,39 @@ class TestFreqSet(MatSciTest):
         assert test_freq_set.rem == ref_dict
         assert test_freq_set.smx == {"solvent": "water"}
         assert test_freq_set.molecule == test_molecule
+
+
+def test_cmirs_does_not_mutate_module_settings():
+    mol = QCInput.from_file(f"{TEST_DIR}/pcm.qin").molecule
+    reference = copy.deepcopy(CMIRS_SETTINGS)
+
+    SinglePointSet(mol, cmirs_solvent="water", overwrite_inputs={"svp": {"rhoiso": "0.0005"}})
+    SinglePointSet(mol, cmirs_solvent="water", overwrite_inputs={"pcm_nonels": {"a": "-0.1"}})
+    assert reference == CMIRS_SETTINGS
+
+    # a later default (rhoiso = 0.001) calculation must get the 0.001 parameters
+    sp_set = SinglePointSet(mol, cmirs_solvent="water")
+    assert sp_set.pcm_nonels == {**CMIRS_SETTINGS["water"]["0.001"], "delta": "7", "gaulag_n": "40"}
+
+
+def test_dict_set_does_not_mutate_user_inputs():
+    mol = QCInput.from_file(f"{TEST_DIR}/pcm.qin").molecule
+    geom_opt = {"coordinates": "delocalized"}
+    opt_variables = {"CONSTRAINT": ["tors 2 3 4 5 25.0"]}
+    scan_variables = {"stre": ["3 6 1.5 1.9 0.1"]}
+
+    OptSet(
+        mol,
+        qchem_version=6,
+        geom_opt=geom_opt,
+        opt_variables=opt_variables,
+        overwrite_inputs={"opt": {"FIXED": ["2 XY"]}},
+    )
+    PESScanSet(mol, scan_variables=scan_variables, overwrite_inputs={"scan": {"tors": ["1 2 3 4 -180 180 15"]}})
+    assert geom_opt == {"coordinates": "delocalized"}
+    assert opt_variables == {"CONSTRAINT": ["tors 2 3 4 5 25.0"]}
+    assert scan_variables == {"stre": ["3 6 1.5 1.9 0.1"]}
+
+    # reusing the same geom_opt dict with a different number of cycles must not raise
+    opt_set = OptSet(mol, qchem_version=6, geom_opt=geom_opt, geom_opt_max_cycles=50)
+    assert opt_set.geom_opt["maxiter"] == "50"

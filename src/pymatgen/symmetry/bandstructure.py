@@ -78,6 +78,10 @@ class HighSymmKpath(KPathBase):
             atol (float): Absolute tolerance used to determine symmetric
                 equivalence of points and lines on the BZ.
         """
+        valid_path_types = ("setyawan_curtarolo", "hinuma", "latimer_munro", "all")
+        if path_type not in valid_path_types:
+            raise ValueError(f"Unknown path_type {path_type!r}, must be one of {valid_path_types}")
+
         super().__init__(structure, symprec=symprec, angle_tolerance=angle_tolerance, atol=atol)
 
         self._path_type = path_type
@@ -270,7 +274,7 @@ class HighSymmKpath(KPathBase):
                     ]
 
                     if key != []:
-                        a_to_b_labels[label_a] = key[0][0] + "^{*}"
+                        a_to_b_labels[label_a] = key[0] + "^{*}"
                         break
 
                 if key == []:

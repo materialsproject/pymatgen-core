@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import copy
 
+import numpy as np
 import orjson
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.electronic_structure.bandstructure import Kpoint
 from pymatgen.phonon.bandstructure import PhononBandStructureSymmLine
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
@@ -121,6 +123,35 @@ class TestPhononBandStructureSymmLine(MatSciTest):
         max_qpoint2, max_freq2 = self.bs2.max_freq()
         assert list(max_qpoint2.frac_coords) == [0, 0, 0]
         assert max_freq2 == approx(15.2873634264)
+
+    def test_band_reorder(self):
+        # one atom, three modes polarized along x, y, z. The x and y branches cross, so
+        # sorting frequencies at each q-point (as phonopy does) swaps them halfway.
+        n_q = 6
+        freq_x, freq_y, freq_z = np.linspace(1, 3, n_q), np.linspace(3, 1, n_q), np.full(n_q, 5.0)
+        frequencies = np.sort([freq_x, freq_y, freq_z], axis=0)
+        polarization = np.eye(3)
+        eigendisplacements = np.zeros((3, n_q, 1, 3), dtype=complex)
+        for q_idx in range(n_q):
+            x_first = freq_x[q_idx] < freq_y[q_idx]
+            eigendisplacements[0, q_idx, 0] = polarization[0 if x_first else 1]
+            eigendisplacements[1, q_idx, 0] = polarization[1 if x_first else 0]
+            eigendisplacements[2, q_idx, 0] = polarization[2]
+
+        lattice = Lattice.cubic(5).reciprocal_lattice
+        bs = PhononBandStructureSymmLine(
+            np.linspace([0, 0, 0], [0.5, 0, 0], n_q),
+            frequencies,
+            lattice,
+            eigendisplacements=eigendisplacements,
+            labels_dict={"Gamma": [0, 0, 0], "X": [0.5, 0, 0]},
+            structure=Structure(Lattice.cubic(5), ["Si"], [[0, 0, 0]]),
+        )
+        bs.band_reorder()
+
+        assert_allclose(bs.bands, [freq_x, freq_y, freq_z])
+        for band_idx in range(3):
+            assert_allclose(np.abs(bs.eigendisplacements[band_idx, :, 0]), np.tile(polarization[band_idx], (n_q, 1)))
 
     def test_get_gamma_point(self):
         for bs in (self.bs, self.bs2):

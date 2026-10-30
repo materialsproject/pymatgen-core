@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from shutil import which
 
 import pytest
 from monty.serialization import loadfn
 
+from pymatgen.command_line import mcsqs_caller
 from pymatgen.command_line.mcsqs_caller import run_mcsqs
 from pymatgen.core.structure import Structure
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
@@ -15,6 +17,49 @@ __email__ = "handongling@berkeley.edu, rwoodsrobinson@lbl.gov"
 
 
 TEST_DIR = f"{TEST_FILES_DIR}/io/atat/mcsqs"
+
+
+class _FakePopen:
+    """Stand-in for subprocess.Popen that fakes mcsqs output files in the cwd."""
+
+    returncode = 0
+
+    def __init__(self, cmd, *args, **kwargs):
+        self.cmd = cmd
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def communicate(self, *args, **kwargs):
+        for name in ("bestsqs.out", "bestcorr.out"):
+            with open(name, mode="w", encoding="utf-8"):
+                pass
+        return b"", b""
+
+    def kill(self):
+        pass
+
+
+@pytest.mark.parametrize("scaling", [2, 2.5])
+def test_run_mcsqs_restores_cwd(tmp_path, monkeypatch, scaling):
+    # run_mcsqs used to chdir into its run directory and only restore the cwd on timeout
+    struct = MatSciTest.get_structure("Pb2TiZrO6").copy()
+    struct.replace_species({"Ti": {"Ti": 0.5, "Zr": 0.5}, "Zr": {"Ti": 0.5, "Zr": 0.5}})
+    monkeypatch.setattr(mcsqs_caller, "Popen", _FakePopen)
+    monkeypatch.setattr(mcsqs_caller, "_parse_sqs_path", lambda path: "parsed")
+    monkeypatch.chdir(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    # run_mcsqs.__wrapped__ bypasses the @requires check for the mcsqs/str2cif binaries
+    if scaling % 1 == 0:
+        assert run_mcsqs.__wrapped__(struct, {2: 6}, scaling, directory=str(run_dir), instances=1) == "parsed"
+    else:
+        with pytest.raises(ValueError, match="should be an integer"):
+            run_mcsqs.__wrapped__(struct, {2: 6}, scaling, directory=str(run_dir), instances=1)
+    assert os.getcwd() == str(tmp_path)
 
 
 @pytest.mark.skipif(not (which("mcsqs") and which("str2cif")), reason="mcsqs executable not present")

@@ -157,6 +157,11 @@ class TestPhononDos(MatSciTest):
         assert self.dos != 2 * self.dos
         assert 2 * self.dos == self.dos + self.dos
 
+        # different grid lengths used to raise ValueError from np.allclose broadcasting
+        assert PhononDos([0, 1, 2], [1, 2, 3]) != PhononDos([0, 1], [1, 2])
+        # same densities on a different frequency grid are not the same DOS
+        assert PhononDos([0, 1, 2], [1, 2, 3]) != PhononDos([0, 2, 4], [1, 2, 3])
+
     def test_mae(self):
         assert self.dos.mae(self.dos) == 0
         assert self.dos.mae(self.dos + 1) == 1

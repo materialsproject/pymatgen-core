@@ -101,6 +101,18 @@ class TestMagmom:
             assert_allclose(magmom2.get_moment(saxis=magmom2.saxis), magmom2.moment)
             assert_allclose(magmom3.moment, magmom1.moment)
 
+    def test_get_moment_ndarray_saxis(self):
+        # float arrays used to be normalized in place, int arrays raised UFuncOutputCastingError
+        saxis = np.array([1.0, 1.0, 0.0])
+        moment = Magmom([1, 0, 0]).get_moment(saxis=saxis)
+        assert_allclose(saxis, [1.0, 1.0, 0.0])
+        assert_allclose(moment, Magmom([1, 0, 0]).get_moment(saxis=(1, 1, 0)))
+
+        assert_allclose(Magmom([1, 0, 0]).get_moment(saxis=np.array([2, 0, 0])), [0, 0, 1])
+        magmom = Magmom.from_global_moment_and_saxis([1, 0, 0], np.array([1, 0, 0]))
+        assert_allclose(magmom.moment, [0, 0, 1])
+        assert_allclose(magmom.global_moment, [1, 0, 0])
+
     def test_is_collinear(self):
         magmoms = [
             [0, 0, 0],

@@ -141,7 +141,7 @@ class ChargemolAnalysis:
 
         if self._potcar_path:
             potcar = Potcar.from_file(self._potcar_path)
-            self.nelect = [p.nelectrons for p in potcar]
+            self.nelect: list[float] | None = [p.nelectrons for p in potcar]
 
             # chargemol can't process version 64 POTCARs current because of the SHA and COPY fields
             CHGMOL_BAD_POTCAR_KEYS = ("SHA", "COPYR")
@@ -159,6 +159,7 @@ class ChargemolAnalysis:
                     f.seek(0)
                 self._potcar_path = self._temp_potcar_file.name
         else:
+            self.nelect = None
             warnings.warn("No POTCAR found. Some properties may be unavailable.", stacklevel=2)
 
         self.aeccar0 = Chgcar.from_file(self._aeccar0_path) if self._aeccar0_path else None
@@ -340,7 +341,7 @@ class ChargemolAnalysis:
         Returns:
             float: charge on atom_index
         """
-        if nelect:
+        if nelect is not None:
             charge = nelect + self.get_charge_transfer(atom_index, charge_type=charge_type)
         elif self.nelect and self.natoms:
             charge = None
