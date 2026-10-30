@@ -31,7 +31,7 @@ from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import Molecule, PeriodicSite, Structure
 from pymatgen.symmetry._spglib_compat import call_spglib
 from pymatgen.symmetry.structure import SymmetrizedStructure
-from pymatgen.util.coord import find_in_coord_list, pbc_diff
+from pymatgen.util.coord import pbc_diff
 from pymatgen.util.due import Doi, due
 
 if TYPE_CHECKING:
@@ -56,6 +56,9 @@ if TYPE_CHECKING:
     ]
 
 logger = logging.getLogger(__name__)
+
+# Number of sites tested at once by PointGroupAnalyzer.is_valid_op, which bounds its memory use
+_VALID_OP_BLOCK_SIZE = 64
 
 
 cite_conventional_cell_algo = due.dcite(
@@ -113,7 +116,8 @@ class SpacegroupAnalyzer:
         self._symprec = symprec
         self._angle_tol = angle_tolerance
         self._structure = structure
-        self._site_props = structure.site_properties
+        # site_properties is rebuilt on every access, so read it only once
+        self._site_props = site_props = structure.site_properties
         unique_species: list[Element | Species] = []
         zs = []
         for species, group in itertools.groupby(structure, key=lambda s: s.species):
@@ -124,17 +128,18 @@ class SpacegroupAnalyzer:
                 unique_species.append(species)
                 zs.extend([len(unique_species)] * len(tuple(group)))
 
-        has_explicit_magmoms = "magmom" in structure.site_properties or any(
+        has_explicit_magmoms = "magmom" in site_props or any(
             getattr(specie, "spin", None) is not None for specie in structure.types_of_species
         )
 
         magmoms = []
-        for site in structure:
-            if hasattr(site, "magmom"):
-                magmoms.append(site.magmom)
+        # Without a magmom property or a species spin, no site contributes a magmom
+        for site in structure if has_explicit_magmoms else ():
+            if "magmom" in site.properties:
+                magmoms.append(site.properties["magmom"])
             elif site.is_ordered and getattr(site.specie, "spin", None) is not None:
                 magmoms.append(site.specie.spin)
-            elif has_explicit_magmoms:  # if any site has a magmom, all sites must have magmoms
+            else:  # if any site has a magmom, all sites must have magmoms
                 magmoms.append(0)
 
         self._unique_species = unique_species
@@ -313,28 +318,38 @@ class SpacegroupAnalyzer:
             "translations" gives the numpy float64 array of the translation
             vectors in scaled positions.
         """
-        with warnings.catch_warnings():
-            # TODO: get DeprecationWarning: Use get_magnetic_symmetry() for cell with magnetic moments.
-            warnings.filterwarnings("ignore", message="Use get_magnetic_symmetry", category=DeprecationWarning)
-            dct = call_spglib(spglib.get_symmetry, self._cell, symprec=self._symprec, angle_tolerance=self._angle_tol)
+        if len(self._cell) == 3:
+            # Without magmoms, spglib.get_symmetry just returns the operations of the symmetry dataset,
+            # which was already computed (with the same cell and tolerances) in __init__.
+            rotations, raw_translations = self._space_group_data.rotations, self._space_group_data.translations
+        else:
+            with warnings.catch_warnings():
+                # TODO: get DeprecationWarning: Use get_magnetic_symmetry() for cell with magnetic moments.
+                warnings.filterwarnings("ignore", message="Use get_magnetic_symmetry", category=DeprecationWarning)
+                dct = call_spglib(
+                    spglib.get_symmetry, self._cell, symprec=self._symprec, angle_tolerance=self._angle_tol
+                )
 
-        if dct is None:
-            symprec = self._symprec
-            raise ValueError(
-                f"Symmetry detection failed for structure with formula {self._structure.formula}. "
-                f"Try setting {symprec=} to a different value."
-            )
+            if dct is None:
+                symprec = self._symprec
+                raise ValueError(
+                    f"Symmetry detection failed for structure with formula {self._structure.formula}. "
+                    f"Try setting {symprec=} to a different value."
+                )
+            rotations, raw_translations = dct["rotations"], dct["translations"]
+
         # Sometimes spglib returns small translation vectors, e.g.
         # [1e-4, 2e-4, 1e-4]
         # (these are in fractional coordinates, so should be small denominator
-        # fractions)
-        translations: NDArray = np.array(
-            [[float(Fraction(c).limit_denominator(1000)) for c in trans] for trans in dct["translations"]]
-        )
+        # fractions). Only a handful of distinct values occur, so round each of them once.
+        raw_translations = np.asarray(raw_translations, dtype=np.float64)
+        unique_vals, inverse = np.unique(raw_translations, return_inverse=True)
+        rounded = np.array([float(Fraction(val).limit_denominator(1000)) for val in unique_vals])
+        translations: NDArray = rounded[inverse].reshape(raw_translations.shape)
 
         # Fractional translations of 1 are more simply 0
         translations[np.abs(translations) == 1] = 0
-        return dct["rotations"], translations
+        return rotations, translations
 
     def get_symmetry_operations(self, cartesian: bool = False) -> list[SymmOp]:
         """Return symmetry operations as a list of SymmOp objects. By default returns
@@ -652,6 +667,8 @@ class SpacegroupAnalyzer:
 
         new_sites: list[PeriodicSite] = []
         prim_lattice = Lattice(transf @ conv.lattice.matrix)
+        # Fractional coords of the kept sites, to find periodic images without a Python loop over them
+        kept_frac_coords = np.empty((len(conv), 3))
         for site in conv:
             new_s = PeriodicSite(
                 site.species,
@@ -661,8 +678,12 @@ class SpacegroupAnalyzer:
                 coords_are_cartesian=True,
                 properties=site.properties,
             )
-            # Remove duplicate sites
-            if not any(map(new_s.is_periodic_image, new_sites)):
+            # Remove duplicate sites, i.e. periodic images (PeriodicSite.is_periodic_image) of a kept site
+            frac_diff = kept_frac_coords[: len(new_sites)] - new_s.frac_coords
+            frac_diff -= np.round(frac_diff)
+            image_indices = np.flatnonzero(np.all(np.abs(frac_diff) <= 1e-8, axis=1))
+            if not any(new_sites[idx].species == new_s.species for idx in image_indices):
+                kept_frac_coords[len(new_sites)] = new_s.frac_coords
                 new_sites.append(new_s)
 
         # Reorient rhombohedral lattices (keep sites & frac. coordinates)
@@ -1052,19 +1073,23 @@ class SpacegroupAnalyzer:
         if ir_mesh is None:
             raise ValueError("spglib failed to generate the irreducible reciprocal mesh")
         mapping, grid = ir_mesh
-        mapping = list(mapping)  # type:ignore[assignment]
+        mapping = np.asarray(mapping)
+        # number of grid points mapped to each irreducible grid point
+        mapping_counts = np.bincount(mapping)
         grid = (np.array(grid) + np.array(shift) * (0.5, 0.5, 0.5)) / mesh
         weights = []
         mapped: dict[tuple, int] = defaultdict(int)
         for kpt in kpoints:
-            for idx, g in enumerate(grid):
-                if np.allclose(pbc_diff(kpt, g), (0, 0, 0), atol=atol):
-                    mapped[tuple(g)] += 1
-                    weights.append(mapping.count(mapping[idx]))
-                    break
-        if (len(mapped) != len(set(mapping))) or any(v != 1 for v in mapped.values()):
+            # first grid point that is a periodic image of kpt
+            matches = np.flatnonzero(np.all(np.abs(pbc_diff(kpt, grid)) <= atol, axis=1))
+            if len(matches) > 0:
+                idx = matches[0]
+                mapped[tuple(grid[idx])] += 1
+                weights.append(int(mapping_counts[mapping[idx]]))
+        if (len(mapped) != len(set(mapping.tolist()))) or any(v != 1 for v in mapped.values()):
             raise ValueError("Unable to find 1:1 corresponding between input kpoints and irreducible grid!")
-        return [w / sum(weights) for w in weights]
+        total_weight = sum(weights)
+        return [w / total_weight for w in weights]
 
     def is_laue(self) -> bool:
         """Check if the point group of the structure has Laue symmetry (centrosymmetry)."""
@@ -1133,6 +1158,19 @@ class PointGroupAnalyzer:
         self.tol = tolerance
         self.eig_tol = eigen_tolerance
         self.mat_tol = matrix_tolerance
+        # Cartesian coords and integer species labels of the centered molecule, used by is_valid_op
+        self._cart_coords = self.centered_mol.cart_coords
+        unique_species: list = []
+        species_ids = []
+        for site in self.centered_mol:
+            for idx, species in enumerate(unique_species):
+                if species == site.species:
+                    species_ids.append(idx)
+                    break
+            else:
+                species_ids.append(len(unique_species))
+                unique_species.append(site.species)
+        self._species_ids = np.array(species_ids)
         self._analyze()
         if self.sch_symbol in {"C1v", "C1h"}:
             self.sch_symbol: str = "Cs"
@@ -1516,11 +1554,17 @@ class PointGroupAnalyzer:
         Returns:
             bool: True if SymmOp is valid for Molecule.
         """
-        coords = self.centered_mol.cart_coords
-        for site in self.centered_mol:
-            coord = symm_op.operate(site.coords)
-            ind = find_in_coord_list(coords, coord, self.tol)
-            if len(ind) != 1 or self.centered_mol[ind[0]].species != site.species:
+        coords, species_ids = self._cart_coords, self._species_ids
+        new_coords = symm_op.operate_multi(coords)
+        # Test a single site first, since most invalid operations already fail there, then the rest in blocks
+        starts = [0, 1, *range(1 + _VALID_OP_BLOCK_SIZE, len(coords), _VALID_OP_BLOCK_SIZE)]
+        for start, end in itertools.pairwise([*starts, len(coords)]):
+            # matches[i, j]: the image of site start + i lies within tol (in each Cartesian component) of site j
+            matches = (np.abs(new_coords[start:end, None, :] - coords[None, :, :]) < self.tol).all(axis=2)
+            # every image must match exactly one site, of the same species
+            if (matches.sum(axis=1) != 1).any():
+                return False
+            if (species_ids[matches.argmax(axis=1)] != species_ids[start:end]).any():
                 return False
         return True
 
@@ -1546,13 +1590,17 @@ class PointGroupAnalyzer:
                 out.append([indices[0]])
             return out
 
+        cart_coords = self.centered_mol.cart_coords
         for index in get_clustered_indices():
-            sites = self.centered_mol.cart_coords[index]
-            for idx, reference in zip(index, sites, strict=True):
-                for op in symm_ops:
-                    rotated = np.dot(op, sites.T).T
-                    matched_indices = find_in_coord_list(rotated, reference, self.tol)
-                    matched_indices = {dict(enumerate(index))[i] for i in matched_indices}
+            sites = cart_coords[index]
+            # matches[op_idx][i, j]: op maps site index[i] onto site index[j] (find_in_coord_list criterion)
+            matches = [
+                np.all(np.abs(np.dot(op, sites.T).T[:, None, :] - sites[None, :, :]) < self.tol, axis=2)
+                for op in symm_ops
+            ]
+            for ref_idx, idx in enumerate(index):
+                for op, op_matches in zip(symm_ops, matches, strict=True):
+                    matched_indices = {index[i] for i in np.flatnonzero(op_matches[:, ref_idx])}
                     eq_sets[idx] |= matched_indices
 
                     if idx not in operations:
@@ -1605,8 +1653,14 @@ class PointGroupAnalyzer:
                 tmp_eq_sets = new_tmp_eq_sets
             return visited, ops
 
-        equiv_sets = copy.deepcopy(equiv_sets)
-        ops = copy.deepcopy(sym_ops)
+        # Only the containers are modified below (the sets and matrices are replaced, never changed in
+        # place), so copying them is enough to leave the inputs untouched.
+        equiv_sets = copy.copy(equiv_sets)
+        for idx, eq_set in equiv_sets.items():
+            equiv_sets[idx] = set(eq_set)
+        ops = copy.copy(sym_ops)
+        for idx, idx_ops in ops.items():
+            ops[idx] = copy.copy(idx_ops)
         to_be_deleted = set()
         for idx in equiv_sets:
             if idx in to_be_deleted:
@@ -1660,7 +1714,6 @@ class PointGroupAnalyzer:
             for j in eq_indices:
                 if j == idx:
                     continue
-                coords[j] = np.dot(ops[idx][j], coords[idx])
                 coords[j] = np.dot(ops[idx][j], coords[idx])
         molecule = Molecule(species=self.centered_mol.species_and_occu, coords=coords)
         return {"sym_mol": molecule, "eq_sets": eq_sets, "sym_ops": ops}
@@ -1773,12 +1826,18 @@ def generate_full_symmops(
         return symmops
 
     full = list(generators)
+    # Array copy of full (in its first len(full) rows), grown by doubling, so that the membership
+    # test below does not convert the whole list to an array for every candidate
+    full_arr = np.array(full)
 
     for g in full:
         for s in generators:
             op = np.dot(g, s)
-            d = np.abs(full - op) < tol
+            d = np.abs(full_arr[: len(full)] - op) < tol
             if not np.any(np.all(np.all(d, axis=2), axis=1)):
+                if len(full) == len(full_arr):
+                    full_arr = np.concatenate([full_arr, np.empty_like(full_arr)])
+                full_arr[len(full)] = op
                 full.append(op)
             if len(full) > 1000:
                 warnings.warn(

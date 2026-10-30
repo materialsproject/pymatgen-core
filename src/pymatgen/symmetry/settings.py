@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from fractions import Fraction
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -99,43 +100,15 @@ class JonesFaithfulTransformation:
         Returns:
             tuple[list[list[float]] | np.ndarray, list[float]]: transformation matrix & vector
         """
-        # Import sympy is expensive (PR4128)
-        from sympy import Matrix
-        from sympy.parsing.sympy_parser import parse_expr
-
-        try:
-            a, b, c = np.eye(3)
-            b_change, o_shift = transformation_string.split(";")
-            basis_change = b_change.split(",")
-            origin_shift = o_shift.split(",")
-
-            # add implicit multiplication symbols
-            basis_change = [
-                re.sub(
-                    r"(?<=\w|\))(?=\() | (?<=\))(?=\w) | (?<=(\d|a|b|c))(?=([abc]))",
-                    r"*",
-                    string,
-                    flags=re.VERBOSE,
-                )
-                for string in basis_change
-            ]
-
-            # basic input sanitation
-            allowed_chars = "0123456789+-*/.abc()"
-            basis_change = ["".join([c for c in string if c in allowed_chars]) for string in basis_change]
-
-            # requires round-trip to sympy to evaluate
-            # (alternatively, `numexpr` looks like a nice solution but requires an additional dependency)
-            basis_change = [
-                parse_expr(string).subs({"a": Matrix(a), "b": Matrix(b), "c": Matrix(c)}) for string in basis_change
-            ]
-            # convert back to numpy, perform transpose by convention
-            P = np.array(basis_change, dtype=float).T[0]
-
-            p = [float(Fraction(x)) for x in origin_shift]
-            return P, p
-        except Exception as exc:
-            raise ValueError(f"Failed to parse transformation string: {exc}")
+        # only strings are cached (other input is unhashable or fails to parse anyway)
+        parse = (
+            _parse_transformation_string
+            if isinstance(transformation_string, str)
+            else _parse_transformation_string.__wrapped__
+        )
+        P, p = parse(transformation_string)
+        # copies, since the parsed result is cached
+        return P.copy(), list(p)
 
     @property
     def P(self) -> list[list[float]]:
@@ -208,3 +181,50 @@ class JonesFaithfulTransformation:
 
     def __repr__(self):
         return f"JonesFaithfulTransformation with P:\n{self.P}\nand p:\n{self.p}"
+
+
+@lru_cache(maxsize=128)
+def _parse_transformation_string(transformation_string: str) -> tuple[np.ndarray, tuple[float, ...]]:
+    """Cached implementation of JonesFaithfulTransformation.parse_transformation_string.
+
+    Parsing goes through sympy and is slow, while a few strings (above all the identity
+    "a,b,c;0,0,0", parsed for every MagneticSpaceGroup) are parsed over and over.
+    """
+    # Import sympy is expensive (PR4128)
+    from sympy import Matrix
+    from sympy.parsing.sympy_parser import parse_expr
+
+    try:
+        a, b, c = np.eye(3)
+        b_change, o_shift = transformation_string.split(";")
+        basis_change = b_change.split(",")
+        origin_shift = o_shift.split(",")
+
+        # add implicit multiplication symbols
+        basis_change = [
+            re.sub(
+                r"(?<=\w|\))(?=\() | (?<=\))(?=\w) | (?<=(\d|a|b|c))(?=([abc]))",
+                r"*",
+                string,
+                flags=re.VERBOSE,
+            )
+            for string in basis_change
+        ]
+
+        # basic input sanitation
+        allowed_chars = "0123456789+-*/.abc()"
+        basis_change = ["".join([c for c in string if c in allowed_chars]) for string in basis_change]
+
+        # requires round-trip to sympy to evaluate
+        # (alternatively, `numexpr` looks like a nice solution but requires an additional dependency)
+        basis_change = [
+            parse_expr(string).subs({"a": Matrix(a), "b": Matrix(b), "c": Matrix(c)}) for string in basis_change
+        ]
+        # convert back to numpy, perform transpose by convention
+        P = np.array(basis_change, dtype=float).T[0]
+
+        p = [float(Fraction(x)) for x in origin_shift]
+        P.flags.writeable = False
+        return P, tuple(p)
+    except Exception as exc:
+        raise ValueError(f"Failed to parse transformation string: {exc}")

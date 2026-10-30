@@ -10,7 +10,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 from spglib import SpglibDataset
 
-from pymatgen.core import Lattice, Molecule, PeriodicSite, Site, Species, Structure
+from pymatgen.core import Lattice, Molecule, PeriodicSite, Site, Species, Structure, SymmOp
 from pymatgen.core.composition import Composition
 from pymatgen.io.vasp.outputs import Vasprun
 from pymatgen.symmetry.analyzer import (
@@ -1052,6 +1052,40 @@ class TestPointGroupAnalyzer(MatSciTest):
         eq = iterative_symmetrize(dist_mol, tolerance=0.3)
         pa3 = PointGroupAnalyzer(eq["sym_mol"], tolerance=0.1)
         assert pa3.get_pointgroup().sch_symbol == "Ci"
+
+    def test_large_molecule(self):
+        # 125 sites, so is_valid_op tests the sites in several blocks
+        grid = list(itertools.product(range(-2, 3), repeat=3))
+        species = ["Na" if sum(point) % 2 == 0 else "Cl" for point in grid]
+        cluster = Molecule(species, np.array(grid) * 2.82)
+        c4 = SymmOp.from_axis_angle_and_translation([0, 0, 1], 90)
+        pga = PointGroupAnalyzer(cluster)
+        assert pga.sch_symbol == "Oh"
+        assert len(pga.get_pointgroup()) == 48
+        assert pga.is_valid_op(c4)
+
+        # Substitute a site in a later block and its inversion image: only the species check rejects C4
+        idx, img = 100, grid.index((-2, 2, 2))
+        species[idx] = species[img] = "K"
+        pga = PointGroupAnalyzer(Molecule(species, np.array(grid) * 2.82))
+        assert pga.sch_symbol == "D3d"
+        assert len(pga.get_pointgroup()) == 12
+        assert not pga.is_valid_op(c4)
+        assert pga.is_valid_op(SymmOp.inversion())
+
+    def test_combine_eq_sets_does_not_modify_input(self):
+        eq = PointGroupAnalyzer(CH4)._get_eq_sets()
+        eq_sets = {key: set(val) for key, val in eq["eq_sets"].items()}
+        sym_ops = {key: {j: op.copy() for j, op in val.items()} for key, val in eq["sym_ops"].items()}
+        combined = PointGroupAnalyzer._combine_eq_sets(eq["eq_sets"], eq["sym_ops"])
+        assert dict(eq["eq_sets"]) == eq_sets
+        assert eq["sym_ops"].keys() == sym_ops.keys()
+        for key, val in sym_ops.items():
+            assert eq["sym_ops"][key].keys() == val.keys()
+            for j, op in val.items():
+                assert_allclose(eq["sym_ops"][key][j], op)
+        assert len(combined["eq_sets"]) == 2
+        assert {1, 2, 3, 4} in combined["eq_sets"].values()
 
     def test_get_kpoint_weights(self):
         for name in ("SrTiO3", "LiFePO4", "Graphite"):
