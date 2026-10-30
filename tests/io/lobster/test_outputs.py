@@ -2281,6 +2281,31 @@ class TestWavefunction(MatSciTest):
         volumetricdata_density = wave1.get_volumetricdata_density()
         assert volumetricdata_density.data["total"][0, 0, 0] == approx((-3.0966 * -3.0966) + (-6.45895 * -6.45895))
 
+    def test_set_volumetric_data_values(self):
+        wave = Wavefunction(
+            filename=f"{TEST_DIR}/LCAOWaveFunctionAfterLSO1PlotOfSpin1Kpoint1band1.gz",
+            structure=Structure.from_file(f"{TEST_DIR}/POSCAR_O.gz"),
+        )
+        wave.set_volumetric_data(grid=wave.grid, structure=wave.structure)
+
+        n_x, n_y, n_z = (n - 1 for n in wave.grid)
+        assert wave.final_real.shape == (n_x, n_y, n_z)
+        for i, j, k in [(0, 0, 0), (1, 2, 3), (n_x - 1, n_y - 1, n_z - 1), (5, 0, n_z - 1)]:
+            idx = (i * wave.grid[1] + j) * wave.grid[2] + k
+            assert wave.final_real[i, j, k] == wave.real[idx]
+            assert wave.final_imaginary[i, j, k] == wave.imaginary[idx]
+            assert wave.final_density[i, j, k] == approx(wave.real[idx] ** 2 + wave.imaginary[idx] ** 2)
+
+    def test_set_volumetric_data_wrong_structure(self):
+        structure = Structure.from_file(f"{TEST_DIR}/POSCAR_O.gz")
+        wave = Wavefunction(
+            filename=f"{TEST_DIR}/LCAOWaveFunctionAfterLSO1PlotOfSpin1Kpoint1band1.gz",
+            structure=structure,
+        )
+        structure.scale_lattice(structure.volume * 8)
+        with pytest.raises(ValueError, match="does not contain all relevant points"):
+            wave.set_volumetric_data(grid=wave.grid, structure=structure)
+
     def test_write_file(self):
         wave1 = Wavefunction(
             filename=f"{TEST_DIR}/LCAOWaveFunctionAfterLSO1PlotOfSpin1Kpoint1band1.gz",

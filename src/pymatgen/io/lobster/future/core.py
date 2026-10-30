@@ -296,7 +296,8 @@ class LobsterInteractionsHolder(LobsterFile):
         matching_sets = []
 
         if indices is not None:
-            matching_sets.append({i for i, bond in enumerate(self.interactions) if bond["index"] in indices})
+            index_set = set(indices)
+            matching_sets.append({i for i, bond in enumerate(self.interactions) if bond["index"] in index_set})
 
         if centers is not None:
             center_counts = Counter(centers)
@@ -376,7 +377,7 @@ class LobsterInteractionsHolder(LobsterFile):
         """
         interaction_indices = self.get_interaction_indices_by_properties(indices, centers, cells, orbitals, length)
 
-        return [bond for i, bond in enumerate(self.interactions) if i in interaction_indices]
+        return [self.interactions[i] for i in interaction_indices]
 
     @staticmethod
     def get_label_from_interaction(

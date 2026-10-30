@@ -112,18 +112,7 @@ class ICOXXLIST(LobsterInteractionsHolder):
 
                 interaction_counter += 1
 
-        self.data = np.full((len(self.interactions), len(self.spins)), np.nan, dtype=np.float64)
-
-        for i, interaction in enumerate(self.interactions):
-            if "icoxx" in interaction:
-                icoxx = interaction["icoxx"]
-            else:
-                raise ValueError(f"No ICOXX data found for interaction: {interaction}")
-
-            if Spin.up in icoxx:
-                self.data[i, 0] = icoxx[Spin.up]
-            if Spin.down in icoxx:
-                self.data[i, 1] = icoxx[Spin.down]
+        self._set_data_from_interactions()
 
     @version_processor(min_version="5.1")
     def parse_file(self) -> None:
@@ -184,14 +173,21 @@ class ICOXXLIST(LobsterInteractionsHolder):
 
                 self.interactions.append(bond_tmp)
 
-        self.data = np.full((len(self.interactions), len(self.spins)), np.nan, dtype=np.float64)
+        self._set_data_from_interactions()
+
+    def _set_data_from_interactions(self: LobsterInteractionsHolder) -> None:
+        """Collect the per-spin ICOXX values of all interactions into `self.data`.
+
+        Raises:
+            ValueError: If an interaction has no ICOXX data.
+        """
+        self.data = np.full((len(self.interactions), len(self.spins or [])), np.nan, dtype=np.float64)
 
         for i, interaction in enumerate(self.interactions):
-            if "icoxx" in interaction:
-                icoxx = interaction["icoxx"]
-            else:
+            if "icoxx" not in interaction:
                 raise ValueError(f"No ICOXX data found for interaction: {interaction}")
 
+            icoxx = interaction["icoxx"]
             if Spin.up in icoxx:
                 self.data[i, 0] = icoxx[Spin.up]
             if Spin.down in icoxx:
@@ -412,18 +408,9 @@ class NcICOBILIST(LobsterInteractionsHolder):
 
                 interaction_counter += 1
 
-        self.data = np.full((len(self.interactions), len(self.spins)), np.nan, dtype=np.float64)
+        self._set_data_from_interactions()
 
-        for i, interaction in enumerate(self.interactions):
-            if "icoxx" in interaction:
-                icoxx = interaction["icoxx"]
-            else:
-                raise ValueError(f"No ICOXX data found for interaction: {interaction}")
-
-            if Spin.up in icoxx:
-                self.data[i, 0] = icoxx[Spin.up]
-            if Spin.down in icoxx:
-                self.data[i, 1] = icoxx[Spin.down]
+    _set_data_from_interactions = ICOXXLIST._set_data_from_interactions
 
     get_data_by_properties = ICOXXLIST.get_data_by_properties
 

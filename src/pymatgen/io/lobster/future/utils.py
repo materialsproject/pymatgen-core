@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.lobster.future.constants import LOBSTER_ORBITALS
+
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
 
 
 def natural_sort(list_to_sort: str) -> list[Any]:
@@ -122,3 +127,50 @@ def restore_spin_keys(obj: Any) -> Any:
         return new_dict
 
     return obj
+
+
+def _wavefunction_on_periodic_grid(
+    grid: tuple[int, int, int],
+    lattice_matrix: ArrayLike,
+    points: ArrayLike,
+    reals: ArrayLike,
+    imaginaries: ArrayLike,
+) -> tuple[NDArray, NDArray, NDArray]:
+    """Map a LOBSTER real-space wave function onto the periodic grid used by VolumetricData.
+
+    LOBSTER writes the wave function on a (Nx+1, Ny+1, Nz+1) grid that includes the periodic images of the
+    first grid point along each axis. These are dropped and the remaining points are checked against the
+    expected grid positions.
+
+    Args:
+        grid (tuple[int, int, int]): Grid on which the wave function was calculated, (Nx+1, Ny+1, Nz+1).
+        lattice_matrix (ArrayLike): 3x3 lattice matrix of the structure.
+        points (ArrayLike): Cartesian coordinates of all grid points, in file order.
+        reals (ArrayLike): Real parts of the wave function, in file order.
+        imaginaries (ArrayLike): Imaginary parts of the wave function, in file order.
+
+    Returns:
+        tuple[NDArray, NDArray, NDArray]: Real part, imaginary part and density, each of shape (Nx, Ny, Nz).
+
+    Raises:
+        ValueError: If the wave function does not cover the full unit cell.
+    """
+    shape = tuple(int(n) for n in grid)
+    n_x, n_y, n_z = (n - 1 for n in shape)
+    frac_axes = [np.arange(n + 1) / float(n) for n in (n_x, n_y, n_z)]
+    frac_coords = np.stack(np.meshgrid(*frac_axes, indexing="ij"), axis=-1)[:n_x, :n_y, :n_z]
+    expected = frac_coords.reshape(-1, 3) @ np.asarray(lattice_matrix)
+    actual = np.asarray(points, dtype=np.float64).reshape(*shape, 3)[:n_x, :n_y, :n_z].reshape(-1, 3)
+
+    # A point is only rejected if none of its three coordinates matches the expected position
+    if np.any(np.all(~np.isclose(actual, expected, rtol=1e-3), axis=1)):
+        raise ValueError(
+            "The provided wavefunction from Lobster does not contain all relevant"
+            " points. "
+            "Please use a line similar to: printLCAORealSpaceWavefunction kpoint 1 "
+            "coordinates 0.0 0.0 0.0 coordinates 1.0 1.0 1.0 box bandlist 1 "
+        )
+
+    real = np.asarray(reals, dtype=np.float64).reshape(shape)[:n_x, :n_y, :n_z].copy()
+    imaginary = np.asarray(imaginaries, dtype=np.float64).reshape(shape)[:n_x, :n_y, :n_z].copy()
+    return real, imaginary, real**2 + imaginary**2

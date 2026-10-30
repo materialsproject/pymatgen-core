@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
@@ -67,14 +66,18 @@ class BandOverlaps(LobsterFile):
         Raises:
             ValueError: If no data is found for a key in the bandOverlaps file.
         """
+        spin_up_marker, spin_down_marker = (
+            f"Overlap Matrix (abs) of the orthonormalized projected bands for spin {spin_number}"
+            for spin_number in spin_numbers
+        )
         n_kpoints = {Spin.up: 0, Spin.down: 0}
         matrix_size = None
 
         current_spin = Spin.up
         for line in self.iterate_lines():
-            if f"Overlap Matrix (abs) of the orthonormalized projected bands for spin {spin_numbers[0]}" in line:
+            if spin_up_marker in line:
                 current_spin = Spin.up
-            elif f"Overlap Matrix (abs) of the orthonormalized projected bands for spin {spin_numbers[1]}" in line:
+            elif spin_down_marker in line:
                 current_spin = Spin.down
             elif "maxDeviation" in line:
                 n_kpoints[current_spin] += 1
@@ -108,9 +111,9 @@ class BandOverlaps(LobsterFile):
         kpoint_idx = {Spin.up: 0, Spin.down: 0}
         matrix_row = 0
         for line in self.iterate_lines():
-            if f"Overlap Matrix (abs) of the orthonormalized projected bands for spin {spin_numbers[0]}" in line:
+            if spin_up_marker in line:
                 current_spin = Spin.up
-            elif f"Overlap Matrix (abs) of the orthonormalized projected bands for spin {spin_numbers[1]}" in line:
+            elif spin_down_marker in line:
                 current_spin = Spin.down
             elif "k-point" in line:
                 self.band_overlaps["k_points"][current_spin][kpoint_idx[current_spin]] = [
@@ -124,7 +127,7 @@ class BandOverlaps(LobsterFile):
                 matrix_row = 0
             elif line.strip():
                 try:
-                    parts = [float(el) for el in re.split(r"\s+", line.strip())]
+                    parts = [float(el) for el in line.split()]
                 except ValueError:
                     raise ValueError(f"Incomplete or non-numeric data found in bandOverlaps file at line: {line}")
 
@@ -463,7 +466,7 @@ class Fatband(LobsterFile):
                     fatband["energies"][current_spin].append([])
                     fatband["projections"][current_spin].append([])
 
-            if data := re.findall(r"[+-]?(?:[0-9]*[.])?[0-9]+", line):
+            if data := line.split():
                 fatband["energies"][current_spin][-1].append(float(data[1]))
                 fatband["projections"][current_spin][-1].append(float(data[-1]))
 
