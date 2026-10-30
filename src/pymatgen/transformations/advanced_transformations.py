@@ -7,6 +7,7 @@ import math
 import warnings
 from fractions import Fraction
 from itertools import groupby, product
+from operator import itemgetter
 from string import ascii_lowercase
 from typing import TYPE_CHECKING, cast
 
@@ -756,32 +757,30 @@ class MagOrderingTransformation(AbstractTransformation):
         if not structure.is_ordered:
             raise RuntimeError("Something went wrong with enumeration.")
 
-        sites_to_remove = []
         logger.debug(f"Dummy species structure:\n{structure}")
-        for idx, site in enumerate(structure):
-            if isinstance(site.specie, DummySpecies):
-                sites_to_remove.append(idx)
-                spin = getattr(site.specie, "spin", 0)
-                neighbors = structure.get_neighbors(
-                    site,
-                    0.05,  # arbitrary threshold, needs to be << any bond length
-                    # but >> floating point precision issues
-                    include_index=True,
-                )
-                if len(neighbors) != 1:
-                    raise RuntimeError(f"This shouldn't happen, found {neighbors=}")
-                orig_site_idx = neighbors[0][2]
-                orig_specie = structure[orig_site_idx].specie
-                new_specie = Species(
-                    orig_specie.symbol,
-                    getattr(orig_specie, "oxi_state", None),
-                    spin=spin,
-                )
-                structure.replace(
-                    orig_site_idx,
-                    new_specie,
-                    properties=structure[orig_site_idx].properties,
-                )
+        sites_to_remove = [idx for idx, site in enumerate(structure) if isinstance(site.specie, DummySpecies)]
+        if not sites_to_remove:
+            return structure
+        # A single neighbor list for the whole structure: Structure.get_neighbors(site, ...) on each dummy
+        # site is slower and misses the coincident original site when that site has index 0.
+        # The 0.05 A cutoff is arbitrary, it needs to be << any bond length but >> floating point noise.
+        center_indices, point_indices, _, _ = structure.get_neighbor_list(0.05)
+        for idx in sites_to_remove:
+            neighbors = point_indices[center_indices == idx]
+            if len(neighbors) != 1:
+                raise RuntimeError(f"This shouldn't happen, found {len(neighbors)} sites coincident with {idx=}")
+            orig_site_idx = int(neighbors[0])
+            orig_specie = structure[orig_site_idx].specie
+            new_specie = Species(
+                orig_specie.symbol,
+                getattr(orig_specie, "oxi_state", None),
+                spin=getattr(structure[idx].specie, "spin", 0),
+            )
+            structure.replace(
+                orig_site_idx,
+                new_specie,
+                properties=structure[orig_site_idx].properties,
+            )
         structure.remove_sites(sites_to_remove)
         logger.debug(f"Structure with dummy species removed:\n{structure}")
         return structure
@@ -796,22 +795,18 @@ class MagOrderingTransformation(AbstractTransformation):
             Structure: Structure with spin magnitudes added.
         """
         for idx, site in enumerate(structure):
-            if getattr(site.specie, "spin", False):
-                spin = site.specie.spin
-                spin = getattr(site.specie, "spin", None)
-                sign = int(spin) if spin else 0
-                if spin:
-                    # this very hacky bit of code only works because we know
-                    # that on disordered sites in this class, all species are the same
-                    # but have different spins, and this is comma-delimited
-                    sp = str(site.specie).split(",", maxsplit=1)[0]
-                    new_spin = sign * self.mag_species_spin.get(sp, 0)
-                    new_specie = Species(
-                        site.specie.symbol,
-                        getattr(site.specie, "oxi_state", None),
-                        spin=new_spin,
-                    )
-                    structure.replace(idx, new_specie, properties=site.properties)
+            if not (spin := getattr(site.specie, "spin", None)):
+                continue
+            # this very hacky bit of code only works because we know
+            # that on disordered sites in this class, all species are the same
+            # but have different spins, and this is comma-delimited
+            sp = str(site.specie).split(",", maxsplit=1)[0]
+            new_specie = Species(
+                site.specie.symbol,
+                getattr(site.specie, "oxi_state", None),
+                spin=int(spin) * self.mag_species_spin.get(sp, 0),
+            )
+            structure.replace(idx, new_specie, properties=site.properties)
         logger.debug(f"Structure with spin magnitudes:\n{structure}")
         return structure
 
@@ -841,7 +836,7 @@ class MagOrderingTransformation(AbstractTransformation):
 
         # trivial case
         if structure.is_ordered:
-            structure = self._remove_dummy_species(structure)
+            structure = self._add_spin_magnitudes(self._remove_dummy_species(structure))
             return [structure] if return_ranked_list > 1 else structure
 
         enum_kwargs = self.enum_kwargs.copy()
@@ -888,13 +883,15 @@ class MagOrderingTransformation(AbstractTransformation):
         # Remove duplicate structures and group according to energy model
         matcher = StructureMatcher(comparator=SpinComparator())
 
-        def key(struct: Structure) -> int:
-            return SpacegroupAnalyzer(struct, 0.1).get_space_group_number()
-
+        # space group number of each structure, computed once and used for both sorting and grouping
+        structs = [dct["structure"] for dct in all_structs]  # type: ignore[index]
+        spg_and_structs = sorted(
+            ((SpacegroupAnalyzer(struct, 0.1).get_space_group_number(), struct) for struct in structs),  # type: ignore[arg-type]
+            key=itemgetter(0),
+        )
         out = []
-        for _, group in groupby(sorted((dct["structure"] for dct in all_structs), key=key), key):  # type: ignore[arg-type, index]
-            group = list(group)  # type: ignore[assignment]
-            grouped = matcher.group_structures(group)
+        for _, group in groupby(spg_and_structs, itemgetter(0)):
+            grouped = matcher.group_structures([struct for _, struct in group])
             out.extend([{"structure": g[0], "energy": self.energy_model.get_energy(g[0])} for g in grouped])
 
         self._all_structures = sorted(out, key=lambda dct: dct["energy"])

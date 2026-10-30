@@ -7,6 +7,7 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core.ewald import EwaldSummation
 from pymatgen.core.structure import Molecule, Structure
 from pymatgen.transformations.site_transformations import (
     AddSitePropertyTransformation,
@@ -232,6 +233,14 @@ class TestPartialRemoveSitesTransformation:
         )
         struct = trafo.apply_transformation(self.struct)
         assert struct.formula == "Li2 O2"
+
+        # energy used to be the per-site array sum(e_matrix) instead of a scalar
+        (output,) = trafo.apply_transformation(self.struct, return_ranked_list=True)
+        assert isinstance(output["energy"], float)
+        e_matrix = EwaldSummation(self.struct).total_energy_matrix
+        kept = [idx for idx, site in enumerate(self.struct) if site in output["structure"]]
+        assert len(kept) == 4
+        assert output["energy"] == approx(e_matrix[np.ix_(kept, kept)].sum())
 
     def test_apply_transformation_fast(self):
         trafo = PartialRemoveSitesTransformation(

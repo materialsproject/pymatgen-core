@@ -7,6 +7,7 @@ import math
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+import numpy as np
 from monty.json import MontyDecoder, MSONable
 
 from pymatgen.core import get_el_sp
@@ -131,17 +132,21 @@ class SpecieProximityFilter(AbstractStructureFilter):
 
     def test(self, structure: Structure):
         """True if structure does not contain species within specified distances."""
-        all_species = set(self.specie_and_min_dist)
-        for site in structure:
-            species = set(site.species)
-            if sp_to_test := species.intersection(all_species):
-                max_r = max(self.specie_and_min_dist[sp] for sp in sp_to_test)
-                neighbors = structure.get_neighbors(site, max_r)
-                for sp in sp_to_test:
-                    for nn_site, dist, *_ in neighbors:
-                        if sp in nn_site.species and dist < self.specie_and_min_dist[sp]:
-                            return False
-        return True
+        # mask of the sites containing each species of interest
+        site_masks = {
+            sp: mask
+            for sp in self.specie_and_min_dist
+            if (mask := np.array([sp in site.species for site in structure], dtype=bool)).any()
+        }
+        if not site_masks:
+            return True
+        # one neighbor list for all sites instead of a neighbor search per site
+        max_r = max(self.specie_and_min_dist[sp] for sp in site_masks)
+        center_indices, point_indices, _, distances = structure.get_neighbor_list(max_r)
+        return not any(
+            np.any(mask[center_indices] & mask[point_indices] & (distances < self.specie_and_min_dist[sp]))
+            for sp, mask in site_masks.items()
+        )
 
     def as_dict(self):
         """Get MSONable dict."""
