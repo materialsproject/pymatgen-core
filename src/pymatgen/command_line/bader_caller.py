@@ -128,6 +128,13 @@ class BaderAnalysis:
         if cube_filename and chgcar_filename:
             raise ValueError("Cannot parse cube and CHGCAR at the same time.")
 
+        # Resolve input paths before ScratchDir changes the working directory,
+        # otherwise relative paths can no longer be found.
+        chgcar_filename, potcar_filename, chgref_filename, cube_filename = (
+            str(Path(filename).resolve()) if filename else ""
+            for filename in (chgcar_filename, potcar_filename, chgref_filename, cube_filename)
+        )
+
         with ScratchDir("."):
             if chgcar_filename:
                 filepath = chgcar_fpath = temp_decompress(chgcar_filename)
@@ -181,7 +188,7 @@ class BaderAnalysis:
             # Determine Bader version
             try:
                 self.version = float(stdout.split()[5])
-            except ValueError:
+            except (ValueError, IndexError):
                 self.version = -1  # Unknown
 
             if self.version < 1.0:
@@ -393,7 +400,7 @@ class BaderAnalysis:
             return filepath
 
         chgcar_filename = _get_filepath("CHGCAR")
-        if chgcar_filename is None:
+        if not chgcar_filename:  # _get_filepath returns "" if not found
             raise FileNotFoundError("Could not find CHGCAR!")
         potcar_filename = _get_filepath("POTCAR")
         aeccar0 = _get_filepath("AECCAR0")
@@ -534,10 +541,9 @@ def bader_analysis_from_objects(
             summary["charge_transfer"] = charge_transfer
 
         if chgcar.is_spin_polarized:
-            # write a CHGCAR containing magnetization density only
-            chgcar.data["total"] = chgcar.data["diff"]
-            chgcar.is_spin_polarized = False
-            chgcar.write_file("CHGCAR_mag")
+            # write a CHGCAR containing magnetization density only (without mutating the input)
+            chgcar_mag = Chgcar(chgcar.poscar, {"total": chgcar.data["diff"]})
+            chgcar_mag.write_file("CHGCAR_mag")
 
             chgcar_mag_path = f"{tmp_dir}/CHGCAR_mag"
             ba = BaderAnalysis(
