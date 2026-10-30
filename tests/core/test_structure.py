@@ -2828,7 +2828,7 @@ Sites (8)
         with _patched_modules(fake_modules):
             relaxed, traj = self.cu_structure.relax(calculator="m3gnet", steps=2, return_trajectory=True)
 
-        load_model.assert_called_once_with("M3GNet-MP-2021.2.8-PES")
+        load_model.assert_called_once_with("M3GNet-PES-MatPES-r2SCAN-2025.2")
         pes_calculator.assert_called_once_with(potential="potential", stress_weight=1 / 160.21766208)
         assert isinstance(traj, FakeTrajectoryObserver)
         assert len(observer_calls) == 1

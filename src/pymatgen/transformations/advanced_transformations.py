@@ -302,8 +302,8 @@ class EnumerateStructureTransformation(AbstractTransformation):
                 this parameter.
             sort_criteria (str or callable): Sort by Ewald energy ("ewald", must have oxidation states and slow) or
                 M3GNet relaxed energy ("m3gnet_relax", which is the most accurate but most expensive and provides
-                pre-relaxed structures - needs m3gnet package installed) or by M3GNet static energy ("m3gnet_static")
-                or by number of sites ("nsites", the fastest, the default). The expense of m3gnet_relax or m3gnet_static
+                pre-relaxed structures - needs matgl installed) or by M3GNet static energy ("m3gnet")
+                or by number of sites ("nsites", the fastest, the default). The expense of m3gnet_relax or m3gnet
                 can be worth it if it significantly reduces the number of structures to be considered. m3gnet_relax
                 speeds up the subsequent DFT calculations. Alternatively, a callable can be supplied that returns a
                 (Structure, energy) tuple.
@@ -413,11 +413,11 @@ class EnumerateStructureTransformation(AbstractTransformation):
             from matgl.ext.ase import M3GNetCalculator, Relaxer
 
             if self.sort_criteria == "m3gnet_relax":
-                potential = matgl.load_model("M3GNet-MP-2021.2.8-PES")
+                potential = matgl.load_model("M3GNet-PES-MatPES-r2SCAN-2025.2")
                 m3gnet_model = Relaxer(potential=potential)
             elif self.sort_criteria == "m3gnet":
-                potential = matgl.load_model("M3GNet-MP-2021.2.8-PES")
-                m3gnet_model = M3GNetCalculator(potential=potential, stress_weight=0.01)
+                potential = matgl.load_model("M3GNet-PES-MatPES-r2SCAN-2025.2")
+                m3gnet_model = M3GNetCalculator(potential=potential, stress_weight=1 / 160.21766208)
 
         def _get_stats(struct):
             if callable(self.sort_criteria):

@@ -963,7 +963,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
                 from matgl.ext.ase import PESCalculator
             except ImportError:
                 raise ImportError("matgl not installed. Try `pip install matgl`.")
-            calculator = "M3GNet-MP-2021.2.8-PES" if calculator.lower() == "m3gnet" else calculator
+            calculator = "M3GNet-PES-MatPES-r2SCAN-2025.2" if calculator.lower() == "m3gnet" else calculator
             potential = matgl.load_model(calculator)
             return PESCalculator(potential=potential, **params)
 
