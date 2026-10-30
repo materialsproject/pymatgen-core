@@ -12,7 +12,7 @@ import warnings
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from io import BytesIO
+from io import BufferedReader, BytesIO, StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -137,13 +137,69 @@ def _parse_v_parameters(
     return floats
 
 
+def _parse_float_rows(rows: list[str | None], n_cols: int) -> NDArray[np.float64] | None:
+    """Bulk-parse rows of whitespace-separated floats (the text of ``<r>``/``<v>`` elements).
+
+    All rows are joined and parsed in a single call to the C float parser, which is much
+    faster than parsing each row separately.
+
+    Args:
+        rows: Text of each row.
+        n_cols: Expected number of floats per row.
+
+    Returns:
+        Float64 array of shape (len(rows), n_cols), or None if the rows do not contain
+        exactly len(rows) * n_cols parsable floats (e.g. ``****`` overflow markers or
+        missing text), in which case the caller should fall back to a more tolerant parser.
+    """
+    if (n_values := len(rows) * n_cols) == 0:
+        return None
+    try:
+        stream = BytesIO(" ".join(rows).encode())  # type: ignore[arg-type]
+    except TypeError:  # row without text
+        return None
+    out = np.empty(n_values + 1)  # one spare slot to detect surplus values
+    if parse_n_doubles(stream, out) != n_values or stream.read().strip():
+        return None
+    return out[:n_values].reshape(len(rows), n_cols)
+
+
+def _parse_nested_sets(root) -> NDArray[np.float64] | None:
+    """Parse regularly nested ``<set>`` blocks of ``<r>`` rows into a single array.
+
+    The shape is inferred from the first element at each nesting level, i.e.
+    ``(n_sets_level_0, n_sets_level_1, ..., n_rows, n_cols)``.
+
+    Returns:
+        The parsed array, or None if the block is empty, irregular or contains
+        unparsable values.
+    """
+    shape: list[int] = []
+    node = root
+    while sets := node.findall("set"):
+        shape.append(len(sets))
+        node = sets[0]
+    first_rows = node.findall("r")
+    if not first_rows or first_rows[0].text is None:
+        return None
+    shape += [len(first_rows), len(first_rows[0].text.split())]
+    rows = [r.text for r in root.iter("r")]
+    if len(rows) != math.prod(shape[:-1]):
+        return None
+    data = _parse_float_rows(rows, shape[-1])
+    return None if data is None else data.reshape(shape)
+
+
 def _parse_vasp_array(elem) -> list[list[bool]] | NDArray[np.float64]:
     if elem.get("type") == "logical":
         return [[i == "T" for i in v.text.split()] for v in elem]
 
-    try:
-        # numerical data, try parse with numpy loadtxt for efficiency:
-        return np.loadtxt([e.text for e in elem], ndmin=2, dtype=np.float64)
+    rows = [e.text for e in elem]
+    if rows and rows[0] is not None and (data := _parse_float_rows(rows, len(rows[0].split()))) is not None:
+        return data
+
+    try:  # irregular rows or unparsable values
+        return np.loadtxt(rows, ndmin=2, dtype=np.float64)
     except ValueError:  # unexpectedly couldn't re-shape to grid
         return np.array([list(map(_vasprun_float, e.text.split())) for e in elem])
 
@@ -1486,40 +1542,53 @@ class Vasprun(MSONable):
                 "efermi": self.efermi,
             }
 
+        # Large arrays converted with ndarray.tolist() are already JSON-native, so they are
+        # inserted only after jsanitize to avoid recursively re-walking millions of floats.
+        # Placeholders keep the key order in vout unchanged.
+        array_lists: dict[str, Any] = {}
+
         if self.eigenvalues:
-            eigen = {str(spin): v.tolist() for spin, v in self.eigenvalues.items()}
-            vout["eigenvalues"] = eigen
+            vout["eigenvalues"] = None
+            array_lists["eigenvalues"] = {str(spin): v.tolist() for spin, v in self.eigenvalues.items()}
             gap, cbm, vbm, is_direct = self.eigenvalue_band_properties
             vout |= {"bandgap": gap, "cbm": cbm, "vbm": vbm, "is_gap_direct": is_direct}
 
             if self.projected_eigenvalues:
-                vout["projected_eigenvalues"] = {
+                vout["projected_eigenvalues"] = None
+                array_lists["projected_eigenvalues"] = {
                     str(spin): v.tolist() for spin, v in self.projected_eigenvalues.items()
                 }
 
             if self.projected_magnetization is not None:
-                vout["projected_magnetization"] = self.projected_magnetization.tolist()
+                vout["projected_magnetization"] = None
+                array_lists["projected_magnetization"] = self.projected_magnetization.tolist()
 
         if kpt_opt_props and kpt_opt_props.eigenvalues:
-            eigen = {str(spin): v.tolist() for spin, v in kpt_opt_props.eigenvalues.items()}
-            vout["eigenvalues_kpoints_opt"] = eigen
+            vout["eigenvalues_kpoints_opt"] = None
+            array_lists["eigenvalues_kpoints_opt"] = {
+                str(spin): v.tolist() for spin, v in kpt_opt_props.eigenvalues.items()
+            }
             # TODO: implement kpoints_opt eigenvalue_band_proprties.
             # gap, cbm, vbm, is_direct = self.eigenvalue_band_properties
             # vout |= {"bandgap": gap, "cbm": cbm, "vbm": vbm, "is_gap_direct": is_direct}
 
             if kpt_opt_props.projected_eigenvalues:
-                vout["projected_eigenvalues_kpoints_opt"] = {
+                vout["projected_eigenvalues_kpoints_opt"] = None
+                array_lists["projected_eigenvalues_kpoints_opt"] = {
                     str(spin): v.tolist() for spin, v in kpt_opt_props.projected_eigenvalues.items()
                 }
 
             if kpt_opt_props.projected_magnetization is not None:
-                vout["projected_magnetization_kpoints_opt"] = kpt_opt_props.projected_magnetization.tolist()
+                vout["projected_magnetization_kpoints_opt"] = None
+                array_lists["projected_magnetization_kpoints_opt"] = kpt_opt_props.projected_magnetization.tolist()
 
         vout["epsilon_static"] = self.epsilon_static
         vout["epsilon_static_wolfe"] = self.epsilon_static_wolfe
         vout["epsilon_ionic"] = self.epsilon_ionic
         dct["output"] = vout
-        return jsanitize(dct, strict=True)
+        dct = jsanitize(dct, strict=True)
+        dct["output"] |= array_lists
+        return dct
 
     def _parse_params(self, elem: etree.Element) -> Incar:
         """Parse INCAR parameters and more."""
@@ -1787,12 +1856,16 @@ class Vasprun(MSONable):
     @staticmethod
     def _parse_eigen(elem: etree.Element) -> dict[Spin, NDArray]:
         """Parse eigenvalues."""
-        eigenvalues: dict[Spin, NDArray] = defaultdict(list)  # type:ignore[arg-type]
-        for s in elem.find("array").find("set").findall("set"):  # type: ignore[union-attr]
-            spin = Spin.up if s.attrib["comment"] == "spin 1" else Spin.down
-            for ss in s.findall("set"):
-                eigenvalues[spin].append(_parse_vasp_array(ss))
-        eigenvalues = {spin: np.array(v) for spin, v in eigenvalues.items()}
+        root = elem.find("array").find("set")  # type: ignore[union-attr]
+        spin_sets = root.findall("set")  # type: ignore[union-attr]
+        spins = [Spin.up if s.attrib["comment"] == "spin 1" else Spin.down for s in spin_sets]
+        if len(set(spins)) == len(spins) and (data := _parse_nested_sets(root)) is not None and data.ndim == 4:
+            eigenvalues = dict(zip(spins, data, strict=True))
+        else:  # irregular or unparsable data: parse each k-point separately
+            eigen_lists: dict[Spin, list] = defaultdict(list)
+            for spin, s in zip(spins, spin_sets, strict=True):
+                eigen_lists[spin].extend(_parse_vasp_array(ss) for ss in s.findall("set"))
+            eigenvalues = {spin: np.array(v) for spin, v in eigen_lists.items()}
         elem.clear()
         return eigenvalues
 
@@ -1802,25 +1875,27 @@ class Vasprun(MSONable):
     ) -> tuple[dict[Spin, NDArray], NDArray | None]:
         """Parse projected eigenvalues."""
         root = elem.find("array").find("set")  # type: ignore[union-attr]
-        _proj_eigen: dict[int, NDArray] = defaultdict(list)  # type:ignore[arg-type]
-        for s in root.findall("set"):  # type: ignore[union-attr]
-            spin: int = int(re.match(r"spin(\d+)", s.attrib["comment"])[1])  # type: ignore[index]
-
-            # Force spin to be +1 or -1
-            for ss in s.findall("set"):
-                dk = []
-                for sss in ss.findall("set"):
-                    db = _parse_vasp_array(sss)
-                    dk.append(db)
-                _proj_eigen[spin].append(dk)
-        _proj_eigen = {spin: np.array(v) for spin, v in _proj_eigen.items()}
+        spin_sets = root.findall("set")  # type: ignore[union-attr]
+        spins = [int(re.match(r"spin(\d+)", s.attrib["comment"])[1]) for s in spin_sets]  # type: ignore[index]
+        _proj_eigen: dict[int, NDArray]
+        if len(set(spins)) == len(spins) and (data := _parse_nested_sets(root)) is not None and data.ndim == 5:
+            # Fast path: data has shape (n_spin_channels, n_kpoints, n_bands, n_ions, n_orbitals)
+            _proj_eigen = dict(zip(spins, data, strict=True))
+        else:  # irregular or unparsable data: parse each band separately
+            proj_lists: dict[int, list] = defaultdict(list)
+            for spin, s in zip(spins, spin_sets, strict=True):
+                proj_lists[spin].extend(
+                    [_parse_vasp_array(sss) for sss in ss.findall("set")] for ss in s.findall("set")
+                )
+            _proj_eigen = {spin: np.array(v) for spin, v in proj_lists.items()}
 
         if len(_proj_eigen) > 2:
             # non-collinear magentism (also spin-orbit coupling) enabled, last three
             # "spin channels" are the projected magnetization of the orbitals in the
             # x, y, and z Cartesian coordinates
             proj_mag = np.stack([_proj_eigen.pop(i) for i in range(2, 5)], axis=-1)  # type: ignore[call-overload]
-            proj_eigen: dict[Spin, NDArray] = {Spin.up: _proj_eigen[1]}
+            # Copy so that the (possibly shared) buffer of the magnetization channels can be freed
+            proj_eigen: dict[Spin, NDArray] = {Spin.up: np.array(_proj_eigen[1])}
         else:
             proj_eigen = {Spin.up if k == 1 else Spin.down: v for k, v in _proj_eigen.items()}
             proj_mag = None
@@ -2135,13 +2210,12 @@ class Outcar:
         self.filename: str = str(filename)
         self.is_stopped: bool = False
 
-        # Slurp the OUTCAR once. Every `read_pattern` / `read_table_pattern`
-        # call in __init__ (20+) reuses this cache instead of re-opening and
-        # decompressing the file. Helpers (read_chemical_shielding etc.) that
-        # use micro_pyawk still hit disk; they are conditional on
-        # NMR/LEPSILON/LCALCPOL and out of scope here.
+        # Slurp the OUTCAR once. Every `read_pattern` / `read_table_pattern` /
+        # `_micro_pyawk` call reuses this cache instead of re-opening and
+        # decompressing the file.
         with zopen(self.filename, mode="rt", encoding="utf-8") as _f:
             self._text: str = _f.read()  # type:ignore[assignment]
+        self._text_filename: str = self.filename
         self._lines: list[str] = self._text.splitlines()
 
         # Assume a compilation with parallelization enabled.
@@ -2264,7 +2338,7 @@ class Outcar:
                 mag_z = []
                 read_mag_z = True
                 read_charge, read_mag_x, read_mag_y = False, False, False
-            elif re.search("electrostatic", clean):
+            elif "electrostatic" in clean:
                 read_charge, read_mag_x, read_mag_y, read_mag_z = (
                     False,
                     False,
@@ -2454,6 +2528,24 @@ class Outcar:
             final_energy_contribs[key] = sum(map(float, self.data[key][-1]))
         self.final_energy_contribs = final_energy_contribs
 
+    def _micro_pyawk(self, search: list, results: Any) -> Any:
+        """Equivalent of `pymatgen.util.io_utils.micro_pyawk` on the cached OUTCAR text.
+
+        Lines are yielded exactly as when iterating over the file (including the
+        trailing newline), so patterns and test functions behave identically, but
+        the file is not re-read and the regexes are compiled only once. Falls back to
+        reading the file if `filename` has been changed after initialization.
+        """
+        text = getattr(self, "_text", None)
+        if text is None or str(self.filename) != getattr(self, "_text_filename", None):
+            return micro_pyawk(self.filename, search, results)
+        searches = [(re.compile(regex).search, test, run) for regex, test, run in search]
+        for line in StringIO(text):
+            for regex_search, test, run in searches:
+                if (match := regex_search(line)) is not None and (test is None or test(results, line)):
+                    run(results, match)
+        return results
+
     @staticmethod
     def _parse_sci_notation(line: str) -> list[float]:
         """
@@ -2571,18 +2663,29 @@ class Outcar:
         # re-opening the file on every call; fall back to monty.regrep
         # only if the cache hasn't been set (e.g. when subclasses skip
         # the parent __init__).
-        if getattr(self, "_lines", None) is not None:
-            compiled = {k: re.compile(p) for k, p in patterns.items()}
-            matches: dict[str, list] = {k: [] for k in patterns}
-            line_iter = reversed(self._lines) if reverse else iter(self._lines)
-            for line in line_iter:
-                for k, p in compiled.items():
-                    if m := p.search(line):
-                        matches[k].append([postprocess(g) for g in m.groups()])
-                if terminate_on_match and all(matches[k] for k in patterns):
-                    break
-            for key in patterns:
-                self.data[key] = matches[key]
+        if (lines := getattr(self, "_lines", None)) is not None:
+            if terminate_on_match and len(patterns) > 1:
+                # Scan line by line until every pattern has matched at least once
+                compiled = [(key, re.compile(pattern).search) for key, pattern in patterns.items()]
+                matches: dict[str, list] = {key: [] for key in patterns}
+                for line in reversed(lines) if reverse else lines:
+                    for key, search in compiled:
+                        if match := search(line):
+                            matches[key].append([postprocess(g) for g in match.groups()])
+                    if all(matches.values()):
+                        break
+                self.data |= matches
+                return
+
+            # Patterns are independent of each other, so scan the lines once per pattern
+            # with the per-line regex search running in C via map/filter.
+            for key, pattern in patterns.items():
+                hits: Iterator[re.Match] = filter(
+                    None, map(re.compile(pattern).search, reversed(lines) if reverse else lines)
+                )
+                if terminate_on_match:
+                    hits = itertools.islice(hits, 1)
+                self.data[key] = [[postprocess(g) for g in match.groups()] for match in hits]
             return
 
         raw_matches = regrep(
@@ -3190,7 +3293,7 @@ class Outcar:
             self.er_ev = {Spin.up: None, Spin.down: None}  # type:ignore[dict-item]
             self.er_bp = {Spin.up: None, Spin.down: None}  # type:ignore[dict-item]
 
-            micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+            self._micro_pyawk(search, self)
 
             if self.er_ev[Spin.up] is not None and self.er_ev[Spin.down] is not None:
                 self.er_ev_tot = self.er_ev[Spin.up] + self.er_ev[Spin.down]  # type: ignore[operator,assignment]
@@ -3246,7 +3349,7 @@ class Outcar:
 
         self.internal_strain_ion = None
         self.internal_strain_tensor: list[NDArray[np.float64]] = []
-        micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+        self._micro_pyawk(search, self)
 
     def read_lepsilon(self) -> None:
         """Read a LEPSILON run.
@@ -3397,7 +3500,7 @@ class Outcar:
             self.born_ion: int | None = None
             self.born: list | NDArray = []
 
-            micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+            self._micro_pyawk(search, self)
 
             self.born = np.array(self.born)
 
@@ -3529,7 +3632,7 @@ class Outcar:
             self.piezo_ionic_index: int | None = None
             self.piezo_ionic_tensor = np.zeros((3, 6))
 
-            micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+            self._micro_pyawk(search, self)
 
             self.dielectric_ionic_tensor = self.dielectric_ionic_tensor.tolist()  # type:ignore[assignment]
             self.piezo_ionic_tensor = self.piezo_ionic_tensor.tolist()  # type:ignore[assignment]
@@ -3631,12 +3734,12 @@ class Outcar:
                 ]
             )
 
-            micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+            self._micro_pyawk(search, self)
 
             # Fix polarization units in new versions of VASP
             regex = r"^.*Ionic dipole moment: .*"
             search = [[regex, None, lambda x, y: x.append(y.group(0))]]
-            results = micro_pyawk(self.filename, search, [])  # type:ignore[arg-type]
+            results = self._micro_pyawk(search, [])
 
             if "|e|" in results[0]:
                 self.p_elec *= -1  # type: ignore[operator, assignment]
@@ -3674,7 +3777,7 @@ class Outcar:
                 )
             )
 
-            micro_pyawk(self.filename, search, self)  # type:ignore[arg-type]
+            self._micro_pyawk(search, self)
 
             self.zval_dict: dict[str, float] = dict(zip(self.atom_symbols, self.zvals, strict=True))  # type: ignore[attr-defined]
 
@@ -3902,7 +4005,12 @@ class VolumetricData(BaseVolumetricData):
         Returns:
             tuple[Poscar, dict, dict]: Poscar object, data dict, data_aug dict
         """
-        with zopen(filename, mode="rb") as file:
+        with zopen(filename, mode="rb") as raw_file:
+            # parse_n_doubles seeks backwards after each block. On compressed
+            # streams that restarts decompression from the beginning of the
+            # file, so decompress compressed files into memory once instead.
+            file = raw_file if isinstance(raw_file, BufferedReader) else BytesIO(raw_file.read())
+
             # parse poscar
             poscar = None
             poscar_string: list[bytes] = []

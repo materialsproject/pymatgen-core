@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import tarfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from io import BytesIO
 from pathlib import Path
 from shutil import copyfile, copyfileobj
@@ -51,6 +51,7 @@ from pymatgen.io.vasp.outputs import (
     Waveder,
     Xdatcar,
     _parse_from_incar,
+    _parse_vasp_array,
     get_adjusted_fermi_level,
     get_band_structure_from_vasp_multiple_branches,
 )
@@ -839,6 +840,37 @@ class TestVasprun(MatSciTest):
         assert vasp_run_dct["input"]["nkpoints_opt"] == 100
         assert vasp_run_dct["input"]["nkpoints"] == 10
         assert vasp_run_dct["output"]["eigenvalues_kpoints_opt"]["1"][0][0][0] == approx(-6.1536)
+        # Large arrays are serialized as plain nested lists, in a fixed key order
+        output = vasp_run_dct["output"]
+        for key, values in (
+            ("eigenvalues", vasp_run.eigenvalues),
+            ("projected_eigenvalues", vasp_run.projected_eigenvalues),
+            ("eigenvalues_kpoints_opt", kpt_opt_props.eigenvalues),
+            ("projected_eigenvalues_kpoints_opt", kpt_opt_props.projected_eigenvalues),
+        ):
+            assert list(output[key]) == [str(spin) for spin in values]
+            for spin, arr in values.items():
+                assert type(output[key][str(spin)]) is list
+                np.testing.assert_array_equal(output[key][str(spin)], arr)
+        assert list(output) == [
+            "ionic_steps",
+            "final_energy",
+            "final_energy_per_atom",
+            "crystal",
+            "efermi",
+            "eigenvalues",
+            "bandgap",
+            "cbm",
+            "vbm",
+            "is_gap_direct",
+            "projected_eigenvalues",
+            "eigenvalues_kpoints_opt",
+            "projected_eigenvalues_kpoints_opt",
+            "epsilon_static",
+            "epsilon_static_wolfe",
+            "epsilon_ionic",
+        ]
+        assert json.dumps(vasp_run_dct) is not None
 
     def test_kpoints_opt_band_structure(self):
         vasp_run = Vasprun(
@@ -3866,6 +3898,82 @@ class TestVasprunEdgeCases(MatSciTest):
         oscillator_strength, _ = Vasprun._parse_optical_transition(elem)
         assert_allclose(oscillator_strength, [1.5, 2.5])
 
+    @pytest.mark.parametrize("sep", ["", "\n  "])
+    def test_parse_vasp_array(self, sep):
+        # rows must not be glued together even without whitespace between the elements
+        elem = ET.fromstring(f"<varray><v> 1.0 2.0 3.0 </v>{sep}<v>4.0 -5.0 6.5E-01</v></varray>")
+        arr = _parse_vasp_array(elem)
+        assert arr.dtype == np.float64
+        assert_allclose(arr, [[1, 2, 3], [4, -5, 0.65]])
+
+        assert_allclose(_parse_vasp_array(ET.fromstring("<varray><v>1.5 2.5</v></varray>")), [[1.5, 2.5]])
+        assert_allclose(_parse_vasp_array(ET.fromstring("<set><r>1.5</r><r>2.5</r></set>")), [[1.5], [2.5]])
+
+    def test_parse_vasp_array_logical(self):
+        elem = ET.fromstring('<varray type="logical"><v>T F T</v><v>F F T</v></varray>')
+        assert _parse_vasp_array(elem) == [[True, False, True], [False, False, True]]
+
+    def test_parse_vasp_array_overflow(self):
+        elem = ET.fromstring("<varray><v>1.0 2.0</v>\n<v>********* 4.0</v></varray>")
+        with pytest.warns(UserWarning, match="Float overflow"):
+            arr = _parse_vasp_array(elem)
+        assert arr.shape == (2, 2)
+        assert np.isnan(arr[1, 0])
+        assert_allclose(arr[[0, 0, 1], [0, 1, 1]], [1, 2, 4])
+
+    @staticmethod
+    def _nested_set_xml(tag: str, data: np.ndarray, spin_label: str) -> str:
+        """Build a vasprun-like <eigenvalues>/<projected> block from data of shape
+        (n_spins, n_kpoints, n_bands, [n_ions,] n_cols)."""
+        fmt = lambda vals: " ".join("*********" if np.isnan(v) else f"{v:.4f}" for v in vals)  # noqa: E731
+        spins = []
+        for i_spin, spin_data in enumerate(data, start=1):
+            kpts = []
+            for i_kpt, kpt_data in enumerate(spin_data, start=1):
+                if data.ndim == 4:  # eigenvalues: rows are bands
+                    body = "\n".join(f"<r>{fmt(row)}</r>" for row in kpt_data)
+                else:  # projected: sets of bands, rows are ions
+                    body = "\n".join(
+                        f'<set comment="band {i_band}">' + "\n".join(f"<r>{fmt(r)}</r>" for r in band) + "</set>"
+                        for i_band, band in enumerate(kpt_data, start=1)
+                    )
+                kpts.append(f'<set comment="kpoint {i_kpt}">\n{body}\n</set>')
+            spins.append(f'<set comment="{spin_label}{i_spin}">\n' + "\n".join(kpts) + "\n</set>")
+        return f"<{tag}><array><field>x</field><set>\n" + "\n".join(spins) + f"\n</set></array></{tag}>"
+
+    @pytest.mark.parametrize("overflow", [False, True])
+    def test_parse_eigen(self, overflow):
+        data = np.arange(2 * 3 * 4 * 2, dtype=float).reshape(2, 3, 4, 2) / 7
+        if overflow:
+            data[1, 2, 3, 0] = np.nan
+        elem = ET.fromstring(self._nested_set_xml("eigenvalues", data, "spin "))
+        with pytest.warns(UserWarning, match="Float overflow") if overflow else nullcontext():
+            eigen = Vasprun._parse_eigen(elem)
+        assert set(eigen) == {Spin.up, Spin.down}
+        assert_allclose(eigen[Spin.up], data[0], atol=1e-4)
+        assert_allclose(eigen[Spin.down], data[1], atol=1e-4)
+
+    @pytest.mark.parametrize("overflow", [False, True])
+    @pytest.mark.parametrize("n_spins", [1, 2, 4])
+    def test_parse_projected_eigen(self, n_spins, overflow):
+        # shape: (n_spins, n_kpoints, n_bands, n_ions, n_orbitals)
+        data = np.arange(n_spins * 2 * 3 * 2 * 4, dtype=float).reshape(n_spins, 2, 3, 2, 4) / 7
+        if overflow:
+            data[-1, 1, 2, 1, 3] = np.nan
+        elem = ET.fromstring(self._nested_set_xml("projected", data, "spin"))
+        with pytest.warns(UserWarning, match="Float overflow") if overflow else nullcontext():
+            proj_eigen, proj_mag = Vasprun._parse_projected_eigen(elem)
+        assert_allclose(proj_eigen[Spin.up], data[0], atol=1e-4)
+        if n_spins == 4:
+            assert set(proj_eigen) == {Spin.up}
+            assert proj_mag.shape == (2, 3, 2, 4, 3)
+            assert_allclose(proj_mag, np.moveaxis(data[1:], 0, -1), atol=1e-4)
+        else:
+            assert proj_mag is None
+            assert set(proj_eigen) == ({Spin.up, Spin.down} if n_spins == 2 else {Spin.up})
+            if n_spins == 2:
+                assert_allclose(proj_eigen[Spin.down], data[1], atol=1e-4)
+
 
 class TestGetAdjustedFermiLevel:
     @staticmethod
@@ -3969,16 +4077,26 @@ class TestOutcarEdgeCases(MatSciTest):
         assert self.outcar.data["energy"] == approx(self.outcar.final_energy, abs=1e-3)
         assert self.outcar.data["tangent_force"] == []
 
-    def test_read_pattern_without_cache(self):
-        patterns = {"energy": r"energy\(sigma->0\)\s+=\s+([\d\-\.]+)", "nions": r"NIONS\s+=\s+(\d+)"}
-        self.outcar.read_pattern(patterns, postprocess=float)
+    @pytest.mark.parametrize("reverse", [False, True])
+    @pytest.mark.parametrize("terminate_on_match", [False, True])
+    @pytest.mark.parametrize("keys", [("energy",), ("energy", "nions"), ("energy", "nions", "missing")])
+    def test_read_pattern_without_cache(self, keys, terminate_on_match, reverse):
+        all_patterns = {
+            "energy": r"energy\(sigma->0\)\s+=\s+([\d\-\.]+)",
+            "nions": r"NIONS\s+=\s+(\d+)",
+            "missing": r"this pattern is not in the OUTCAR (\d+)",
+        }
+        patterns = {key: all_patterns[key] for key in keys}
+        kwargs = {"postprocess": float, "terminate_on_match": terminate_on_match, "reverse": reverse}
+        self.outcar.read_pattern(patterns, **kwargs)
         cached = {key: self.outcar.data[key] for key in patterns}
-        assert len(cached["energy"]) > 1
+        assert len(cached["energy"]) == 1 if terminate_on_match and keys == ("energy",) else len(cached["energy"]) >= 1
+        assert cached.get("missing", []) == []
 
         # Without the cached lines, read_pattern falls back to monty's regrep
         self.outcar._lines = None
         self.outcar.data = {}
-        self.outcar.read_pattern(patterns, postprocess=float)
+        self.outcar.read_pattern(patterns, **kwargs)
         assert {key: self.outcar.data[key] for key in patterns} == cached
 
     def test_has_onsite_density_matrices_false(self):
