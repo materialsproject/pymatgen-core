@@ -1163,13 +1163,15 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         # (taking into account nsites for that particular element)
         el_amt = comp.get_el_amt_dict()
         elements = list(el_amt)
-        el_sums: list = []  # matrix: dim1= el_idx, dim2=possible sums
-        el_sum_scores: defaultdict = defaultdict(set)  # dict of el_idx, sum -> score
-        el_best_oxid_combo: dict = {}  # dict of el_idx, sum -> oxid combo with best score
-        for idx, el in enumerate(elements):
-            el_sum_scores[idx] = {}
-            el_best_oxid_combo[idx] = {}
-            el_sums.append([])
+        oxi_prob = type(self).oxi_prob
+        # per element: possible oxidation-state sum -> score of its best combo (in order of first appearance)
+        el_sum_scores: list[dict[float, float]] = []
+        el_best_oxid_combo: list[dict[float, tuple]] = []  # per element: sum -> oxid combo with best score
+        for el in elements:
+            sum_scores: dict[float, float] = {}
+            best_oxid_combo: dict[float, tuple] = {}
+            el_sum_scores.append(sum_scores)
+            el_best_oxid_combo.append(best_oxid_combo)
             if oxi_states_override.get(el):
                 oxids: list | tuple = oxi_states_override[el]
             elif all_oxi_states:
@@ -1177,22 +1179,22 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
             else:
                 oxids = Element(el).icsd_oxidation_states or Element(el).common_oxidation_states
 
+            # Probability of each oxidation state, looked up once rather than per combo
+            prob = {oxi: oxi_prob.get(Species(el, oxi), 0) for oxi in oxids}  # type: ignore[union-attr]
+
             # Get all possible combinations of oxidation states
             # and sum each combination
             for oxid_combo in combinations_with_replacement(oxids, int(el_amt[el])):
-                # List this sum as a possible option
                 oxid_sum = sum(oxid_combo)
-                if oxid_sum not in el_sums[idx]:
-                    el_sums[idx].append(oxid_sum)
-
                 # Determine how probable is this combo?
-                score = sum(type(self).oxi_prob.get(Species(el, o), 0) for o in oxid_combo)  # type: ignore[union-attr]
+                score = sum(map(prob.__getitem__, oxid_combo))
 
                 # If it is the most probable combo for a certain sum,
                 # store the combination
-                if oxid_sum not in el_sum_scores[idx] or score > el_sum_scores[idx].get(oxid_sum, 0):
-                    el_sum_scores[idx][oxid_sum] = score
-                    el_best_oxid_combo[idx][oxid_sum] = oxid_combo
+                if oxid_sum not in sum_scores or score > sum_scores[oxid_sum]:
+                    sum_scores[oxid_sum] = score
+                    best_oxid_combo[oxid_sum] = oxid_combo
+        el_sums = [list(sum_scores) for sum_scores in el_sum_scores]  # possible sums for each element
 
         # Determine which combination of oxidation states for each element
         # is the most probable

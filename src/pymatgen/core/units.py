@@ -14,7 +14,7 @@ import collections
 import collections.abc
 import re
 from collections import defaultdict
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from numbers import Number
 from typing import TYPE_CHECKING, cast, overload
 
@@ -140,6 +140,33 @@ SUPPORTED_UNIT_NAMES: tuple[str, ...] = tuple(i for d in ALL_UNITS.values() for 
 
 # Mapping unit name --> unit type (unit names must be unique).
 _UNAME2UTYPE: dict[str, str] = {uname: utype for utype, dct in ALL_UNITS.items() for uname in dct}
+# Mapping base unit type --> its SI unit (the first unit with factor 1), e.g. "length" -> "m".
+_SI_UNITS: dict[str, str] = {utype: next(k for k, f in dct.items() if f == 1) for utype, dct in BASE_UNITS.items()}
+
+
+def _get_derived_unit_names() -> dict[frozenset, str]:
+    """Map each derived unit's definition, e.g. {"kg": 1, "m": 2, "s": -2}, to its name ("J").
+
+    The first unit with a given definition wins, matching the scan order of DERIVED_UNITS.
+    """
+    names: dict[frozenset, str] = {}
+    for dct in DERIVED_UNITS.values():
+        for name, definition in dct.items():
+            names.setdefault(frozenset(definition.items()), name)
+    return names
+
+
+_DERIVED_UNIT_NAMES: dict[frozenset, str] = _get_derived_unit_names()
+_UNIT_STR_RE = re.compile(r"([A-Za-z]+)\s*\^*\s*([\-0-9]*)")
+
+
+@lru_cache(maxsize=256)
+def _parse_unit_str(unit_def: str) -> tuple[tuple[str, int], ...]:
+    """Parse a unit string such as "kg m^2 s^-2" into ((unit, power), ...), dropping zero powers."""
+    unit: dict[str, int] = defaultdict(int)
+    for match in _UNIT_STR_RE.finditer(unit_def):
+        unit[match[1]] += int(match[2]) if match[2] else 1
+    return tuple((key, val) for key, val in unit.items() if val != 0)
 
 
 class UnitError(Exception):
@@ -161,28 +188,17 @@ class Unit(collections.abc.Mapping):
                 format uses "^" as the power operator and all units must be
                 space-separated.
         """
-
-        def check_mappings(u):
-            for v in DERIVED_UNITS.values():
-                for k2, v2 in v.items():
-                    if all(v2.get(ku, 0) == vu for ku, vu in u.items()) and all(
-                        u.get(kv2, 0) == vv2 for kv2, vv2 in v2.items()
-                    ):
-                        return {k2: 1}
-            return u
-
         if isinstance(unit_def, str):
-            unit: dict[str, float] = defaultdict(int)
-
-            for match in re.finditer(r"([A-Za-z]+)\s*\^*\s*([\-0-9]*)", unit_def):
-                val = match[2]
-                val = int(val) if val else 1
-                key = match[1]
-                unit[key] += val
+            unit: dict[str, Any] = dict(_parse_unit_str(unit_def))
         else:
             unit = {k: v for k, v in dict(unit_def).items() if v != 0}
 
-        self._unit = check_mappings(unit)
+        # Collapse a combination matching a derived unit, e.g. {"kg": 1, "m": 2, "s": -2} -> {"J": 1}
+        try:
+            derived = _DERIVED_UNIT_NAMES.get(frozenset(unit.items()))
+        except TypeError:  # unhashable powers cannot match a derived unit
+            derived = None
+        self._unit = unit if derived is None else {derived: 1}
 
     def __mul__(self, other: Self) -> Self:
         new_units: defaultdict = defaultdict(int)
@@ -226,29 +242,19 @@ class Unit(collections.abc.Mapping):
             tuple[dict, float]: (base_units_dict, scaling factor). base_units_dict will not
                 contain any constants, which are gathered in the scaling factor.
         """
-
-        def get_si_unit(unit):
-            unit_type = _UNAME2UTYPE[unit]
-            si_unit = filter(lambda k: BASE_UNITS[unit_type][k] == 1, BASE_UNITS[unit_type])
-            return next(iter(si_unit)), BASE_UNITS[unit_type][unit]
-
         base_units: defaultdict = defaultdict(int)
         factor: float = 1
         for k, v in self.items():
-            derived = False
-            for dct in DERIVED_UNITS.values():
-                if k in dct:
-                    for k2, v2 in dct[k].items():
-                        if isinstance(k2, Number):
-                            factor *= k2 ** (v2 * v)
-                        else:
-                            base_units[k2] += v2 * v
-                    derived = True
-                    break
-            if not derived:
-                si, f = get_si_unit(k)
-                base_units[si] += v
-                factor *= f**v
+            unit_type = _UNAME2UTYPE[k]
+            if unit_type in DERIVED_UNITS:
+                for k2, v2 in DERIVED_UNITS[unit_type][k].items():
+                    if isinstance(k2, Number):
+                        factor *= k2 ** (v2 * v)
+                    else:
+                        base_units[k2] += v2 * v
+            else:
+                base_units[_SI_UNITS[unit_type]] += v
+                factor *= BASE_UNITS[unit_type][k] ** v
         return {k: v for k, v in base_units.items() if v != 0}, factor
 
     def get_conversion_factor(self, new_unit: str | Unit) -> float:
@@ -316,11 +322,9 @@ class FloatWithUnit(float):
             unit (str | Unit): A unit. e.g. "C".
             unit_type (str): A type of unit. e.g. "charge"
         """
+        # _unit and _unit_type are already set by __new__
         if unit_type is not None and str(unit) not in ALL_UNITS[unit_type]:
             raise UnitError(f"{unit} is not a supported unit for {unit_type}")
-
-        self._unit = unit if isinstance(unit, Unit) else Unit(unit)
-        self._unit_type = unit_type
 
     def __new__(
         cls,

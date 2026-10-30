@@ -1061,13 +1061,21 @@ class Species(MSONable, Stringify):
         return getattr(self._el, attr)
 
     def __getstate__(self) -> dict:
-        return self.__dict__
+        # drop the cached hash: str hashes are salted per process, so it must not be pickled
+        return {key: val for key, val in self.__dict__.items() if key != "_hash"}
 
     def __setstate__(self, dct: dict) -> None:
         self.__dict__.update(dct)
 
     def __eq__(self, other: object) -> bool:
         """Species is equal to other only if element and oxidation states are exactly the same."""
+        if type(self) is type(other) is Species:
+            # fast path: equal elements share symbol (Z) and A
+            return (
+                self._oxi_state == other._oxi_state  # type: ignore[attr-defined]
+                and self._spin == other._spin  # type: ignore[attr-defined]
+                and self._el == other._el  # type: ignore[attr-defined]
+            )
         attrs = ("oxi_state", "symbol", "spin", "A")
         if not all(hasattr(other, attribute) for attribute in attrs):
             return NotImplemented
@@ -1078,8 +1086,15 @@ class Species(MSONable, Stringify):
         """Equal Species should have the same str representation, hence
         should hash equally. Unequal Species will have different str
         representations.
+
+        The hash is cached on first use (Species is immutable) since building str(self)
+        dominates dict/set operations on Species, e.g. Structure.composition.
         """
-        return hash(str(self))
+        try:
+            return self.__dict__["_hash"]
+        except KeyError:
+            hsh = self.__dict__["_hash"] = hash(str(self))
+            return hsh
 
     def __lt__(self, other: object) -> bool:
         """Set a default sort order for atomic species by Pauling electronegativity,

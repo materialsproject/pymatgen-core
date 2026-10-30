@@ -57,6 +57,22 @@ class TestUnit(MatSciTest):
         newton = Unit("kg") * acc
         assert str(newton * Unit("m")) == "N m"
 
+    def test_init_from_str_is_plain_mapping(self):
+        # a unit parsed from a string used to be a defaultdict: looking up a missing key
+        # returned 0 and inserted it, so "m" in Unit("ang") was True and the unit changed
+        ang = Unit("ang")
+        assert "m" not in ang
+        with pytest.raises(KeyError):
+            ang["m"]
+        assert dict(ang) == {"ang": 1}
+        assert ang == Unit("ang")
+        # zero powers are dropped, as for a dict input
+        assert Unit("m s^0") == Unit("m") == Unit({"m": 1, "s": 0})
+        # combinations of base units still collapse to derived units
+        assert dict(Unit("kg m^2 s^-2")) == {"J": 1}
+        assert dict(Unit({"kg": 1, "m": 1, "s": -2})) == {"N": 1}
+        assert dict(Unit("A s")) == {"C": 1}
+
     def test_as_base_units(self):
         # length
         u = Unit({"m": 1})  # meter
