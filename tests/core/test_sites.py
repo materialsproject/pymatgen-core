@@ -78,6 +78,13 @@ class TestSite(MatSciTest):
         with pytest.raises(ValueError, match="Species occupancies sum to more than 1"):
             self.disordered_site.species = {"Cu": 0.5, "Gd": 0.6}
 
+    def test_from_dict_does_not_alias_properties(self):
+        dct = self.propertied_site.as_dict()
+        site = Site.from_dict(dct)
+        site.properties["magmom"] = 0
+        assert self.propertied_site.properties["magmom"] == approx(5.1)
+        assert dct["properties"]["magmom"] == approx(5.1)
+
 
 class TestPeriodicSite(MatSciTest):
     def setup_method(self):
@@ -187,6 +194,22 @@ class TestPeriodicSite(MatSciTest):
             properties={"selective_dynamics": np.array([True, False, False])},
         )
         assert site_0 != site_1
+
+    def test_from_dict_does_not_alias_properties(self):
+        site = PeriodicSite("Fe", [0, 0, 0], self.lattice, properties={"magmom": 5})
+        dct = site.as_dict()
+        new_site = PeriodicSite.from_dict(dct)
+        new_site.properties["magmom"] = 0
+        assert site.properties["magmom"] == 5
+        assert dct["properties"]["magmom"] == 5
+
+    def test_init_does_not_alias_coords(self):
+        frac_coords = np.array([0.1, 0.2, 0.3])
+        site = PeriodicSite("Fe", frac_coords, self.lattice)
+        frac_coords[0] = 0.9
+        assert_allclose(site.frac_coords, [0.1, 0.2, 0.3])
+        site.a = 0.5
+        assert_allclose(frac_coords, [0.9, 0.2, 0.3])
 
     def test_as_from_dict(self):
         dct = self.site2.as_dict()

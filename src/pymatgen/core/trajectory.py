@@ -212,6 +212,10 @@ class Trajectory(MSONable):
         # Convert to position mode if not already
         self.to_positions()
 
+        # Accept numpy integers (e.g. from np.arange or np.argmin) like Python ints
+        if isinstance(frames, np.integer):
+            frames = int(frames)
+
         # For integer input, return the structure at that frame
         if isinstance(frames, int):
             if frames >= len(self):
@@ -611,7 +615,7 @@ class Trajectory(MSONable):
         len2: int,
     ) -> tuple[np.ndarray, bool]:
         """Helper function to combine trajectory lattice."""
-        if lat1.ndim == lat2.ndim == 2:
+        if lat1.ndim == lat2.ndim == 2 and np.allclose(lat1, lat2):
             constant_lat = True
             lat = lat1
         else:
