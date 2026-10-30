@@ -897,7 +897,10 @@ class TestTrajectoryAse(MatSciTest):
         assert traj[1].lattice.a == pytest.approx(3.1)
         assert [frame["energy"] for frame in traj.frame_properties] == [-1.0, -2.0]
         assert all(frame["temperature"] > 0 for frame in traj.frame_properties)
-        assert_allclose(traj[0].site_properties["velocities"], np.full((2, 3), 0.01))
+        # ASE velocities are converted to A/fs
+        from ase import units
+
+        assert_allclose(traj[0].site_properties["velocities"], np.full((2, 3), 0.01 * units.fs))
 
     def test_from_ase_property_map(self):
         filename = f"{self.tmp_path}/si.traj"
@@ -928,6 +931,22 @@ class TestTrajectoryAse(MatSciTest):
         _write_ase_traj(filename, pbc=False)
         traj = Trajectory.from_ase(filename, additional_fields=None)
         assert traj.lattice is None
+
+    def test_velocities_round_trip_and_opt_out(self):
+        velocities = [[0.01, 0.0, -0.02], [0.0, 0.03, 0.0]]  # A/fs
+        traj = Trajectory(
+            species=SI_SPECIES,
+            coords=SI_COORDS[:1],
+            lattice=LATTICE,
+            site_properties={"velocities": velocities},
+        )
+        ase_file = f"{self.tmp_path}/vel.traj"
+        traj.to_ase(ase_traj_file=ase_file)
+
+        roundtrip = Trajectory.from_ase(ase_file, store_frame_properties=False)
+        assert_allclose(roundtrip[0].site_properties["velocities"], velocities)
+        opt_out = Trajectory.from_ase(ase_file, store_frame_properties=False, additional_fields=None)
+        assert "velocities" not in opt_out[0].site_properties
 
     def test_from_ase_without_calculator(self):
         filename = f"{self.tmp_path}/si.traj"
