@@ -680,18 +680,20 @@ def get_centroid_2d(vertices: np.ndarray) -> np.ndarray:
     """
     cx = cy = a = 0
 
-    for idx in range(len(vertices) - 1):
+    # include the closing edge from the last vertex back to the first
+    for idx in range(len(vertices)):
         xi = vertices[idx, 0]
         yi = vertices[idx, 1]
-        xi_p = vertices[idx + 1, 0]
-        yi_p = vertices[idx + 1, 1]
+        xi_p = vertices[(idx + 1) % len(vertices), 0]
+        yi_p = vertices[(idx + 1) % len(vertices), 1]
         common_term = xi * yi_p - xi_p * yi
 
         cx += (xi + xi_p) * common_term
         cy += (yi + yi_p) * common_term
         a += common_term
 
-    prefactor = 0.5 / (6 * a)
+    # a is twice the signed area A, and the centroid is sum(...) / (6 * A)
+    prefactor = 1 / (3 * a)
     return np.array([prefactor * cx, prefactor * cy])
 
 

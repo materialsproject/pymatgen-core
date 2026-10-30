@@ -273,7 +273,8 @@ class TransformedPDEntry(PDEntry):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "sp_mapping": self.sp_mapping,
+            # Composition keys are not JSON-serializable, so store (composition, species) pairs.
+            "sp_mapping": [[comp.as_dict(), sp.as_dict()] for comp, sp in self.sp_mapping.items()],
             **self.original_entry.as_dict(),
         }
 
@@ -286,8 +287,11 @@ class TransformedPDEntry(PDEntry):
         Returns:
             TransformedPDEntry
         """
-        sp_mapping = dct["sp_mapping"]
-        del dct["sp_mapping"]
+        dct = dct.copy()
+        sp_mapping = dct.pop("sp_mapping")
+        if not isinstance(sp_mapping, dict):
+            decoder = MontyDecoder()
+            sp_mapping = {Composition(comp): decoder.process_decoded(sp) for comp, sp in sp_mapping}
         entry = MontyDecoder().process_decoded(dct)
         return cls(entry, sp_mapping)
 
@@ -1577,8 +1581,11 @@ class GrandPotentialPhaseDiagram(PhaseDiagram):
         return {
             "@module": type(self).__module__,
             "@class": type(self).__name__,
-            "all_entries": [entry.as_dict() for entry in self.all_entries],
-            "chempots": self.chempots,
+            # Store the original (non-grand-potential) entries so from_dict does not
+            # wrap GrandPotPDEntry objects in a second GrandPotPDEntry.
+            "all_entries": [entry.original_entry.as_dict() for entry in self.all_entries],
+            # Element keys are not JSON-serializable.
+            "chempots": {el.symbol: mu for el, mu in self.chempots.items()},
             "elements": [entry.as_dict() for entry in self.elements],
         }
 
@@ -1592,6 +1599,8 @@ class GrandPotentialPhaseDiagram(PhaseDiagram):
             GrandPotentialPhaseDiagram
         """
         entries = MontyDecoder().process_decoded(dct["all_entries"])
+        # Legacy dicts stored GrandPotPDEntry objects; unwrap them to the original entries.
+        entries = [entry.original_entry if isinstance(entry, GrandPotPDEntry) else entry for entry in entries]
         elements = MontyDecoder().process_decoded(dct["elements"])
         return cls(entries, dct["chempots"], elements)
 
@@ -1690,11 +1699,12 @@ class CompoundPhaseDiagram(PhaseDiagram):
             sp_mapping[comp] = DummySpecies("X" + self.num2str(idx))
 
         for entry in entries:
-            if getattr(entry, "attribute", None) is None:
-                entry.attribute = getattr(entry, "entry_id", None)
-
             try:
                 transformed_entry = TransformedPDEntry(entry, sp_mapping)
+                # Label with the entry_id if no attribute is set. Set this on the
+                # transformed entry rather than mutating the caller's entry.
+                if transformed_entry.attribute is None:
+                    transformed_entry.attribute = getattr(entry, "entry_id", None)
                 new_entries.append(transformed_entry)
             except ReactionError:
                 # If the reaction can't be balanced, the entry does not fall
@@ -2660,8 +2670,9 @@ def _get_slsqp_decomp(
 
     options = {"maxiter": maxiter, "disp": False}
 
-    # NOTE max_bound needs to be larger than 1
-    max_bound = comp.num_atoms
+    # NOTE max_bound needs to be at least 1 since the amounts are fractions of the
+    # normalized composition (a fractional comp, e.g. Li0.2O0.1, has num_atoms < 1)
+    max_bound = max(comp.num_atoms, 1)
     bounds = [(0, max_bound)] * len(competing_entries)
     x0 = [1 / len(competing_entries)] * len(competing_entries)
 
@@ -2920,7 +2931,7 @@ class PDPlotter:
             x1 = v
             y1 = dct["evolution"] / num_atoms
 
-            x2 = -(evolution[idx + 1]["chempot"] - element_energy) if idx != len(evolution) - 1 else 5.0
+            x2 = -(evolution[idx + 1]["chempot"] - element_energy) if idx != len(evolution) - 1 else xlim
             if show_label_index is not None and idx in show_label_index:
                 products = [
                     re.sub(r"(\d+)", r"$_{\1}$", p.reduced_formula)
