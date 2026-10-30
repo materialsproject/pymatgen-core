@@ -6,7 +6,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
 from pymatgen.core.lattice import Lattice
-from pymatgen.util import coord
+from pymatgen.util import coord, coord_cython
 
 
 class TestCoordUtils:
@@ -24,6 +24,13 @@ class TestCoordUtils:
         assert coord.get_linear_interpolated_value(x_vals[::-1], y_vals[::-1], 5) == approx(12)
         with pytest.raises(ValueError, match=r"-0.5 is out of range of provided x_values \(0, 5\)"):
             coord.get_linear_interpolated_value(x_vals, y_vals, -0.5)
+
+        # unsorted input is sorted by x; ties keep their input order (stable sort)
+        assert coord.get_linear_interpolated_value([3, 1, 2], [30, 10, 20], 1.5) == approx(15)
+        assert coord.get_linear_interpolated_value([1, 1, 2], [5, 6, 7], 1.5) == approx(6.5)
+        assert coord.get_linear_interpolated_value(np.array([2.0, 1.0]), np.array([4, 2]), 2.0) == 4
+        with pytest.raises(ValueError, match="same length"):
+            coord.get_linear_interpolated_value([0, 1, 2], [0, 1], 0.5)
 
     def test_in_coord_list(self):
         coords = [[0, 0, 0], [0.5, 0.5, 0.5]]
@@ -82,6 +89,13 @@ class TestCoordUtils:
         coord.coord_list_mapping_pbc([c1, c2], [c2, c1], pbc=(False, False, False))
         with pytest.raises(ValueError, match="not a subset of superset"):
             coord.coord_list_mapping_pbc(a, b, pbc=(True, True, False))
+
+        # a single coord used to give one index per Cartesian component, e.g. [2, -1, -1]
+        assert_array_equal(coord.coord_list_mapping_pbc(c1, [c2, c3, c1]), [2])
+        # integer coords used to raise a buffer dtype mismatch
+        assert_array_equal(coord.coord_list_mapping_pbc(np.array([[0, 0, 0]]), np.array([[1, 2, 3]])), [0])
+        # an empty subset maps trivially
+        assert coord.coord_list_mapping_pbc(np.zeros((0, 3)), b).shape == (0,)
 
     def test_find_in_coord_list(self):
         coords = [[0, 0, 0], [0.5, 0.5, 0.5]]
@@ -173,6 +187,11 @@ class TestCoordUtils:
         assert not coord.is_coord_subset_pbc([c1, c2, c3], [c1, c4, c2], pbc=pbc)
         assert coord.is_coord_subset_pbc([c1, c2, c3], [c1, c5, c2], pbc=pbc)
 
+        # an empty subset is contained in any superset (the result used to be uninitialized)
+        empty = np.zeros((0, 3))
+        assert coord.is_coord_subset_pbc(empty, [c1, c2])
+        assert coord_cython.is_coord_subset_pbc(empty, np.array([c1], dtype=float), np.full(3, 1e-8), np.zeros((0, 1)))
+
     def test_lattice_points_in_supercell(self):
         supercell = np.array([[1, 3, 5], [-3, 2, 3], [-5, 3, 1]])
         points = coord.lattice_points_in_supercell(supercell)
@@ -248,6 +267,23 @@ class TestCoordUtils:
         vectors = coord.pbc_shortest_vectors(lattice_pbc, frac_coords[:-1], frac_coords)
         dists = np.sum(vectors**2, axis=-1) ** 0.5
         assert_allclose(dists, expected_pbc, 3)
+
+        # partial pbc used to require C-contiguous float64 input
+        int_vectors, int_d2 = coord.pbc_shortest_vectors(lattice_pbc, [[0, 0, 0]], [[1, 0, 1]], return_d2=True)
+        float_vectors, float_d2 = coord.pbc_shortest_vectors(
+            lattice_pbc, np.zeros((1, 3)), np.array([[1.0, 0, 1]]), return_d2=True
+        )
+        assert_allclose(int_vectors, float_vectors)
+        assert_allclose(int_d2, float_d2)
+        fortran_coords = np.asfortranarray(frac_coords)
+        assert_allclose(coord.pbc_shortest_vectors(lattice_pbc, fortran_coords[:-1], fortran_coords), vectors)
+
+        # empty inputs used to raise "Invalid shape in axis 0"
+        for latt in (lattice, lattice_pbc):
+            vecs, d2 = coord.pbc_shortest_vectors(latt, np.zeros((0, 3)), frac_coords, return_d2=True)
+            assert vecs.shape == (0, 5, 3)
+            assert d2.shape == (0, 5)
+            assert coord.pbc_shortest_vectors(latt, frac_coords, np.zeros((0, 3))).shape == (5, 0, 3)
 
     def test_get_angle(self):
         v1 = (1, 0, 0)

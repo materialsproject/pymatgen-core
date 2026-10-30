@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from pymatgen.util.io_utils import micro_pyawk
 from pymatgen.util.testing import VASP_OUT_DIR, MatSciTest
 
@@ -15,4 +17,9 @@ class TestFunc(MatSciTest):
             return y
 
         micro_pyawk(f"{VASP_OUT_DIR}/OUTCAR.gz", [["POTCAR:(.*)", f2, f]])
+        assert len(data) == 6
+
+        # pre-compiled patterns are accepted as well
+        data.clear()
+        micro_pyawk(f"{VASP_OUT_DIR}/OUTCAR.gz", [[re.compile("POTCAR:(.*)"), f2, f]])
         assert len(data) == 6

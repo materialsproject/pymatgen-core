@@ -130,7 +130,11 @@ def get_linear_interpolated_value(x_values: ArrayLike, y_values: ArrayLike, x: f
     Returns:
         Value at x.
     """
-    arr = np.array(sorted(zip(x_values, y_values, strict=True), key=lambda d: d[0]))  # type:ignore[arg-type,return-value]
+    if len(x_values) != len(y_values):  # type:ignore[arg-type]
+        raise ValueError("x_values and y_values must have the same length")
+    arr = np.column_stack((x_values, y_values))
+    # stable sort by x, matching sorted() on the (x, y) pairs keyed by x
+    arr = arr[np.argsort(arr[:, 0], kind="stable")]
 
     # x equal to the last x value is in range but has no larger x value to interpolate to
     if x == arr[-1, 0]:
@@ -228,10 +232,9 @@ def find_in_coord_list_pbc(
     """
     if len(frac_coord_list) == 0:
         return np.array([], dtype=np.int_)
-    frac_coords = np.tile(frac_coord, (len(frac_coord_list), 1))
-    frac_dist = frac_coord_list - frac_coords
-    frac_dist[:, pbc] -= np.round(frac_dist)[:, pbc]
-    return np.where(np.all(np.abs(frac_dist) < atol, axis=1))[0]
+    frac_dist = np.subtract(frac_coord_list, frac_coord)
+    frac_dist -= np.round(frac_dist) * pbc
+    return np.flatnonzero(np.all(np.abs(frac_dist) < atol, axis=1))
 
 
 def in_coord_list_pbc(

@@ -70,6 +70,11 @@ def find_points_in_spheres(
         offset_vectors (n, 3): The periodic image offsets for all_coords.
         distances (n, ).
     """
+    if center_coords.shape[0] == 0 or all_coords.shape[0] == 0:
+        # Nothing to search; the C buffers below cannot be allocated with zero size
+        return (np.array([], dtype=np.int64), np.array([], dtype=np.int64),
+            np.array([[], [], []], dtype=float).T, np.array([], dtype=float))
+
     if r < min_r:
         findex1, findex2, foffset_vectors, fdistances = find_points_in_spheres(
             all_coords=all_coords, center_coords=center_coords,
@@ -219,7 +224,7 @@ def find_points_in_spheres(
                                 indices_p_temp, n_atoms * sizeof(np.int64_t)
                             )
                         if (
-                                offset_final is NULL or
+                                offsets_p_temp is NULL or
                                 expanded_coords_p_temp is NULL or
                                 indices_p_temp is NULL
                         ):
@@ -485,7 +490,7 @@ cdef void get_cube_neighbors(
 cdef int compute_offset_vectors(
         np.int64_t* ovectors,
         np.int64_t n
-    ) nogil:
+    ) noexcept nogil:
     cdef:
         int i, j, k
         unsigned int ind
@@ -514,32 +519,13 @@ cdef int compute_offset_vectors(
     return count
 
 
-cdef double distance2(
-        const double[:, ::1] m1,
-        const double[:, ::1] m2,
-        np.int64_t index1,
-        np.int64_t index2,
-        np.int64_t size
-    ) nogil:
-    """Faster way to compute the distance squared by not using slice
-    but providing indices in each matrix.
-    """
-    cdef:
-        int i
-        double s = 0
-
-    for i in range(size):
-        s += (m1[index1, i] - m2[index2, i]) * (m1[index1, i] - m2[index2, i])
-    return s
-
-
 cdef void get_bounds(
         const double[:, ::1] frac_coords,
         const double[3] max_rep,
         const np.int64_t[3] pbc,
         np.int64_t[3] max_bounds,
         np.int64_t[3] min_bounds
-    ) nogil:
+    ) noexcept nogil:
     """
     Given the fractional coordinates and the number of repeation needed in each
     direction (max_rep), compute the translational bounds in each dimension.
@@ -565,7 +551,7 @@ cdef void get_frac_coords(
         double[:, ::1] inv_lattice,
         const double[:, ::1] cart_coords,
         double[:, ::1] frac_coords
-    ) nogil:
+    ) noexcept nogil:
     """
     Compute the fractional coordinates.
     """
@@ -576,7 +562,7 @@ cdef void matmul(
         const double[:, ::1] m1,
         const double[:, ::1] m2,
         double [:, ::1] out
-    ) nogil:
+    ) noexcept nogil:
     """
     (N, 3) @ (3, 3) -> (N, 3) matrix multiplication.
 
@@ -604,7 +590,7 @@ cdef void matmul(
 cdef void matrix_inv(
         const double[:, ::1] matrix,
         double[:, ::1] inv
-    ) nogil:
+    ) noexcept nogil:
     """
     3x3 matrix inverse via hand-unrolled cofactor expansion.
     """
@@ -628,23 +614,11 @@ cdef void matrix_inv(
     inv[2, 1] = (m01 * m20 - m00 * m21) * inv_det
     inv[2, 2] = (m00 * m11 - m01 * m10) * inv_det
 
-cdef double matrix_det(
-        const double[:, ::1] matrix
-    ) nogil:
-    """
-    Matrix determinant.
-    """
-    return (
-        matrix[0, 0] * (matrix[1, 1] * matrix[2, 2] - matrix[1, 2] * matrix[2, 1]) +
-        matrix[0, 1] * (matrix[1, 2] * matrix[2, 0] - matrix[1, 0] * matrix[2, 2]) +
-        matrix[0, 2] * (matrix[1, 0] * matrix[2, 1] - matrix[1, 1] * matrix[2, 0])
-    )
-
 cdef void get_max_rep(
         const double[:, ::1] reciprocal_lattice,
         double[3] max_rep,
         double r
-    ) nogil:
+    ) noexcept nogil:
     """
     Get maximum repetition in each direction. Lattice is always 3x3 in pymatgen.
     """
@@ -659,7 +633,7 @@ cdef void get_max_rep(
 cdef void get_reciprocal_lattice(
         const double[:, ::1] lattice,
         double[:, ::1] reciprocal_lattice
-    ) nogil:
+    ) noexcept nogil:
     """
     Compute the reciprocal lattice.
     """
@@ -676,7 +650,7 @@ cdef void recip_component(
         const double[::1] a2,
         const double[::1] a3,
         double[::1] out
-    ) nogil:
+    ) noexcept nogil:
     """
     Compute the reciprocal lattice vector.
     """
@@ -693,7 +667,7 @@ cdef void recip_component(
 cdef double inner(
     const double[3] x,
     const double[3] y
-    ) nogil:
+    ) noexcept nogil:
     """
     Compute inner product of 3d vectors.
     """
@@ -709,7 +683,7 @@ cdef void cross(
         const double[3] x,
         const double[3] y,
         double[3] out
-    ) nogil:
+    ) noexcept nogil:
     """
     Cross product of vector x and y, output in out.
     """
@@ -719,7 +693,7 @@ cdef void cross(
 
 cdef double norm(
         const double[::1] vec
-    ) nogil:
+    ) noexcept nogil:
     """
     Vector norm.
     """
@@ -736,7 +710,7 @@ cdef void get_max_and_min(
         const double[:, ::1] coords,
         double[3] max_coords,
         double[3] min_coords
-    ) nogil:
+    ) noexcept nogil:
     """
     Compute the lower (min_coords) and upper (max_coords) boundaries along each dimension.
     """
@@ -761,7 +735,7 @@ cdef void compute_cube_index(
         const double[3] global_min,
         double radius,
         np.int64_t[:, ::1] return_indices
-    ) nogil:
+    ) noexcept nogil:
     """
     Computes the cube indices for a set of coordinates based on radius.
     """
@@ -778,7 +752,7 @@ cdef void three_to_one(
         np.int64_t ny,
         np.int64_t nz,
         np.int64_t[::1] label1d
-    ) nogil:
+    ) noexcept nogil:
     """
     3D vector representation to 1D.
     """
@@ -793,7 +767,7 @@ cdef bint distance_vertices(
         const double[8][3] center,
         const double[8][3] off,
         double r
-    ) nogil:
+    ) noexcept nogil:
     cdef:
         unsigned int i, j
         double d2
@@ -814,7 +788,7 @@ cdef void offset_cube(
         np.int64_t m,
         np.int64_t l,
         const double[8][3] (&offsetted)
-    ) nogil:
+    ) noexcept nogil:
     cdef:
         unsigned int i, j, k
         unsigned int ind

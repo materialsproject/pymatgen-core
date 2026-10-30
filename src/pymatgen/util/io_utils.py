@@ -87,7 +87,7 @@ def micro_pyawk(
     with zopen(filename, mode="rt", encoding="utf-8") as file:
         for line in file:
             for regex, test, run in searches:
-                match = re.search(regex, line)
+                match = regex.search(line)
 
                 if match is not None and (test is None or test(results, line)):
                     run(results, match)
