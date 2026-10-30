@@ -1290,38 +1290,38 @@ class PawXmlSetup(Pseudo, PawPseudo):
         """
         eq = grid_params.get("eq").replace(" ", "")
         istart, iend = int(grid_params.get("istart")), int(grid_params.get("iend"))
-        indices = list(range(istart, iend + 1))
+        indices = np.arange(istart, iend + 1)
 
         if eq == "r=a*exp(d*i)":
             a, d = float(grid_params["a"]), float(grid_params["d"])
-            mesh = [a * np.exp(d * i) for i in indices]
+            mesh = a * np.exp(d * indices)
 
         elif eq == "r=a*i/(n-i)":
             a, n = float(grid_params["a"]), float(grid_params["n"])
-            mesh = [a * i / (n - i) for i in indices]
+            mesh = a * indices / (n - indices)
 
         elif eq == "r=a*(exp(d*i)-1)":
             a, d = float(grid_params["a"]), float(grid_params["d"])
-            mesh = [a * (np.exp(d * i) - 1.0) for i in indices]
+            mesh = a * (np.exp(d * indices) - 1.0)
 
         elif eq == "r=d*i":
             d = float(grid_params["d"])
-            mesh = [d * i for i in indices]
+            mesh = d * indices
 
         elif eq == "r=(i/n+a)^5/a-a^4":
             a, n = float(grid_params["a"]), float(grid_params["n"])
-            mesh = [(i / n + a) ** 5 / a - a**4 for i in indices]
+            mesh = (indices / n + a) ** 5 / a - a**4
 
         else:
             raise ValueError(f"Unknown grid type: {eq}")
 
-        return np.array(mesh)
+        return mesh
 
     def _parse_radfunc(self, func_name):
         """Parse the first occurrence of func_name in the XML file."""
         node = self.root.find(func_name)
         grid = node.attrib["grid"]
-        values = np.array([float(s) for s in node.text.split()])
+        values = np.array(node.text.split(), dtype=float)
 
         return self.rad_grids[grid], values, node.attrib
 
@@ -1329,7 +1329,7 @@ class PawXmlSetup(Pseudo, PawPseudo):
         """Parse all the nodes with tag func_name in the XML file."""
         for node in self.root.findall(func_name):
             grid = node.attrib["grid"]
-            values = np.array([float(s) for s in node.text.split()])
+            values = np.array(node.text.split(), dtype=float)
 
             yield self.rad_grids[grid], values, node.attrib
 
