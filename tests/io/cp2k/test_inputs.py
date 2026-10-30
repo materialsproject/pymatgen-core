@@ -1118,3 +1118,20 @@ class TestRegressions:
         struct.add_site_property("oxi_state", [4, 4])
         get_unique_site_indices(struct)
         assert struct.site_properties["oxi_state"] == [4, 4]
+
+    def test_get_unique_site_indices_first_appearance_order(self):
+        # Kind labels must follow site order, not (hash-randomized) set iteration order
+        coords = np.random.default_rng(0).random((5, 3))
+        struct = Structure(Lattice.cubic(6), ["Co", "Co", "O", "Co", "Co"], coords)
+        struct.add_site_property("magmom", [-1, 1, 0, -1, 1])
+        assert get_unique_site_indices(struct) == {"Co_1": [0, 3], "Co_2": [1, 4], "O_1": [2]}
+
+    def test_from_str_keyword_after_same_named_subsection(self):
+        inp = Cp2kInput.from_str(
+            "&FORCE_EVAL\n&SUBSYS\n&KIND H\n&POTENTIAL\nGTH-PBE-q1\n&END POTENTIAL\n"
+            "POTENTIAL GTH-PBE-q1\n&END KIND\n&END SUBSYS\n&END FORCE_EVAL\n"
+        )
+        kind = inp.by_path("FORCE_EVAL/SUBSYS/KIND H")
+        assert kind.get_keyword("POTENTIAL") == Keyword("POTENTIAL", "GTH-PBE-q1")
+        assert isinstance(kind.get_section("POTENTIAL"), Section)
+        assert Cp2kInput.from_str(inp.get_str()) == inp

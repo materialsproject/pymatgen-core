@@ -162,6 +162,8 @@ class TestCp2kOutput:
         assert info["valence_electrons"] == 4
         assert info["core_electrons"] == 10
         assert info["element"] == "Si"
+        # "Total Pseudopotential Energy :: -7.143143335066" (Ha) from the atomic guess
+        assert info["total_pseudopotential_energy"] == approx(-7.143143335066 * Ha_to_eV)
 
     def test_structure_energy_forces(self):
         assert self.out.final_structure == self.out.initial_structure

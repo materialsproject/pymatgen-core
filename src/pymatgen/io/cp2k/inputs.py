@@ -761,17 +761,16 @@ class Cp2kInput(Section):
             else:
                 kwd = Keyword.from_str(line, (description or None))
 
-                if tmp := self.by_path(current).get(kwd.name):
+                sec = self.by_path(current)
+                if isinstance(sec, SectionList):  # keywords go to the most recent repeat
+                    sec = sec[-1]
+                if tmp := sec.get_keyword(kwd.name):
                     if isinstance(tmp, KeywordList):
-                        self.by_path(current).get(kwd.name).append(kwd)
-                    elif isinstance(self.by_path(current), SectionList):
-                        self.by_path(current)[-1][kwd.name] = KeywordList(keywords=[tmp, kwd])
+                        tmp.append(kwd)
                     else:
-                        self.by_path(current)[kwd.name] = KeywordList(keywords=[tmp, kwd])
-                elif isinstance(self.by_path(current), SectionList):
-                    self.by_path(current)[-1].keywords[kwd.name] = kwd
+                        sec[kwd.name] = KeywordList(keywords=[tmp, kwd])
                 else:
-                    self.by_path(current).keywords[kwd.name] = kwd
+                    sec.keywords[kwd.name] = kwd
 
     def write_file(
         self,

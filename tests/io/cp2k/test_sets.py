@@ -518,6 +518,20 @@ class TestDftSetExtra(MatSciTest):
         s.activate_motion()
         assert s.check("motion/constraint")
 
+    def test_activate_motion_fix_ranges(self) -> None:
+        struct = self.si_structure.copy()
+        struct.make_supercell([2, 2, 1])  # 8 sites
+        fix = ["XY", "XY", "", "", "XYZ", "XY", "XY", "XY"]
+        struct.add_site_property("fix", fix)
+        s = DftSet(struct, basis_and_potential=self.bp, xc_functionals="PBE", run_type="GEO_OPT")
+        s.activate_motion()
+        fixed = s["MOTION"]["CONSTRAINT"]["FIXED_ATOMS"]
+        assert [(sec["COMPONENTS_TO_FIX"].values[0], sec["LIST"].values[0]) for sec in fixed] == [
+            ("XY", "1..2"),
+            ("XYZ", "5..5"),
+            ("XY", "6..8"),
+        ]
+
     # ------ hybrid activation variants ------
 
     @pytest.mark.parametrize("hf", ["PBE0", "HSE06", "RSH", "UNKNOWN_HF"])

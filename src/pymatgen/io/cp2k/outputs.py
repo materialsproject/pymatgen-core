@@ -747,7 +747,7 @@ class Cp2kOutput:
         auxiliary_basis_set = re.compile(r"Auxiliary Fit Basis Set\s+(.+$)")
         core_electrons = re.compile(r"Total number of core electrons\s+(\d+)")
         valence_electrons = re.compile(r"Total number of valence electrons\s+(\d+)")
-        pseudo_energy = re.compile(r"Total Pseudopotential Energy.+(-?\d+.\d+)")
+        pseudo_energy = re.compile(r"Total Pseudopotential Energy\s+::\s+(-?\d+\.\d+)")
         self.read_pattern(
             {
                 "kinds": kinds,
@@ -792,8 +792,8 @@ class Cp2kOutput:
             except (TypeError, IndexError):
                 atomic_kind_info[kind]["auxiliary_basis_set"] = None
             try:
-                atomic_kind_info[kind]["total_pseudopotential_energy"] = float(
-                    self.data.get("total_pseudopotential_energy")[i][0] * Ha_to_eV
+                atomic_kind_info[kind]["total_pseudopotential_energy"] = (
+                    float(self.data.get("pseudo_energy")[i][0]) * Ha_to_eV
                 )
             except (TypeError, IndexError, ValueError):
                 atomic_kind_info[kind]["total_pseudopotential_energy"] = None
