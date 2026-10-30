@@ -197,6 +197,13 @@ O 9.960184 1.516793 1.393875"""
         # body tests (also tests index and columns)
         pd.testing.assert_frame_equal(mol_df, test_df)
 
+    def test_as_dataframe_multi_frame(self):
+        # only the last frame should be returned
+        multi_df = self.multi_xyz.as_dataframe()
+        assert len(multi_df) == 5
+        assert list(multi_df["atom"]) == ["C", "H", "H", "H", "H"]
+        assert multi_df["x"].to_numpy() == approx([site.x for site in self.multi_mols[-1]])
+
     def test_invalid_coord_precision(self):
         with pytest.raises(ValueError, match="Format specifier missing precision"):
             XYZ(self.mol, coord_precision="foo")._frame_str(self.mol)

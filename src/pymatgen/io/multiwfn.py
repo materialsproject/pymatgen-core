@@ -412,7 +412,7 @@ def add_atoms(
             bond_atoms_list = list()
             for index in cp_desc["connected_bond_paths"]:
                 for true_index, descriptors in atom_cps.items():
-                    if int(descriptors["name"].split("_")[0]) == index:
+                    if "name" in descriptors and int(descriptors["name"].split("_")[0]) == index:
                         bond_atoms_list.append(true_index)
                         break
 
@@ -422,7 +422,7 @@ def add_atoms(
                 bond_atoms_list = list()
                 for index in cp_desc["connected_bond_paths"]:
                     for true_index, descriptors in atom_cps.items():
-                        if int(descriptors["name"].split("_")[0]) == index:
+                        if "name" in descriptors and int(descriptors["name"].split("_")[0]) == index:
                             bond_atoms_list.append(true_index)
                             break
                 if len(bond_atoms_list) != 2:

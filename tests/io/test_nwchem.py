@@ -97,6 +97,18 @@ end
 task dft energy"""
         assert str(task) == answer
 
+    def test_dft_task_does_not_mutate_directives(self):
+        theory_directives = {"iterations": 100}
+        NwTask.dft_task(mol, theory_directives=theory_directives)
+        assert theory_directives == {"iterations": 100}
+
+    @pytest.mark.parametrize("basis_set_option", ["cartesian", "spherical"])
+    def test_basis_set_option_round_trip(self, basis_set_option):
+        nw_input = NwInput(mol, [NwTask.dft_task(mol, basis_set_option=basis_set_option)])
+        round_tripped = NwInput.from_str(str(nw_input))
+        assert round_tripped.tasks[0].basis_set_option == basis_set_option
+        assert str(round_tripped) == str(nw_input)
+
     def test_dft_cosmo_task(self):
         task = NwTask.dft_task(
             mol,

@@ -121,7 +121,7 @@ class XYZ:
         Returns:
             pandas.DataFrame
         """
-        lines = str(self)
+        lines = self._frame_str(self._mols[-1])
         str_io = StringIO(lines)
         df_xyz = pd.read_csv(
             str_io,

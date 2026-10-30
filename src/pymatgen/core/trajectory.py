@@ -766,7 +766,7 @@ class Trajectory(MSONable):
                 `constant_lattice = None`.
             additional_fields (Sequence of str, defaults to ["temperature", "velocities"]) :
                 Optional other fields to save in the pymatgen .Trajectory.
-                Valid options are "temperature" and "velocities".
+                Valid options are "temperature" and "velocities" (stored as a site property in A/fs).
 
         Returns:
             pymatgen .Trajectory
@@ -788,11 +788,11 @@ class Trajectory(MSONable):
         converter = adaptor.get_structure if (is_pbc := any(trajectory[0].pbc)) else adaptor.get_molecule
 
         for atoms in trajectory:
-            site_properties = {}
-            if "velocities" in additional_fields:
-                site_properties["velocities"] = atoms.get_velocities()
-
-            structures.append(converter(atoms, site_properties=site_properties))  # type:ignore[arg-type]
+            # The adaptor converts ASE momenta into a "velocities" site property in A/fs
+            struct = converter(atoms)  # type:ignore[arg-type]
+            if "velocities" not in additional_fields and "velocities" in struct.site_properties:
+                struct.remove_site_property("velocities")
+            structures.append(struct)  # type:ignore[arg-type]
 
             if store_frame_properties and atoms.calc:
                 props = {v: atoms.calc.get_property(k) for k, v in property_map.items()}
@@ -864,7 +864,7 @@ class Trajectory(MSONable):
 
         frame_props = self.frame_properties or [{} for _ in range(len(self))]
         for idx, structure in enumerate(self):
-            atoms = adaptor.get_atoms(structure, msonable=False, velocities=structure.site_properties.get("velocities"))
+            atoms = adaptor.get_atoms(structure, msonable=False)
 
             props: dict[str, Any] = {k: frame_props[idx][v] for k, v in property_map.items() if v in frame_props[idx]}
 

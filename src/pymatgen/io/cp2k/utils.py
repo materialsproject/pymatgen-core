@@ -88,8 +88,9 @@ def preprocessor(data: str, dir: str = ".") -> str:  # noqa: A002
         if len(v) != 3:  # @SET VAR value
             raise ValueError(f"length of v should be 3, got {len(v)}")
         var, value = v[1:]
-        data = re.sub(rf"{match}", "", data)
-        data = re.sub(rf"\${{?{var}}}?", value, data)
+        data = re.sub(re.escape(match), "", data)
+        # $VAR must not match a longer name ($VARIABLE); ${VAR} is explicitly delimited
+        data = re.sub(rf"\$(?:\{{{re.escape(var)}\}}|{re.escape(var)}(?!\w))", lambda _: value, data)
 
     c1 = re.findall(r"@IF", data, re.IGNORECASE)
     c2 = re.findall(r"@ELIF", data, re.IGNORECASE)
@@ -148,10 +149,15 @@ def get_unique_site_indices(struct: Structure | Molecule):
         "aux_basis",
     }
 
-    for site in struct:
+    # Species attributes take precedence, but don't clobber existing site properties with defaults
+    site_oxi_states = struct.site_properties.get("oxi_state") or [0] * len(struct)
+    site_spins = struct.site_properties.get("spin") or [0] * len(struct)
+    for idx, site in enumerate(struct):
         for sp in site.species:
-            oxi_states.append(getattr(sp, "oxi_state", 0))
-            spins.append(getattr(sp, "_properties", {}).get("spin", 0))
+            oxi_state = getattr(sp, "oxi_state", None)
+            spin = getattr(sp, "spin", None)
+            oxi_states.append((site_oxi_states[idx] or 0) if oxi_state is None else oxi_state)
+            spins.append((site_spins[idx] or 0) if spin is None else spin)
 
     struct.add_site_property("oxi_state", oxi_states)
     struct.add_site_property("spin", spins)

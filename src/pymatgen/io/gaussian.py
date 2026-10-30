@@ -465,6 +465,7 @@ class GaussianInput:
             "input_parameters": self.input_parameters,
             "link0_parameters": self.link0_parameters,
             "dieze_tag": self.dieze_tag,
+            "gen_basis": self.gen_basis,
         }
 
     @classmethod
@@ -487,6 +488,8 @@ class GaussianInput:
             spin_multiplicity=dct["spin_multiplicity"],
             input_parameters=dct["input_parameters"],
             link0_parameters=dct["link0_parameters"],
+            dieze_tag=dct.get("dieze_tag", "#P"),
+            gen_basis=dct.get("gen_basis"),
         )
 
 
@@ -651,6 +654,7 @@ class GaussianOutput:
         read_mulliken = read_eigen = num_basis_found = terminated = parse_forces = False
         read_mo = parse_hessian = standard_orientation = parse_bond_order = parse_freq = False
         read_coord = parse_stage = 0
+        mulliken_txt: list[str] = []
         eigen_txt = []
         forces = []
         frequencies = []
@@ -849,7 +853,8 @@ class GaussianOutput:
                                     IR_intens = map(float, float_patt.findall(line))
                                     for ifreq, intens in zip(ifreqs, IR_intens, strict=True):
                                         frequencies[ifreq]["IR_intensity"] = intens
-                                else:
+                                elif "--" not in line:
+                                    # symmetry labels; skip other "Label --" rows (e.g. Raman activity, depolarization)
                                     syms = line.split()[:3]
                                     for ifreq, sym in zip(ifreqs, syms, strict=True):
                                         frequencies[ifreq]["symmetry"] = sym
@@ -913,7 +918,7 @@ class GaussianOutput:
                         match = mp2_patt.search(line)
                         self.energies.append(float(match[1].replace("D", "E")))
                     elif oniom_patt.search(line):
-                        match = oniom_patt.matcher(line)
+                        match = oniom_patt.search(line)
                         self.energies.append(float(match[1]))
                     elif scf_patt.search(line):
                         match = scf_patt.search(line)
@@ -941,6 +946,7 @@ class GaussianOutput:
                         read_eigen = True
                     elif mulliken_patt.search(line):
                         read_mulliken = True
+                        mulliken_txt = []
                     elif not parse_forces and forces_on_patt.search(line):
                         parse_forces = True
                     elif freq_on_patt.search(line):
@@ -967,7 +973,6 @@ class GaussianOutput:
                         parse_bond_order = True
 
                     if read_mulliken:
-                        mulliken_txt = []
                         if not end_mulliken_patt.search(line):
                             mulliken_txt.append(line)
                         else:
@@ -1242,7 +1247,7 @@ class GaussianOutput:
         # sum of gaussian functions
         spectre = np.zeros(npts)
         for trans in transitions:
-            spectre += trans[2] * norm(eneval, trans[0], sigma)
+            spectre += trans[2] * norm.pdf(eneval, trans[0], sigma)
         spectre /= spectre.max()
         ax.plot(lambdaval, spectre, "r-", label="spectre")
 

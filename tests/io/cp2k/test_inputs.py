@@ -7,7 +7,7 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Element
+from pymatgen.core import Element, Lattice, Species
 from pymatgen.core.structure import Molecule, Structure
 from pymatgen.io.cp2k.inputs import (
     DOS,
@@ -51,6 +51,7 @@ from pymatgen.io.cp2k.inputs import (
     VHartreeCube,
     XCFunctional,
 )
+from pymatgen.io.cp2k.utils import get_unique_site_indices, preprocessor
 from pymatgen.io.vasp.inputs import Kpoints as VaspKpoints
 from pymatgen.io.vasp.inputs import KpointsSupportedModes
 from pymatgen.symmetry.bandstructure import HighSymmKpath
@@ -1051,3 +1052,69 @@ class TestBasisAndPotentialExtra:
         assert [obj.name for obj in pot_file.objects] == ["GTH-PBE-q1", "GTH-PBE-q16"]
         assert PotentialFile.from_str(pot_file.get_str()).objects == pot_file.objects
         assert DataFile().get_str() == ""
+
+
+class TestRegressions:
+    def test_coord_keeps_keywords(self):
+        coord = Coord(SI_STRUCT, keywords={"SCALED": Keyword("SCALED", False)})  # noqa: FBT003
+        assert coord.get_keyword("SCALED") == Keyword("SCALED", False)  # noqa: FBT003
+        assert "SCALED False" in coord.get_str()
+
+    def test_scf_max_iter_lumo_not_duplicated(self):
+        scf = Scf(max_iter_lumo=100)
+        assert scf.get_str().upper().count("MAX_ITER_LUMO") == 1
+        assert scf["MAX_ITER_LUMO"] == Keyword("MAX_ITER_LUMO", 100)
+
+    def test_mo_cubes_keyword_key(self):
+        mo_cubes = MOCubes(write_cube=True)
+        assert mo_cubes.get_keyword("WRITE_CUBE") == Keyword("WRITE_CUBE", True)  # noqa: FBT003
+        mo_cubes.update({"WRITE_CUBE": False})
+        assert mo_cubes.get_str().count("WRITE_CUBE") == 1
+
+    def test_kpoints_single_general_kpoint(self):
+        vasp_kpts = VaspKpoints(
+            style=KpointsSupportedModes.Reciprocal, kpts=[(0.25, 0.25, 0.25)], kpts_weights=[1], num_kpts=1
+        )
+        kpts = Kpoints.from_kpoints(vasp_kpts)
+        assert kpts["SCHEME"] == Keyword("SCHEME", "GENERAL")
+        assert kpts["KPOINT"][0] == Keyword("KPOINT", 0.25, 0.25, 0.25, 1)
+
+    def test_from_str_subsections_in_repeated_section(self):
+        inp = Cp2kInput.from_str(
+            "&FORCE_EVAL\n&SUBSYS\n"
+            "&COLVAR\n&DISTANCE\nATOMS 1 2\n&END DISTANCE\n&END COLVAR\n"
+            "&COLVAR\n&DISTANCE\nATOMS 1 3\n&END DISTANCE\n&END COLVAR\n"
+            "&END SUBSYS\n&END FORCE_EVAL\n"
+        )
+        colvars = inp["FORCE_EVAL"]["SUBSYS"]["COLVAR"]
+        assert isinstance(colvars, SectionList)
+        assert [c["DISTANCE"]["ATOMS"].values for c in colvars] == [(1, 2), (1, 3)]
+        assert Cp2kInput.from_str(inp.get_str()) == inp
+
+    def test_gth_round_trip_projector_without_coefficients(self):
+        pot_str = (
+            "Li GTH-PBE-q3 GTH-PBE\n    3\n     0.40000000    4   -14.08115455     9.62621962    -1.78361605"
+            "     0.08515207\n    2\n     0.00000000    0\n     0.30000000    1     1.00000000\n"
+        )
+        pot = GthPotential.from_str(pot_str)
+        assert pot.nprj_ppnl == {0: 0, 1: 1}
+        assert GthPotential.from_str(pot.get_str()) == pot
+
+    def test_potential_info_pade(self):
+        assert PotentialInfo.from_str("GTH-PADE-q4").xc == "PADE"
+
+    def test_preprocessor_variable_name_prefix(self):
+        txt = "@SET A 1\n@SET AB 2\nX $AB\nY ${A}\nZ $A\n"
+        assert preprocessor(txt).split() == ["X", "2", "Y", "1", "Z", "1"]
+
+    def test_get_unique_site_indices_species_spin(self):
+        species = [Species("Fe", 2, spin=1), Species("Fe", 2, spin=-1)]
+        struct = Structure(Lattice.cubic(4), species, [[0, 0, 0], [0.5, 0.5, 0.5]])
+        assert sorted(get_unique_site_indices(struct)) == ["Fe_1", "Fe_2"]
+        assert struct.site_properties["spin"] == [1, -1]
+
+    def test_get_unique_site_indices_keeps_site_oxi_state(self):
+        struct = SI_STRUCT.copy()
+        struct.add_site_property("oxi_state", [4, 4])
+        get_unique_site_indices(struct)
+        assert struct.site_properties["oxi_state"] == [4, 4]
