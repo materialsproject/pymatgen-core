@@ -581,6 +581,58 @@ class TestGaussianOutput:
         assert [freq["symmetry"] for freq in gau.frequencies[0]] == ["A'", "A'", "A'"]
         assert gau.frequencies[0][0]["IR_intensity"] == approx(97.3057)
 
+    def test_pcm_errors_and_energy_keywords(self, tmp_path):
+        # Synthetic log exercising branches not covered by the real test files: PCM block,
+        # MP2/ONIOM/SCF energies, error messages, saddle detection and error termination.
+        log = (
+            " %chk=test.chk\n"
+            " ----------------------------------\n"
+            " #P MP2/6-31G(d) opt freq scrf=(pcm)\n"
+            " ----------------------------------\n"
+            " (Enter /opt/g09/l101.exe)\n"
+            " ------\n"
+            " synth\n"
+            " ------\n"
+            " Charge =  0 Multiplicity = 1\n"
+            " Polarizable Continuum Model (PCM)\n"
+            " Eps          =   78.355300\n"
+            " RSolv        =    1.385000\n"
+            " Dispersion energy (a.u.) =   -0.0012345\n"
+            " Cavitation energy (a.u.) =    0.0034567\n"
+            " Repulsion energy (a.u.) =    0.0005678\n"
+            " After PCM corrections, the energy is with all non electrostatic terms (a.u.) = -76.4321\n"
+            "     5 alpha electrons        5 beta electrons\n"
+            " SCF Done:  E(RHF) =  -76.0107465     A.U. after   10 cycles\n"
+            " E2 =    -0.2010000000D+00 EUMP2 =    -0.76211746500D+02\n"
+            " ONIOM: extrapolated energy =  -76.300000000\n"
+            " Convergence failure -- run terminated.\n"
+            " ****** 1 imaginary frequencies (negative Signs) ******\n"
+            " ! Non-Optimized Parameters !\n"
+            " Error termination via Lnk1e in /opt/g09/l9999.exe\n"
+        )
+        log_path = tmp_path / "synth.log"
+        log_path.write_text(log, encoding="utf-8")
+
+        with pytest.warns(UserWarning, match="Termination error"):
+            gau = GaussianOutput(str(log_path))
+        assert gau.link0 == {"%chk": "test.chk"}
+        assert gau.is_pcm
+        assert gau.pcm == approx(
+            {
+                "Eps": 78.3553,
+                "RSolv": 1.385,
+                "Dispersion energy": -0.0012345,
+                "Cavitation energy": 0.0034567,
+                "Repulsion energy": 0.0005678,
+                "Total energy": -76.4321,
+            }
+        )
+        assert gau.electrons == (5, 5)
+        assert gau.energies == approx([-76.0107465, -76.2117465, -76.3])
+        assert gau.errors == ["SCF convergence error", "Optimization error"]
+        assert gau.stationary_type == "Saddle"
+        assert not gau.properly_terminated
+
 
 class TestGaussianInputSerialization:
     def test_as_from_dict_keeps_dieze_tag_and_gen_basis(self):

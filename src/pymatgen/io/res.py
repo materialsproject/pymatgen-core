@@ -377,9 +377,9 @@ class ResProvider(MSONable):
     def sites(self) -> list[PeriodicSite]:
         """Construct a list of PeriodicSites from the res file."""
         sfac_tag = self._res.SFAC
+        lattice = self.lattice  # build the Lattice once rather than once per ion
         return [
-            PeriodicSite(ion.specie, ion.pos, self.lattice, properties=self._site_spin(ion.spin))
-            for ion in sfac_tag.ions
+            PeriodicSite(ion.specie, ion.pos, lattice, properties=self._site_spin(ion.spin)) for ion in sfac_tag.ions
         ]
 
     @property
