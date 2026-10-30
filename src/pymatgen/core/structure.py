@@ -43,7 +43,7 @@ from tabulate import tabulate
 # lazily inside the few methods that use them (merge_sites,
 # get_primitive_structure, rotate_sites, interpolate). Together they account
 # for ~85 ms of cold `from pymatgen.core import Structure` import time.
-from pymatgen.core.bonds import CovalentBond, get_bond_length
+from pymatgen.core.bonds import CovalentBond, bond_lengths, get_bond_length
 from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice, get_points_in_spheres
 from pymatgen.core.operations import SymmOp
@@ -94,6 +94,50 @@ FileFormats: TypeAlias = Literal[
 ]
 
 
+def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
+    """Equivalent to ``all(site in others for site in sites)``, but in O(N log N) instead of O(N^2).
+
+    Site equality requires np.allclose Cartesian coords, so each site is only compared (with ==, as
+    ``in`` does) against the sites of ``others`` found within a generous coordinate tolerance by a cKDTree.
+
+    Args:
+        sites: Sites that must all be present in others.
+        others: Sites to search.
+
+    Returns:
+        bool: True if every site in sites is equal to (or is) some site in others.
+    """
+    # Brute force is faster for a few sites
+    if len(sites) <= 4:
+        return all(site in others for site in sites)
+    try:
+        coords = np.array([site.coords for site in sites], dtype=np.float64)
+        other_coords = np.array([site.coords for site in others], dtype=np.float64)
+    except (AttributeError, TypeError, ValueError):
+        coords = other_coords = np.empty(0)
+    if (
+        len(others) == 0
+        or coords.shape != (len(sites), 3)
+        or other_coords.shape != (len(others), 3)
+        or not (np.isfinite(coords).all() and np.isfinite(other_coords).all())
+    ):
+        return all(site in others for site in sites)
+
+    from scipy.spatial import cKDTree
+
+    # np.allclose(a, b, atol) requires |a - b| <= atol + rtol * |b| (rtol = 1e-5) for each component.
+    # Use twice the largest such bound as search radius so no equal site can be missed.
+    atol = max(
+        getattr(cls, "position_atol", Site.position_atol) for cls in {Site, *map(type, sites), *map(type, others)}
+    )
+    radii = 2 * (atol + 1e-5 * np.abs(coords).max(axis=1))
+    candidates = cKDTree(other_coords).query_ball_point(coords, radii, p=np.inf)
+    return all(
+        any(others[idx] is site or others[idx] == site for idx in cand)
+        for site, cand in zip(sites, candidates, strict=True)
+    )
+
+
 class Neighbor(Site):
     """Simple Site subclass to contain a neighboring atom that skips all the unnecessary checks for speed. Can be
     used as a fixed-length tuple of size 3 to retain backwards compatibility with past use cases.
@@ -122,12 +166,15 @@ class Neighbor(Site):
             index: Index within structure.
             label: Label for the site. Defaults to None.
         """
-        self._species: Composition = species
-        self.coords: NDArray = coords
-        self.properties: dict = properties or {}
-        object.__setattr__(self, "nn_distance", nn_distance)
-        object.__setattr__(self, "index", index)
-        self._label = label
+        # Set the instance attributes directly, bypassing the slow Site.__setattr__
+        vars(self).update(
+            _species=species,
+            coords=coords,
+            properties=properties or {},
+            nn_distance=nn_distance,
+            index=index,
+            _label=label,
+        )
 
     def __len__(self) -> Literal[3]:
         """Make neighbor Tuple-like to retain backwards compatibility."""
@@ -190,14 +237,17 @@ class PeriodicNeighbor(PeriodicSite):
             image (tuple, optional): PeriodicImage. Defaults to (0, 0, 0).
             label (str, optional): Label for the site. Defaults to None.
         """
-        self._lattice = lattice
-        self._frac_coords = coords
-        self._species = species
-        self.properties = properties or {}
-        object.__setattr__(self, "nn_distance", nn_distance)
-        object.__setattr__(self, "index", index)
-        object.__setattr__(self, "image", image)
-        self._label = label
+        # Set the instance attributes directly, bypassing the slow Site.__setattr__
+        vars(self).update(
+            _lattice=lattice,
+            _frac_coords=coords,
+            _species=species,
+            properties=properties or {},
+            nn_distance=nn_distance,
+            index=index,
+            image=image,
+            _label=label,
+        )
 
     def __len__(self) -> Literal[4]:
         """Make neighbor Tuple-like to retain backwards compatibility."""
@@ -1121,7 +1171,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             return False
         if self.properties != other.properties:
             return False
-        return all(site in other for site in self)
+        return _all_sites_in(self.sites, other.sites)
 
     def __hash__(self) -> int:
         """Use the composition hash for now."""
@@ -1929,26 +1979,29 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 )
 
         # Get a list of neighbors up to distance r
-        bonds = self.get_neighbor_list(r)
+        bonds = self.get_neighbor_list(r, numerical_tol=numerical_tol, exclude_self=exclude_self)
 
         if unique:
-            redundant = []
-            # Compare all neighbors pairwise to find the pairs that connect the same
-            # two sites, but with an inverted vector (R=-R) that connects the two and add
-            # one of each pair to the redundant list.
-            for idx, (i, j, R, d) in enumerate(zip(*bonds, strict=True)):
-                if idx in redundant:
+            # Find the pairs of neighbors that connect the same two sites, but with an
+            # inverted vector (R=-R), and mark the second one of each pair as redundant.
+            # Bonds are indexed by (center, neighbor, image) to look up the reverse bond directly.
+            keys = [
+                (i, j, tuple(image))
+                for i, j, image in zip(bonds[0].tolist(), bonds[1].tolist(), bonds[2].tolist(), strict=True)
+            ]
+            bond_indices: dict[tuple, list[int]] = defaultdict(list)
+            for idx, key in enumerate(keys):
+                bond_indices[key].append(idx)
+            redundant = np.zeros(len(keys), dtype=bool)
+            for idx, (i, j, image) in enumerate(keys):
+                if redundant[idx]:
                     continue
-                for jdx, (i2, j2, R2, d2) in enumerate(zip(*bonds, strict=True)):
-                    bool1 = i == j2
-                    bool2 = j == i2
-                    bool3 = (-R2 == R).all()
-                    bool4 = np.allclose(d, d2, atol=numerical_tol)
-                    if bool1 and bool2 and bool3 and bool4:
-                        redundant.append(jdx)
+                for jdx in bond_indices.get((j, i, tuple(-x for x in image)), []):
+                    if np.allclose(bonds[3][idx], bonds[3][jdx], atol=numerical_tol):
+                        redundant[jdx] = True
 
             # Delete the redundant neighbors
-            m = ~np.isin(np.arange(len(bonds[0])), redundant)
+            m = ~redundant
             idcs_dist = np.argsort(bonds[3][m])
             bonds = (
                 bonds[0][m][idcs_dist],
@@ -2637,37 +2690,42 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         super_ftol = np.divide(tolerance, self.lattice.abc)
         super_ftol_2 = super_ftol * 2
 
-        def pbc_coord_intersection(fc1, fc2, tol):
-            """
-            Get the fractional coords in fc1 that have coordinates
-            within tolerance to some coordinate in fc2.
-            """
-            from scipy.spatial import cKDTree
+        from scipy.spatial import cKDTree
 
-            tol = np.asarray(tol, dtype=float)
-            scale = 1.0 / tol
-            boxsize = scale
+        # Coordinates are scaled by 1 / tolerance into a periodic box so that "within tolerance along
+        # every axis" becomes a Chebyshev distance < 1 in a periodic cKDTree.
+        box = 1.0 / super_ftol_2
+        # sparse_distance_matrix keeps pairs with distance <= max_distance, so use the largest float < 1
+        max_dist = np.nextafter(1.0, 0.0)
 
-            fc1_scaled = (fc1 % 1.0) * scale
-            fc2_scaled = (fc2 % 1.0) * scale
-
+        def to_box(fcoords: NDArray) -> NDArray:
+            scaled = (fcoords % 1.0) * box
             # cKDTree requires all coords strictly < boxsize
-            np.clip(fc1_scaled, 0, boxsize * (1 - 1e-15), out=fc1_scaled)
-            np.clip(fc2_scaled, 0, boxsize * (1 - 1e-15), out=fc2_scaled)
-
-            tree = cKDTree(fc2_scaled, boxsize=boxsize)
-            dist, _ = tree.query(fc1_scaled, p=np.inf, distance_upper_bound=1.0)
-            return fc1[np.isfinite(dist)]
+            return np.clip(scaled, 0, box * (1 - 1e-15), out=scaled)
 
         # Here we reduce the number of min_vecs by enforcing that every
-        # vector in min_vecs approximately maps each site onto a similar site.
+        # vector in min_vecs approximately maps each site onto a similar site,
+        # i.e. for every site f in a group, it must be close to group - group[f].
         # The subsequent processing is O(fu^3 * min_vecs) = O(n^4) if we do no
         # reduction.
         # This reduction is O(n^3) so usually is an improvement. Using double
-        # the tolerance because both vectors are approximate
+        # the tolerance because both vectors are approximate.
+        # The translations of many sites f are checked in one cKDTree query (chunked to bound memory).
         for group in sorted(grouped_frac_coords, key=len):
-            for frac_coords in group:
-                min_vecs = pbc_coord_intersection(min_vecs, group - frac_coords, super_ftol_2)
+            n_grp = len(group)
+            chunk = max(1, 2**18 // n_grp)
+            for start in range(0, n_grp, chunk):
+                if len(min_vecs) == 0:
+                    break
+                # Row f holds group - group[f]
+                translations = group[None, :, :] - group[start : start + chunk, None, :]
+                n_rows = len(translations)
+                vec_tree = cKDTree(to_box(min_vecs), boxsize=box)
+                trans_tree = cKDTree(to_box(translations.reshape(-1, 3)), boxsize=box)
+                pairs = vec_tree.sparse_distance_matrix(trans_tree, max_dist, p=np.inf, output_type="ndarray")
+                is_close = np.zeros((len(min_vecs), n_rows), dtype=bool)
+                is_close[pairs["i"], pairs["j"] // n_grp] = True
+                min_vecs = min_vecs[is_close.all(axis=1)]
 
         def get_hnf(form_units):
             """Get all possible distinct supercell matrices given a
@@ -3353,7 +3411,7 @@ class IMolecule(SiteCollection[Site], MSONable):
             return False
         if self.properties != other.properties:
             return False
-        return all(site in other for site in self)
+        return _all_sites_in(self.sites, other.sites)
 
     def __hash__(self) -> int:
         """Use the composition hash for now."""
@@ -3518,11 +3576,45 @@ class IMolecule(SiteCollection[Site], MSONable):
         Returns:
             List of bonds
         """
-        bonds = []
-        for site1, site2 in itertools.combinations(self._sites, 2):
-            if CovalentBond.is_bonded(site1, site2, tol):
-                bonds.append(CovalentBond(site1, site2))
-        return bonds
+        sites = self._sites
+        if len(sites) < 2:
+            return []
+
+        # Same criterion as CovalentBond.is_bonded, i.e. distance < (1 + tol) * any tabulated bond
+        # length of the pair of (first) species symbols, but evaluated once per pair of symbols.
+        symbols = [next(iter(site.species)).symbol for site in sites]
+        uniq_symbols = sorted(set(symbols))
+        sym_to_idx = {sym: idx for idx, sym in enumerate(uniq_symbols)}
+        sym_idx = np.array([sym_to_idx[sym] for sym in symbols])
+        cutoffs = np.full((len(uniq_symbols),) * 2, -np.inf)
+        has_data = np.zeros_like(cutoffs, dtype=bool)
+        for (idx_a, sym_a), (idx_b, sym_b) in itertools.combinations_with_replacement(enumerate(uniq_symbols), 2):
+            if (key := (sym_a, sym_b)) in bond_lengths:
+                has_data[idx_a, idx_b] = has_data[idx_b, idx_a] = True
+                cutoffs[idx_a, idx_b] = cutoffs[idx_b, idx_a] = max(
+                    ((1 + tol) * length for length in bond_lengths[key].values()), default=-np.inf
+                )
+
+        if not has_data.all():
+            # Raise for the first pair of sites without bond data, as CovalentBond.is_bonded does
+            for idx in np.flatnonzero(~has_data[sym_idx].all(axis=1)):
+                if (no_data := ~has_data[sym_idx[idx], sym_idx[idx + 1 :]]).any():
+                    syms = sorted([symbols[idx], symbols[idx + 1 + int(np.argmax(no_data))]])
+                    raise ValueError(f"No bond data for elements {syms[0]} - {syms[1]}")
+
+        if cutoffs.max() <= 0:
+            return []
+
+        from scipy.spatial import cKDTree
+
+        # Candidate pairs from a cKDTree (with a small margin), then the exact check on each candidate
+        pairs = cKDTree(self.cart_coords).query_pairs(cutoffs.max() * (1 + 1e-6), output_type="ndarray")
+        pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
+        return [
+            CovalentBond(sites[idx], sites[jdx])
+            for idx, jdx in pairs.tolist()
+            if sites[idx].distance(sites[jdx]) < cutoffs[sym_idx[idx], sym_idx[jdx]]
+        ]
 
     def get_zmatrix(self) -> str:
         """Get a z-matrix representation of the molecule."""
@@ -4042,8 +4134,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
             self.replace_species({idx: site})  # type: ignore[dict-item]
             return
         elif isinstance(idx, slice):
-            to_mod = self[idx]
-            indices = [ii for ii, site in enumerate(self) if site in to_mod]
+            indices = list(range(len(self))[idx])
         else:
             indices = list(idx)
 
@@ -4977,8 +5068,7 @@ class Molecule(IMolecule, MutableSequence[Site]):
             return
 
         elif isinstance(idx, slice):
-            to_mod = self[idx]
-            indices = [idx for idx, site in enumerate(self._sites) if site in to_mod]
+            indices = list(range(len(self))[idx])
 
         else:
             indices = list(idx)
