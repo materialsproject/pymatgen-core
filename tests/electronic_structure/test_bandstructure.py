@@ -113,6 +113,58 @@ class TestBandStructureSymmLine(MatSciTest):
         assert self.bs_spin.bands[Spin.up][5][10] == approx(0.262)
         assert self.bs_spin.bands[Spin.down][5][10] == approx(1.6156)
 
+    def test_projections_match_site_loop(self):
+        # Pin the vectorized projections against a plain loop over bands, kpoints, orbitals and sites
+        proj_el = self.bs.get_projection_on_elements()
+        proj_el_orb = self.bs.get_projections_on_elements_and_orbitals({"Cu": ["s", "d"], "O": "p", "Xe": ["s"]})
+        projections = self.bs.projections[Spin.up]
+        for band_idx, kpt_idx in [(0, 0), (25, 10), (22, 25), (47, 95)]:
+            expected_el = {"Cu": 0.0, "O": 0.0}
+            expected_orb = {"Cu": {"s": 0.0, "d": 0.0}, "O": {"p": 0.0}, "Xe": {}}
+            for site_idx, site in enumerate(self.bs.structure):
+                el = site.species_string
+                for orb_idx in range(projections.shape[2]):
+                    val = projections[band_idx, kpt_idx, orb_idx, site_idx]
+                    expected_el[el] += val
+                    orb_type = Orbital(orb_idx).name[0]
+                    if orb_type in expected_orb[el]:
+                        expected_orb[el][orb_type] += val
+            assert proj_el[Spin.up][band_idx][kpt_idx] == approx(expected_el)
+            for el, orb_proj in expected_orb.items():
+                assert proj_el_orb[Spin.up][band_idx][kpt_idx][el] == approx(orb_proj)
+        assert list(proj_el_orb[Spin.up][0][0]) == ["Cu", "O", "Xe"]
+
+    def test_band_edges_tie_breaking(self):
+        # Degenerate VBM/CBM energies: the first spin channel and lowest (band, kpoint) index win
+        bands = np.array([[-1.0, -0.5, -0.5], [1.0, 0.5, 2.0]])
+        bs = BandStructure(
+            [[0, 0, 0], [0.25, 0, 0], [0.5, 0, 0]],
+            {Spin.up: bands, Spin.down: bands[:, ::-1]},
+            Lattice.cubic(1),
+            efermi=0.0,
+        )
+        vbm, cbm = bs.get_vbm(), bs.get_cbm()
+        assert vbm["energy"] == approx(-0.5)
+        assert vbm["kpoint_index"] == [1]
+        assert vbm["band_index"] == {Spin.up: [0], Spin.down: [0]}
+        assert cbm["energy"] == approx(0.5)
+        assert cbm["kpoint_index"] == [1]
+        assert cbm["band_index"] == {Spin.up: [1], Spin.down: [1]}
+        assert bs.get_band_gap()["energy"] == approx(1.0)
+
+    def test_duplicate_label_coords(self):
+        # When several labels share coordinates, the last one labels the kpoint
+        labels = {"A": [0, 0, 0], "B": [0.5, 0, 0], "C": [0, 0, 0]}
+        bs = BandStructureSymmLine(
+            [[0, 0, 0], [0.25, 0, 0], [0.5, 0, 0]],
+            {Spin.up: np.array([[-1.0, -0.5, -0.8], [1.0, 0.5, 2.0]])},
+            Lattice.cubic(1),
+            0.0,
+            labels,
+        )
+        assert [kpt.label for kpt in bs.kpoints] == ["C", None, "B"]
+        assert list(bs.labels_dict) == ["A", "C", "B"]
+
     def test_properties(self):
         self.one_kpoint = self.bs2.kpoints[31]
         assert_allclose(self.one_kpoint.frac_coords, [0.5, 0.25, 0.75])
