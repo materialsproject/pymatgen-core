@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, overload
 
 import numpy as np
 import scipy.special
 from monty.json import MSONable
-from tqdm import tqdm
 
 from pymatgen.core import constants as _const
 from pymatgen.electronic_structure.core import Spin
@@ -234,42 +232,24 @@ class DielectricFunctionCalculator(MSONable):
         """
         cderm = self.cder * mask if mask is not None else self.cder
 
-        norm_kweights = np.array(self.kweights) / np.sum(self.kweights)
-        eigs_shifted = self.eigs - self.efermi
-        rspin = 3 - cderm.shape[3]
-
         # Limit the first two indices based on the mask
         try:
-            min_band0, max_band0 = np.min(np.where(cderm)[0]), np.max(np.where(cderm)[0])
-            min_band1, max_band1 = np.min(np.where(cderm)[1]), np.max(np.where(cderm)[1])
-
+            min_band0, min_band1, weight, decel, A = _get_transitions(
+                cderm, self.eigs, self.kweights, self.efermi, self.sigma, self.ismear, idir, jdir
+            )
         except ValueError as exc:
             if "zero-size array" in str(exc):
                 raise ValueError("No matrix elements found. Check the mask.")
             raise
 
+        matrix_el = np.abs(A) * weight  # can have negative weight due to fermi function
         x_val = []
         y_val = []
         text = []
-        _, _, nk, nspin = cderm.shape[:4]
-        iter_idx = [
-            range(min_band0, max_band0 + 1),
-            range(min_band1, max_band1 + 1),
-            range(nk),
-            range(nspin),
-        ]
-        num_ = (max_band0 - min_band0) * (max_band1 - min_band1) * nk * nspin
-        for ib, jb, ik, ispin in tqdm(itertools.product(*iter_idx), total=num_):
-            fermi_w_i = step_func((eigs_shifted[ib, ik, ispin]) / self.sigma, self.ismear)
-            fermi_w_j = step_func((eigs_shifted[jb, ik, ispin]) / self.sigma, self.ismear)
-            weight = (fermi_w_j - fermi_w_i) * rspin * norm_kweights[ik]
-            A = cderm[ib, jb, ik, ispin, idir] * np.conjugate(cderm[ib, jb, ik, ispin, jdir])
-            decel = self.eigs[jb, ik, ispin] - self.eigs[ib, ik, ispin]
-            matrix_el = np.abs(A) * float(weight)  # can have negative weight due to fermi function
-            if matrix_el > min_val:
-                x_val.append(decel)
-                y_val.append(matrix_el)
-                text.append(f"s:{ispin}, k:{ik}, {ib} -> {jb} ({decel:.2f})")
+        for ib, jb, ik, ispin in zip(*np.nonzero(matrix_el > min_val), strict=True):
+            x_val.append(decel[ib, jb, ik, ispin])
+            y_val.append(matrix_el[ib, jb, ik, ispin])
+            text.append(f"s:{ispin}, k:{ik}, {min_band0 + ib} -> {min_band1 + jb} ({decel[ib, jb, ik, ispin]:.2f})")
         return x_val, y_val, text
 
 
@@ -396,48 +376,88 @@ def epsilon_imag(
     Returns:
         np.ndarray: Array of size `nedos` with the imaginary part of the dielectric function.
     """
-    norm_kweights = np.array(kweights) / np.sum(kweights)
     egrid = np.linspace(0, nedos * deltae, nedos, endpoint=False)
-    eigs_shifted = eigs - efermi
-    # np.subtract.outer results in a matrix of shape (nband, nband)
-    rspin = 3 - cder.shape[3]
+    epsdd = np.zeros_like(egrid, dtype=np.complex128)
 
-    # For the transition between two bands at one kpoint the contributions is:
-    #  (fermi[band_i] - fermi[band_j]) * rspin * normalized_kpoint_weight
     cderm = cder * mask if mask is not None else cder
-
-    # min_band0, max_band0 = np.min(np.where(cderm)[0]), np.max(np.where(cderm)[0])
-    # min_band1, max_band1 = np.min(np.where(cderm)[1]), np.max(np.where(cderm)[1])
-    # limit the first two indices based on the mask
     try:
-        min_band0, max_band0 = np.min(np.where(cderm)[0]), np.max(np.where(cderm)[0])
-        min_band1, max_band1 = np.min(np.where(cderm)[1]), np.max(np.where(cderm)[1])
+        _, _, weight, decel, A = _get_transitions(cderm, eigs, kweights, efermi, sigma, ismear, idir, jdir)
     except ValueError as exc:
         if "zero-size array" in str(exc):
-            return egrid, np.zeros_like(egrid, dtype=np.complex128)
+            return egrid, epsdd
         raise
-    _, _, nk, nspin = cderm.shape[:4]
-    iter_idx = [
-        range(min_band0, max_band0 + 1),
-        range(min_band1, max_band1 + 1),
-        range(nk),
-        range(nspin),
-    ]
-    num_ = (max_band0 - min_band0) * (max_band1 - min_band1) * nk * nspin
-    epsdd = np.zeros_like(egrid, dtype=np.complex128)
-    for ib, jb, ik, ispin in tqdm(itertools.product(*iter_idx), total=num_):
-        fermi_w_i = step_func((eigs_shifted[ib, ik, ispin]) / sigma, ismear)
-        fermi_w_j = step_func((eigs_shifted[jb, ik, ispin]) / sigma, ismear)
-        weight = (fermi_w_j - fermi_w_i) * rspin * norm_kweights[ik]
-        decel = eigs[jb, ik, ispin] - eigs[ib, ik, ispin]
-        A = cderm[ib, jb, ik, ispin, idir] * np.conjugate(cderm[ib, jb, ik, ispin, jdir])
-        # Reproduce the `SLOT` function calls in VASP:
-        # CALL SLOT( REAL(DECEL,q), ISMEAR, SIGMA, NEDOS, DELTAE,  WEIGHT*A*CONST, EPSDD)
-        # The conjugate part is not needed since we are running over all pairs of ib, jb
-        # vasp just does the conjugate trick to save loop time
-        smeared = get_delta(x0=decel, sigma=sigma, nx=nedos, dx=deltae, ismear=ismear) * weight * A
-        epsdd += smeared
+
+    # Reproduce the `SLOT` function calls in VASP:
+    # CALL SLOT( REAL(DECEL,q), ISMEAR, SIGMA, NEDOS, DELTAE,  WEIGHT*A*CONST, EPSDD)
+    # The conjugate part is not needed since we are running over all pairs of ib, jb
+    # vasp just does the conjugate trick to save loop time.
+    # Transitions with zero weight or matrix element contribute nothing, so skip them.
+    amplitude = (weight * A).ravel()
+    nonzero = amplitude != 0
+    amplitude, decel = amplitude[nonzero], decel.ravel()[nonzero]
+
+    # Smear all transitions at once, in chunks to bound the (n_transitions, nedos) work arrays.
+    # This is the vectorized equivalent of summing get_delta(decel, ...) * weight * A.
+    chunk_size = max(1, 2**20 // nedos)
+    for start in range(0, len(amplitude), chunk_size):
+        x0 = decel[start : start + chunk_size, None]
+        x_scaled = (egrid - x0 + (deltae / 2)) / sigma
+        sfun = step_func(x_scaled.ravel(), ismear).reshape(x_scaled.shape)
+        dfun = np.zeros_like(x_scaled)
+        dfun[:, 1:] = (sfun[:, 1:] - sfun[:, :-1]) / deltae
+        epsdd += amplitude[start : start + chunk_size] @ dfun
     return egrid, epsdd
+
+
+def _get_transitions(
+    cderm: NDArray,
+    eigs: NDArray,
+    kweights: ArrayLike,
+    efermi: float,
+    sigma: float,
+    ismear: int,
+    idir: int,
+    jdir: int,
+) -> tuple[int, int, NDArray, NDArray, NDArray]:
+    """Get the occupation weights, transition energies and matrix elements of all transitions.
+
+    The first two (band) indices are limited to the range in which ``cderm`` is nonzero.
+
+    Args:
+        cderm: The (masked) data written to the WAVEDER (nbands, nbands, nkpoints, nspin, diri, dirj)
+        eigs: The eigenvalues (nbands, nkpoints, nspin)
+        kweights: The kpoint weights (nkpoints)
+        efermi: The fermi energy
+        sigma: The width of the smearing
+        ismear: The smearing parameter used by the ``step_func``.
+        idir: The first direction of the dielectric tensor
+        jdir: The second direction of the dielectric tensor
+
+    Raises:
+        ValueError: With a "zero-size array" message if ``cderm`` is all zero.
+
+    Returns:
+        tuple: The first included band index along each of the two band axes, and the weight,
+            transition energy and matrix element arrays, each of shape (nband0, nband1, nkpoints, nspin).
+    """
+    nonzero = np.nonzero(cderm)
+    min_band0, max_band0 = np.min(nonzero[0]), np.max(nonzero[0])
+    min_band1, max_band1 = np.min(nonzero[1]), np.max(nonzero[1])
+    bands0 = slice(min_band0, max_band0 + 1)
+    bands1 = slice(min_band1, max_band1 + 1)
+
+    kweights = np.array(kweights)
+    norm_kweights = kweights / np.sum(kweights)
+    rspin = 3 - cderm.shape[3]
+    eigs_shifted = eigs - efermi
+    fermi_w = step_func((eigs_shifted / sigma).ravel(), ismear).reshape(eigs.shape)
+
+    # For the transition between two bands at one kpoint the contribution is:
+    #  (fermi[band_j] - fermi[band_i]) * rspin * normalized_kpoint_weight
+    weight = (fermi_w[None, bands1] - fermi_w[bands0, None]) * rspin * norm_kweights[None, None, :, None]
+    decel = eigs[None, bands1] - eigs[bands0, None]
+    A = cderm[bands0, bands1, :, :, idir] * np.conjugate(cderm[bands0, bands1, :, :, jdir])
+    return min_band0, min_band1, weight, decel, A
 
 
 def kramers_kronig(
