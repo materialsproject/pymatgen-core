@@ -1113,23 +1113,18 @@ class DftSet(Cp2kInput):
 
         self.modify_dft_print_iters(0, add_last="numeric")
 
-        if "fix" in self.structure.site_properties:
+        if (fix := self.structure.site_properties.get("fix")) is not None:
             self["motion"].insert(Section("CONSTRAINT"))
 
-            i = 0
+            # Group runs of consecutive sites with equal "fix" values into 1-based (start, end) ranges
             components = []
             tuples = []
-            while i < len(self.structure):
-                end = i + sum(
-                    1
-                    for j in itertools.takewhile(
-                        lambda x: x == self.structure.site_properties["fix"][i],
-                        self.structure.site_properties["fix"][i:],
-                    )
-                )
-                components.append(self.structure.site_properties["fix"][i])
-                tuples.append((i + 1, end))
-                i = end
+            start = 0
+            for component, group in itertools.groupby(fix):
+                end = start + sum(1 for _ in group)
+                components.append(component)
+                tuples.append((start + 1, end))
+                start = end
             self["motion"]["constraint"].insert(
                 SectionList(
                     sections=[
@@ -1303,21 +1298,19 @@ class DftSet(Cp2kInput):
 
         # Insert atom kinds by identifying the unique sites (unique element and site properties)
         unique_kinds = get_unique_site_indices(structure)
+        # site_properties is rebuilt from all sites on every access, so fetch it only once
+        site_props = self.structure.site_properties
         for key, val in unique_kinds.items():
             kind = key.split("_")[0]
             kind_kwargs = {}
 
-            _ox = (
-                self.structure.site_properties["oxi_state"][val[0]]
-                if "oxi_state" in self.structure.site_properties
-                else 0
-            )
-            _sp = self.structure.site_properties.get("spin", {val[0]: 0})[val[0]]
+            _ox = site_props["oxi_state"][val[0]] if "oxi_state" in site_props else 0
+            _sp = site_props.get("spin", {val[0]: 0})[val[0]]
 
             bs = BrokenSymmetry.from_el(kind, _ox, _sp) if _ox else None
 
             # First try site properties
-            if (magmom := self.structure.site_properties.get("magmom")) and not bs:
+            if (magmom := site_props.get("magmom")) and not bs:
                 kind_kwargs["magnetization"] = magmom[val[0]]
             # Then try element defaults
             elif kind_kwargs.get("magnetization") is None and (
@@ -1325,20 +1318,20 @@ class DftSet(Cp2kInput):
             ):
                 kind_kwargs["magnetization"] = magnetization
 
-            if ghost := self.structure.site_properties.get("ghost"):
+            if ghost := site_props.get("ghost"):
                 kind_kwargs["ghost"] = ghost[val[0]]
 
-            if basis_set := self.structure.site_properties.get("basis_set"):
+            if basis_set := site_props.get("basis_set"):
                 basis_set = basis_set[val[0]]
             else:
                 basis_set = self.basis_and_potential[kind].get("basis")
 
-            if potential := self.structure.site_properties.get("potential"):
+            if potential := site_props.get("potential"):
                 potential = potential[val[0]]
             else:
                 potential = self.basis_and_potential[kind].get("potential")
 
-            if aux_basis := self.structure.site_properties.get("aux_basis"):
+            if aux_basis := site_props.get("aux_basis"):
                 kind_kwargs["aux_basis"] = aux_basis[val[0]]
             elif aux_basis := self.basis_and_potential[kind].get("aux_basis"):
                 kind_kwargs["aux_basis"] = aux_basis

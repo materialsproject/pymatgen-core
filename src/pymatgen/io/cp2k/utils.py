@@ -162,17 +162,13 @@ def get_unique_site_indices(struct: Structure | Molecule):
     struct.add_site_property("oxi_state", oxi_states)
     struct.add_site_property("spin", spins)
     struct.remove_oxidation_states()
-    items = [
-        (
-            site.species_string,
-            *[struct.site_properties[k][idx] for k in struct.site_properties if k.lower() in parsable_site_properties],
-        )
-        for idx, site in enumerate(struct)
-    ]
-    unique_items = list(set(items))
-    _sites: dict[tuple, list] = {u: [] for u in unique_items}
+    # site_properties is rebuilt from all sites on every access, so fetch it only once
+    parsable_props = [vals for key, vals in struct.site_properties.items() if key.lower() in parsable_site_properties]
+    items = [(site.species_string, *[vals[idx] for vals in parsable_props]) for idx, site in enumerate(struct)]
+    # Group sites by unique item in order of first appearance so kind labels are reproducible
+    _sites: dict[tuple, list] = {}
     for i, itm in enumerate(items):
-        _sites[itm].append(i)
+        _sites.setdefault(itm, []).append(i)
     sites = {}
     nums = dict.fromkeys(struct.symbol_set, 1)
     for site, val in _sites.items():  # type:ignore[assignment]
