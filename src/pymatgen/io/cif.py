@@ -226,9 +226,9 @@ class CifBlock:
                         break
                     items.append("".join(deq.popleft()))
 
+                if len(items) % len(columns) != 0:
+                    raise ValueError(f"{len(items)=} is not a multiple of {len(columns)=}")
                 n = len(items) // len(columns)
-                if len(items) % n != 0:
-                    raise ValueError(f"{len(items)=} is not a multiple of {n=}")
                 loops.append(columns)
                 for k, v in zip(columns * n, items, strict=True):
                     data[k].append(v.strip())
@@ -530,14 +530,13 @@ class CifParser:
 
                     idxs_to_remove.append(idx)
 
-            # Remove the original row by iterating over all keys in the CIF
-            # data looking for lists, which indicates
-            # multiple data items, one for each row, and remove items from the
-            # list that corresponds to the removed row,
+            # Remove the original row from every column of the _atom_site loop,
             # so that it's not processed by the rest of this function (which
-            # would result in an error).
-            for original_key in data.data:
-                if isinstance(data.data[original_key], list):
+            # would result in an error). Columns of other loops (e.g. symmetry
+            # operations) are indexed independently and must be left untouched.
+            atom_site_keys = next((loop for loop in data.loops if "_atom_site_label" in loop), [])
+            for original_key in atom_site_keys:
+                if isinstance(data.data.get(original_key), list):
                     for idx in sorted(idxs_to_remove, reverse=True):
                         del data.data[original_key][idx]
 
@@ -717,20 +716,21 @@ class CifParser:
                 "_symmetry_cell_setting",
                 "_space_group_crystal_system",
             ):
-                if data.data.get(lattice_label):
-                    lattice_type = data.data.get(lattice_label, "").lower()
-                    try:
-                        required_args = getfullargspec(getattr(Lattice, lattice_type)).args
+                if not data.data.get(lattice_label):
+                    continue
+                lattice_type = data.data.get(lattice_label, "").lower()
+                try:
+                    required_args = getfullargspec(getattr(Lattice, lattice_type)).args
 
-                        lengths = (length for length in length_strings if length in required_args)
-                        angles = (a for a in angle_strings if a in required_args)
-                        return self.get_lattice(data, lengths, angles, lattice_type=lattice_type)
-                    except AttributeError as exc:
-                        self.warnings.append(str(exc))
-                        warnings.warn(str(exc), stacklevel=2)
-
-                else:
-                    return None
+                    lengths = tuple(length for length in length_strings if length in required_args)
+                    angles = tuple(a for a in angle_strings if a in required_args)
+                    return self.get_lattice_no_exception(data, lengths, angles, lattice_type=lattice_type)
+                except AttributeError as exc:
+                    self.warnings.append(str(exc))
+                    warnings.warn(str(exc), stacklevel=2)
+                except KeyError:
+                    # Parameters required by this crystal system are missing as well
+                    continue
         return None
 
     @staticmethod
@@ -1245,8 +1245,11 @@ class CifParser:
             else:
                 all_labels = None  # type: ignore[assignment]
 
+            if lattice is None:
+                raise ValueError("Cannot determine lattice: missing or incomplete _cell_length/_cell_angle data.")
+
             struct: Structure = Structure(
-                lattice,  # type:ignore[arg-type]
+                lattice,
                 all_species,
                 all_coords,
                 site_properties=site_properties,
@@ -1265,15 +1268,12 @@ class CifParser:
                 struct = SymmetrizedStructure(struct, sg, equivalent_indices, wyckoffs)
 
             if not check_occu:
-                if lattice is None:
-                    raise RuntimeError("Cannot generate Structure with lattice as None.")
-
                 for idx in range(len(struct)):
                     struct[idx] = PeriodicSite(
                         all_species_noedit[idx],
                         all_coords[idx],
                         lattice,
-                        properties=site_properties,
+                        properties={key: vals[idx] for key, vals in site_properties.items()},
                         label=all_labels[idx],
                         skip_checks=True,
                     )
@@ -1725,7 +1725,12 @@ class CifWriter:
 
                     if write_site_properties:
                         for key, val in site.properties.items():
-                            atom_site_properties[key].append(format_str.format(val))
+                            try:
+                                formatted = format_str.format(val)
+                            except (TypeError, ValueError):
+                                # Non-numeric property (e.g. str, list, Magmom)
+                                formatted = str(val)
+                            atom_site_properties[key].append(formatted)
 
                     count += 1
 
