@@ -1203,21 +1203,27 @@ class PointGroupAnalyzer:
             logger.debug("Cyclic group detected.")
             self._proc_cyclic()
 
-    def _proc_sym_top(self) -> None:
+    def _proc_sym_top(self, unique_axis: NDArray | None = None) -> None:
         """Handles symmetric top molecules which has one unique eigenvalue whose
         corresponding principal axis is a unique rotational axis.
 
         More complex handling required to look for R2 axes perpendicular to this unique
         axis.
+
+        Args:
+            unique_axis: Axis to use instead of the principal axis with the unique
+                eigenvalue. Accidental spherical tops have no unique eigenvalue, so they
+                pass a rotation axis found by the spherical search.
         """
-        if abs(self.eigvals[0] - self.eigvals[1]) < self.eig_tol:
-            ind = 2
-        elif abs(self.eigvals[1] - self.eigvals[2]) < self.eig_tol:
-            ind = 0
-        else:
-            ind = 1
-        logger.debug(f"Eigenvalues = {self.eigvals}.")
-        unique_axis = self.principal_axes[ind]
+        if unique_axis is None:
+            if abs(self.eigvals[0] - self.eigvals[1]) < self.eig_tol:
+                ind = 2
+            elif abs(self.eigvals[1] - self.eigvals[2]) < self.eig_tol:
+                ind = 0
+            else:
+                ind = 1
+            logger.debug(f"Eigenvalues = {self.eigvals}.")
+            unique_axis = self.principal_axes[ind]
         self._check_rot_sym(unique_axis)
         logger.debug(f"Rotation symmetries = {self.rot_sym}")
         # A perpendicular C2 can exist even when the unique axis carries none; that molecule is C2, not C1.
@@ -1279,7 +1285,21 @@ class PointGroupAnalyzer:
             op = SymmOp.from_axis_angle_and_translation(v, 180)
             if self.is_valid_op(op):
                 self.symmops.append(op)
-                self.rot_sym.append((v, 2))
+                self._add_rot_sym(v, 2)
+
+    def _add_rot_sym(self, axis: NDArray, order: int) -> None:
+        """Record a rotation axis, ignoring one parallel to an axis already recorded.
+
+        The accidental spherical top path runs the symmetric top search after the spherical
+        one, so the same axis can be found twice; counting it twice turns C2 into D2.
+        """
+        unit_axis = axis / np.linalg.norm(axis)
+        for idx, (other, other_order) in enumerate(self.rot_sym):
+            if abs(abs(np.dot(unit_axis, other / np.linalg.norm(other))) - 1) < 1e-3:
+                if order > other_order:
+                    self.rot_sym[idx] = (axis, order)
+                return
+        self.rot_sym.append((axis, order))
 
     def _find_mirror(self, axis: NDArray) -> Literal["h", "d", "v", ""]:
         """Looks for mirror symmetry of specified type about axis.
@@ -1296,17 +1316,23 @@ class PointGroupAnalyzer:
             mirror_type = "h"
         else:
             # Iterate through all pairs of atoms to find mirror
+            unit_axis = axis / np.linalg.norm(axis)
             for s1, s2 in itertools.combinations(self.centered_mol, 2):
                 if s1.species == s2.species:
                     normal = s1.coords - s2.coords
-                    if np.dot(normal, axis) < self.tol:
+                    normal /= np.linalg.norm(normal)
+                    if abs(np.dot(normal, unit_axis)) < self.tol:
                         op = SymmOp.reflection(normal)
                         if self.is_valid_op(op):
                             self.symmops.append(op)
                             if len(self.rot_sym) > 1:
                                 mirror_type = "d"
                                 for v, _ in self.rot_sym:
-                                    if np.linalg.norm(v - axis) >= self.tol and np.dot(v, normal) < self.tol:
+                                    unit_v = v / np.linalg.norm(v)
+                                    if (
+                                        np.linalg.norm(unit_v - unit_axis) >= self.tol
+                                        and abs(np.dot(unit_v, normal)) < self.tol
+                                    ):
                                         mirror_type = "v"
                                         break
                             else:
@@ -1350,7 +1376,7 @@ class PointGroupAnalyzer:
             op = SymmOp.from_axis_angle_and_translation(axis, 360 / idx)
             if self.is_valid_op(op):
                 self.symmops.append(op)
-                self.rot_sym.append((axis, idx))
+                self._add_rot_sym(axis, idx)
                 return idx
         return 1
 
@@ -1366,7 +1392,7 @@ class PointGroupAnalyzer:
                 op = SymmOp.from_axis_angle_and_translation(test_axis, 180)
                 if self.is_valid_op(op):
                     self.symmops.append(op)
-                    self.rot_sym.append((test_axis, 2))
+                    self._add_rot_sym(test_axis, 2)
                     return True
         return None
 
@@ -1383,7 +1409,9 @@ class PointGroupAnalyzer:
         main_axis, rot = max(self.rot_sym, key=lambda v: v[1])
         if rot < 3:
             logger.debug("Accidental spherical top!")
-            self._proc_sym_top()
+            # Every direction is a principal axis of an isotropic inertia tensor, so search
+            # about the C2 axis actually found rather than an arbitrary eigenvector.
+            self._proc_sym_top(main_axis)
 
         elif rot == 3:
             # Of T, Td and Th only Th has inversion. Test it first: the Th mirrors are perpendicular
@@ -1421,17 +1449,19 @@ class PointGroupAnalyzer:
         _origin_site, dist_el_sites = cluster_sites(self.centered_mol, self.tol)
         test_set = min(dist_el_sites.values(), key=len)
         coords = [s.coords for s in test_set]
-        for c1, c2, c3 in itertools.combinations(coords, 3):
-            for cc1, cc2 in itertools.combinations([c1, c2, c3], 2):
-                if not rot_present[2]:
-                    test_axis = cc1 + cc2
-                    if np.linalg.norm(test_axis) > self.tol:
-                        op = SymmOp.from_axis_angle_and_translation(test_axis, 180)
-                        rot_present[2] = self.is_valid_op(op)
-                        if rot_present[2]:
-                            self.symmops.append(op)
-                            self.rot_sym.append((test_axis, 2))
+        # Search pairs rather than triples so a 2-site test set (e.g. an accidental spherical top
+        # whose only symmetry is a C2 swapping two atoms) still yields its C2 axis.
+        for cc1, cc2 in itertools.combinations(coords, 2):
+            test_axis = cc1 + cc2
+            if np.linalg.norm(test_axis) > self.tol:
+                op = SymmOp.from_axis_angle_and_translation(test_axis, 180)
+                if self.is_valid_op(op):
+                    self.symmops.append(op)
+                    self._add_rot_sym(test_axis, 2)
+                    rot_present[2] = True
+                    break
 
+        for c1, c2, c3 in itertools.combinations(coords, 3):
             test_axis = np.cross(c2 - c1, c3 - c1)
             if np.linalg.norm(test_axis) > self.tol:
                 for r in (3, 4, 5):
@@ -1440,7 +1470,7 @@ class PointGroupAnalyzer:
                         rot_present[r] = self.is_valid_op(op)
                         if rot_present[r]:
                             self.symmops.append(op)
-                            self.rot_sym.append((test_axis, r))
+                            self._add_rot_sym(test_axis, r)
                             break
             if rot_present[2] and rot_present[3] and (rot_present[4] or rot_present[5]):
                 break
@@ -1838,6 +1868,11 @@ class SpacegroupOperations(list):
 
         def in_sites(site):
             return any(test_site.is_periodic_image(site, symm_prec, check_lattice=False) for test_site in sites1)
+
+        # A symmetry operation is a bijection, so op(sites2) being a subset of sites1 only implies
+        # equivalence when both sets are the same size.
+        if len(sites1) != len(sites2):
+            return False
 
         for op in self:
             new_sites2 = [PeriodicSite(site.species, op.operate(site.frac_coords), site.lattice) for site in sites2]

@@ -712,6 +712,12 @@ class TestSpacegroup:
         sites2 = [self.structure[idx] for idx in (0, 2)]
         assert not self.sg1.are_symmetrically_equivalent(sites1, sites2, 1e-3)
 
+    def test_are_symmetrically_equivalent_different_sizes(self):
+        # op(sites2) being a subset of sites1 is not equivalence: the sets must also be the same size
+        sites1 = [self.structure[idx] for idx in (0, 1)]
+        assert not self.sg1.are_symmetrically_equivalent(sites1, sites1[:1], 1e-3)
+        assert not self.sg1.are_symmetrically_equivalent(sites1, [], 1e-3)
+
 
 H2O2 = Molecule(
     ["O", "O", "H", "H"],
@@ -938,6 +944,70 @@ class TestPointGroupAnalyzer(MatSciTest):
         assert len(pg_analyzer.get_symmetry_operations()) == 2
         assert len(pg_analyzer.get_pointgroup()) == 2
         assert all(order > 1 for _axis, order in pg_analyzer.rot_sym)
+
+    def test_find_mirror_contains_axis(self):
+        """A v/d mirror about an axis must contain it, whatever the sign or length of the axis."""
+        # CH4 with its S4 axes along x, y, z: the sigma_d planes swapping H1/H2 are at 45 deg to z
+        h_pos = 0.629
+        ch4 = Molecule(
+            ["C", "H", "H", "H", "H"],
+            [
+                [0, 0, 0],
+                [h_pos, h_pos, h_pos],
+                [h_pos, -h_pos, -h_pos],
+                [-h_pos, h_pos, -h_pos],
+                [-h_pos, -h_pos, h_pos],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(ch4)
+        assert pg_analyzer.sch_symbol == "Td"
+        for axis in ([0, 0, 1], [0, 0, -1], [0, 0, -10]):
+            n_ops = len(pg_analyzer.symmops)
+            assert pg_analyzer._find_mirror(np.array(axis, dtype=float)) == "d"
+            assert len(pg_analyzer.symmops) == n_ops + 1
+            # the mirror normal is the eigenvector of the reflection with eigenvalue -1
+            eigvals, eigvecs = np.linalg.eigh(pg_analyzer.symmops[-1].rotation_matrix)
+            normal = eigvecs[:, np.argmin(eigvals)]
+            assert np.dot(normal, axis) == approx(0, abs=1e-8)
+
+    def test_accidental_spherical_top_c2_counted_once(self):
+        """Isotropic inertia tensor with a single C2 axis: the axis found by the spherical search
+        must not be counted again by the symmetric top search (which gave D2)."""
+        mol = Molecule(
+            ["H"] * 8,
+            [
+                [-1.729637, 0.667025, -0.750622],
+                [1.729637, -0.667025, -0.750622],
+                [-0.126047, 0.956108, 1.752133],
+                [0.126047, -0.956108, 1.752133],
+                [1.453775, 1.343358, 0.28623],
+                [-1.453775, -1.343358, 0.28623],
+                [-0.460779, 1.472969, -1.272024],
+                [0.460779, -1.472969, -1.272024],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol)
+        assert pg_analyzer.eigvals.max() - pg_analyzer.eigvals.min() < 0.01
+        assert pg_analyzer.sch_symbol == "C2"
+        assert len(pg_analyzer.rot_sym) == 1
+
+    def test_accidental_spherical_top_c2_from_two_site_cluster(self):
+        """Isotropic inertia tensor whose equidistant sets have only two sites: the C2 swapping
+        them must still be found (the spherical search used to need three sites)."""
+        mol = Molecule(
+            ["H"] * 6,
+            [
+                [-0.2884377780571245, 1.6734349300907385, 1.0566073929997244],
+                [0.2884377780571245, -1.6734349300907385, 1.0566073929997244],
+                [-0.7655843049086493, 0.6712775368814153, 1.7214142849866096],
+                [0.7655843049086493, -0.6712775368814153, 1.7214142849866096],
+                [1.7092787911603025, 0.5830537444134493, -0.8593103893326506],
+                [-1.7092787911603025, -0.5830537444134493, -0.8593103893326506],
+            ],
+        )
+        pg_analyzer = PointGroupAnalyzer(mol)
+        assert pg_analyzer.eigvals.max() - pg_analyzer.eigvals.min() < 0.01
+        assert pg_analyzer.sch_symbol == "C2"
 
     def test_accidental_spherical_top_without_rotation_symmetry(self):
         """An isotropic inertia tensor with no rotational symmetry is C1, not an error."""
