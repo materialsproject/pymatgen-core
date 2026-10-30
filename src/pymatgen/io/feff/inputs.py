@@ -407,18 +407,7 @@ class Atoms(MSONable):
         Returns:
             Molecule
         """
-        center = self.struct[self.center_index].coords
-        # this method builds a supercell containing all periodic images of
-        # the unit cell within the specified radius, excluding the central atom
-        sphere = self.struct.get_neighbors(self.struct[self.center_index], self.radius)
-
-        symbols = [self.absorbing_atom]
-        coords = [[0, 0, 0]]
-        for site_dist in sphere:
-            site_symbol = re.sub(r"[^aA-zZ]+", "", site_dist[0].species_string)
-            symbols.append(site_symbol)
-            coords.append(site_dist[0].coords - center)
-        return Molecule(symbols, coords)
+        return _get_cluster(self.struct, self.center_index, self.absorbing_atom, self.radius)
 
     @property
     def cluster(self):
@@ -828,9 +817,8 @@ class Potential(MSONable):
             self.radius = self.struct.distance_matrix.max()
 
         self.absorbing_atom, self.center_index = get_absorbing_atom_symbol_index(absorbing_atom, struct)
-        atom_sym = get_absorbing_atom_symbol_index(absorbing_atom, struct)[0]
         self._cluster = self._set_cluster()
-        self.pot_dict = get_atom_map(self._cluster, atom_sym)
+        self.pot_dict = get_atom_map(self._cluster, self.absorbing_atom)
 
     def as_dict(self) -> dict:
         """MSONable dict. The absorbing atom is stored by site index so that
@@ -849,18 +837,7 @@ class Potential(MSONable):
         Returns:
             Molecule
         """
-        center = self.struct[self.center_index].coords
-        # this method builds a supercell containing all periodic images of
-        # the unit cell within the specified radius, excluding the central atom
-        sphere = self.struct.get_neighbors(self.struct[self.center_index], self.radius)
-
-        symbols = [self.absorbing_atom]
-        coords = [[0, 0, 0]]
-        for site_dist in sphere:
-            site_symbol = re.sub(r"[^aA-zZ]+", "", site_dist[0].species_string)
-            symbols.append(site_symbol)
-            coords.append(site_dist[0].coords - center)
-        return Molecule(symbols, coords)
+        return _get_cluster(self.struct, self.center_index, self.absorbing_atom, self.radius)
 
     @staticmethod
     def pot_string_from_file(filename="feff.inp"):
@@ -1033,6 +1010,31 @@ class FeffParseError(ParseError):
     """Exception class for Structure.
     Raised when the structure has problems, e.g. atoms that are too close.
     """
+
+
+def _get_cluster(struct, center_index, absorbing_atom, radius):
+    """Get the cluster of atoms within radius of the absorbing site as a Molecule,
+    translated such that the absorbing atom is at the origin.
+
+    Args:
+        struct (Structure): input structure
+        center_index (int): site index of the absorbing atom
+        absorbing_atom (str): symbol of the absorbing atom
+        radius (float): radius of the cluster in Angstroms
+
+    Returns:
+        Molecule
+    """
+    center = struct[center_index].coords
+    # get_neighbors includes all periodic images within the radius, excluding the central atom
+    sphere = struct.get_neighbors(struct[center_index], radius)
+
+    symbols = [absorbing_atom]
+    coords = [[0, 0, 0]]
+    for site_dist in sphere:
+        symbols.append(re.sub(r"[^aA-zZ]+", "", site_dist[0].species_string))
+        coords.append(site_dist[0].coords - center)
+    return Molecule(symbols, coords)
 
 
 def get_atom_map(structure, absorbing_atom=None):

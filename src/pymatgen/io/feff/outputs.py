@@ -7,7 +7,6 @@ Currently supports the xmu.dat, ldos.dat output files are for non-spin case.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -60,7 +59,6 @@ class LDos(MSONable):
         header_str = Header.header_string_from_file(feff_inp_file)
         header = Header.from_str(header_str)
         structure = header.struct
-        n_sites = len(structure)
         parameters = Tags.from_file(feff_inp_file)
 
         if "RECIPROCAL" in parameters:
@@ -104,44 +102,25 @@ class LDos(MSONable):
         ldos = {}
 
         for idx in range(1, len(pot_dict) + 1):
-            if len(str(idx)) == 1:
-                ldos[idx] = np.loadtxt(f"{ldos_file}0{idx}.dat")
-            else:
-                ldos[idx] = np.loadtxt(f"{ldos_file}{idx}.dat")
+            ldos[idx] = np.loadtxt(f"{ldos_file}{idx:02d}.dat")
 
-        dos_energies = [ldos[1][idx][0] for idx in range(len(ldos[1]))]
+        dos_energies = list(ldos[1][:, 0])
 
-        all_pdos: list[dict] = []
-        vorb = {"s": Orbital.s, "p": Orbital.py, "d": Orbital.dxy, "f": Orbital.f0}
-        forb = {"s": 0, "p": 1, "d": 2, "f": 3}
+        # Columns 1-4 of each ldos file hold the s, p, d and f projected DOS.
+        orbitals = (Orbital.s, Orbital.py, Orbital.dxy, Orbital.f0)
+        site_pot_indices = [pot_dict[specie.symbol] for specie in structure.species]
 
-        d_length = len(ldos[1])
+        pdoss = {
+            structure[idx]: {orb: {Spin.up: list(ldos[pot_index][:, col])} for col, orb in enumerate(orbitals, start=1)}
+            for idx, pot_index in enumerate(site_pot_indices)
+        }
 
-        for idx in range(n_sites):
-            pot_index = pot_dict[structure.species[idx].symbol]
-            all_pdos.append(defaultdict(dict))
-            for k, v in vorb.items():
-                density = [ldos[pot_index][j][forb[k] + 1] for j in range(d_length)]
-                up_dos = density
-                if down_dos := None:
-                    all_pdos[-1][v] = {Spin.up: up_dos, Spin.down: down_dos}
-                else:
-                    all_pdos[-1][v] = {Spin.up: up_dos}
-
-        pdos = all_pdos
-        vorb2 = {0: Orbital.s, 1: Orbital.py, 2: Orbital.dxy, 3: Orbital.f0}
-        pdoss = {structure[i]: {v: pdos[i][v] for v in vorb2.values()} for i in range(len(pdos))}
-
-        forb = {"s": 0, "p": 1, "d": 2, "f": 3}
-
-        t_dos = [0] * d_length
-        for idx in range(n_sites):
-            pot_index = pot_dict[structure.species[idx].symbol]
-            for forb_val in forb.values():
-                density = [ldos[pot_index][j][forb_val + 1] for j in range(d_length)]
-                for j in range(d_length):
-                    t_dos[j] += density[j]
-        _t_dos: dict = {Spin.up: t_dos}
+        # Accumulate site by site, orbital by orbital (same summation order as an element-wise loop)
+        t_dos_arr = np.zeros(len(dos_energies))
+        for pot_index in site_pot_indices:
+            for col in range(1, len(orbitals) + 1):
+                t_dos_arr += ldos[pot_index][:, col]
+        _t_dos: dict = {Spin.up: list(t_dos_arr)}
 
         dos = Dos(e_fermi, dos_energies, _t_dos)
         complete_dos = CompleteDos(structure, dos, pdoss)  # type:ignore[arg-type]
@@ -202,24 +181,14 @@ class LDos(MSONable):
             pot_dict = dicts[1]
 
         for idx in range(len(dicts[0]) + 1):
-            if len(str(idx)) == 1:
-                with zopen(f"{ldos_file}0{idx}.dat", mode="rt", encoding="utf-8") as file:
-                    lines = file.readlines()
-                    s = float(lines[3].split()[2])
-                    p = float(lines[4].split()[2])
-                    d = float(lines[5].split()[2])
-                    f1 = float(lines[6].split()[2])
-                    tot = float(lines[1].split()[4])
-                    cht[str(idx)] = {pot_dict[idx]: {"s": s, "p": p, "d": d, "f": f1, "tot": tot}}
-            else:
-                with zopen(f"{ldos_file}{idx}.dat", mode="rt", encoding="utf-8") as file:
-                    lines = file.readlines()
-                    s = float(lines[3].split()[2])
-                    p = float(lines[4].split()[2])
-                    d = float(lines[5].split()[2])
-                    f1 = float(lines[6].split()[2])
-                    tot = float(lines[1].split()[4])
-                    cht[str(idx)] = {pot_dict[idx]: {"s": s, "p": p, "d": d, "f": f1, "tot": tot}}
+            with zopen(f"{ldos_file}{idx:02d}.dat", mode="rt", encoding="utf-8") as file:
+                lines = file.readlines()
+            s = float(lines[3].split()[2])
+            p = float(lines[4].split()[2])
+            d = float(lines[5].split()[2])
+            f1 = float(lines[6].split()[2])
+            tot = float(lines[1].split()[4])
+            cht[str(idx)] = {pot_dict[idx]: {"s": s, "p": p, "d": d, "f": f1, "tot": tot}}
 
         return cht
 
