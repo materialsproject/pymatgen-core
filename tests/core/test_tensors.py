@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import warnings
 
 import numpy as np
 import pytest
@@ -364,6 +365,51 @@ class TestTensor(MatSciTest):
             new[idx] = et.voigt[idx]
         new = Tensor.from_voigt(new).populate(sn)
         assert_allclose(new, et, atol=1e-2)
+
+    def test_populate_without_precond(self):
+        # Regression: with precond=False the guess was never seeded from the input, so a zero tensor came back
+        sn = self.get_structure("Sn")
+        vtens = np.zeros((6, 6))
+        vtens[0, 0], vtens[0, 1], vtens[3, 3] = 259.31, 160.71, 73.48
+        et = Tensor.from_voigt(vtens)
+        populated = et.populate(sn, prec=1e-3, precond=False)
+        assert_allclose(populated, et.populate(sn, prec=1e-3), atol=1e-2)
+        assert populated.voigt[1, 1] == approx(259.31, abs=1e-2)
+        assert populated.voigt[5, 5] == approx(73.48, abs=1e-2)
+
+    @pytest.mark.parametrize("rank", range(1, 7))
+    def test_voigt_conversion_matches_voigt_dict(self, rank):
+        # Pins the vectorized voigt / from_voigt to the get_voigt_dict loop they replaced
+        rng = np.random.default_rng(rank)
+        tensor = Tensor(rng.standard_normal((3,) * rank))
+        voigt_dict = Tensor.get_voigt_dict(rank)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "Tensor is not symmetric")
+            voigt = tensor.voigt
+        expected = np.zeros(voigt.shape)
+        for ind, v_ind in voigt_dict.items():
+            expected[v_ind] = tensor[ind]
+        assert_allclose(voigt, expected, rtol=0, atol=0)
+
+        voigt_input = rng.standard_normal(voigt.shape)
+        expected = np.zeros((3,) * rank)
+        for ind, v_ind in voigt_dict.items():
+            expected[ind] = voigt_input[v_ind]
+        from_voigt = Tensor.from_voigt(voigt_input)
+        assert type(from_voigt) is Tensor
+        assert from_voigt.rank == rank
+        assert_allclose(from_voigt, expected, rtol=0, atol=0)
+
+    @pytest.mark.parametrize("rank", range(1, 7))
+    def test_transform_matches_symm_op(self, rank):
+        rng = np.random.default_rng(rank)
+        tensor = Tensor(rng.standard_normal((3,) * rank))
+        for symm_op in SpacegroupAnalyzer(self.get_structure("Sn")).get_symmetry_operations(cartesian=True)[:6]:
+            assert_allclose(tensor.transform(symm_op), symm_op.transform_tensor(np.asarray(tensor)), atol=1e-12)
+        # fit_to_structure is the average over the structure's Cartesian symmetry operations
+        symm_ops = SpacegroupAnalyzer(self.get_structure("Sn"), 0.1).get_symmetry_operations(cartesian=True)
+        expected = np.mean([symm_op.transform_tensor(np.asarray(tensor)) for symm_op in symm_ops], axis=0)
+        assert_allclose(tensor.fit_to_structure(self.get_structure("Sn")), expected, atol=1e-12)
 
     def test_from_values_indices(self):
         sn = self.get_structure("Sn")
