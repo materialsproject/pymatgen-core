@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import collections.abc
 import json
+import math
 import warnings
 from typing import TYPE_CHECKING, cast
 
@@ -30,6 +31,24 @@ def _decode_properties(props: dict | None) -> dict | None:
     if props is None:
         return None
     return {key: json.loads(json.dumps(val, cls=MontyEncoder), cls=MontyDecoder) for key, val in props.items()}
+
+
+def _coords_allclose(coords1: ArrayLike, coords2: ArrayLike, atol: float) -> bool:
+    """Same result as np.allclose(coords1, coords2, atol=atol) for two equal-length 1D coordinate
+    arrays, but about 10x faster for the 3-vectors compared in Site equality checks.
+    """
+    return all(
+        # x == y keeps np.isclose semantics for infinities (equal infs are close, any other inf is not)
+        x == y or (abs(x - y) <= atol + 1e-5 * abs(y) and math.isfinite(y))
+        for x, y in zip(np.asarray(coords1).tolist(), np.asarray(coords2).tolist(), strict=True)
+    )
+
+
+def _to_unit_cell(frac_coords: ArrayLike, pbc: tuple[bool, bool, bool]) -> NDArray[np.float64]:
+    """Wrap fractional coordinates into [0, 1) along the periodic directions only (returns a new array)."""
+    if all(pbc):
+        return np.mod(frac_coords, 1, dtype=np.float64)
+    return np.where(pbc, np.mod(frac_coords, 1, dtype=np.float64), frac_coords).astype(np.float64, copy=False)
 
 
 class Site(collections.abc.Hashable, MSONable):
@@ -129,9 +148,10 @@ class Site(collections.abc.Hashable, MSONable):
         if not isinstance(other, type(self)):
             return NotImplemented
 
+        # Compare coords first: it is the cheapest check and the one that most often fails
         return (
-            self.species == other.species
-            and np.allclose(self.coords, other.coords, atol=type(self).position_atol)
+            _coords_allclose(self.coords, other.coords, type(self).position_atol)
+            and self.species == other.species
             and is_np_dict_equal(self.properties, other.properties)
         )
 
@@ -359,9 +379,7 @@ class PeriodicSite(Site, MSONable):
         frac_coords = lattice.get_fractional_coords(coords) if coords_are_cartesian else np.asarray(coords)
 
         if to_unit_cell:
-            frac_coords = np.array(
-                [np.mod(f, 1) if p else f for p, f in zip(lattice.pbc, frac_coords, strict=True)], dtype=np.float64
-            )
+            frac_coords = _to_unit_cell(frac_coords, lattice.pbc)
 
         frac_coords = np.asarray(frac_coords, dtype=np.float64)
 
@@ -399,10 +417,11 @@ class PeriodicSite(Site, MSONable):
         if not isinstance(other, type(self)):
             return NotImplemented
 
+        # Compare coords first: it is the cheapest check and the one that most often fails
         return (
-            self.species == other.species
+            _coords_allclose(self.coords, other.coords, Site.position_atol)
+            and self.species == other.species
             and self.lattice == other.lattice
-            and np.allclose(self.coords, other.coords, atol=Site.position_atol)
             and is_np_dict_equal(self.properties, other.properties)
         )
 
@@ -518,9 +537,7 @@ class PeriodicSite(Site, MSONable):
 
     def to_unit_cell(self, in_place: bool = False) -> Self | None:
         """Move frac coords to within the unit cell."""
-        frac_coords = np.array(
-            [np.mod(f, 1) if p else f for p, f in zip(self.lattice.pbc, self.frac_coords, strict=True)]
-        )
+        frac_coords = _to_unit_cell(self.frac_coords, self.lattice.pbc)
         if in_place:
             self.frac_coords = frac_coords
             return None

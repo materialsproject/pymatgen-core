@@ -450,6 +450,25 @@ class TestLattice(MatSciTest):
         with pytest.raises(ValueError, match="Coordinates must have same length"):
             lattice.dot(np.zeros(3), np.zeros(6))
 
+    def test_dot_multiple_vectors(self):
+        lattice = Lattice.from_parameters(5.1, 6.2, 7.3, 80, 95, 110)
+        rng = np.random.default_rng(0)
+        frac_a, frac_b = rng.random((7, 3)), rng.random((7, 3))
+        cart_a, cart_b = frac_a @ lattice.matrix, frac_b @ lattice.matrix
+        expected = [np.dot(vec_a, vec_b) for vec_a, vec_b in zip(cart_a, cart_b, strict=True)]
+
+        assert_allclose(lattice.dot(frac_a, frac_b, frac_coords=True), expected)
+        assert_allclose(lattice.dot(cart_a, cart_b), expected)
+        assert_allclose(lattice.norm(frac_a), np.linalg.norm(cart_a, axis=1))
+        assert_allclose(lattice.norm(cart_a, frac_coords=False), np.linalg.norm(cart_a, axis=1))
+        # Flat input is reshaped to (-1, 3); empty input gives an empty result
+        assert_allclose(lattice.dot(frac_a.ravel(), frac_b.ravel(), frac_coords=True), expected)
+        assert lattice.dot(np.zeros((0, 3)), np.zeros((0, 3)), frac_coords=True).shape == (0,)
+        # Integer Cartesian input keeps an integer result
+        int_dot = lattice.dot([[1, 2, 3]], [[4, 5, 6]])
+        assert int_dot.tolist() == [32]
+        assert np.issubdtype(int_dot.dtype, np.integer)
+
     def test_get_points_in_sphere(self):
         # This is a non-niggli representation of a cubic lattice
         lattice = Lattice([[1, 5, 0], [0, 1, 0], [5, 0, 1]])

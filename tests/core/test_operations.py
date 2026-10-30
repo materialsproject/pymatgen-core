@@ -321,3 +321,19 @@ class TestMagSymmOp(MatSciTest):
         assert magop.time_reversal == -1
         assert magop.tol == approx(0.02)
         assert_allclose(magop.inverse.affine_matrix, np.linalg.inv(magop.affine_matrix))
+
+    def test_mul(self):
+        """MagSymmOp * MagSymmOp used to raise TypeError (missing time_reversal)."""
+        op1 = MagSymmOp.from_xyzt_str("-y, x, z, -1")
+        op2 = MagSymmOp.from_xyzt_str("x, -y, z+1/2, -1")
+        product = op1 * op2
+        assert isinstance(product, MagSymmOp)
+        assert_allclose(product.affine_matrix, op1.affine_matrix @ op2.affine_matrix)
+        assert product.time_reversal == 1
+        assert product.as_xyzt_str() == "y, x, z+1/2, +1"
+
+        # A plain SymmOp has no time reversal, i.e. it counts as +1
+        product = op1 * SymmOp.from_xyz_str("x, y, -z")
+        assert isinstance(product, MagSymmOp)
+        assert product.time_reversal == -1
+        assert_allclose(product.rotation_matrix, [[0, -1, 0], [1, 0, 0], [0, 0, -1]])
