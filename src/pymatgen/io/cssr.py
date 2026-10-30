@@ -82,7 +82,7 @@ class Cssr:
         sp, coords = [], []
         for line in lines[4:]:
             if match := re.match(
-                r"\d+\s+(\w+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)",
+                r"\d+\s+(\S+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)\s+([0-9\-\.]+)",
                 line.strip(),
             ):
                 sp.append(match[1])

@@ -94,6 +94,21 @@ class TestAirssProvider:
         assert entry1 == entry2
         assert string1 == string2
 
+    def test_entry_keeps_titl(self, provider: AirssProvider):
+        # res -> entry -> res used to replace the seed by hash(entry) and zero the pressure
+        prov2 = AirssProvider.from_str(ResWriter(provider.entry).string)
+        assert prov2.seed == provider.seed == "coc-115925-9326-14"
+        assert prov2.pressure == approx(provider.pressure, abs=5e-3)  # written with 2 decimals
+        assert prov2.integrated_spin_density == approx(provider.integrated_spin_density)
+        assert prov2.integrated_absolute_spin_density == approx(provider.integrated_absolute_spin_density)
+
+    def test_unknown_tag_warns(self, provider: AirssProvider):
+        # Unrecognized ShelX tags used to raise a Warning exception, despite the "Skipping" message
+        string = ResWriter(provider.entry).string.replace("LATT -1", "LATT -1\nZERR 1 0.0 0.0 0.0 0 0 0")
+        with pytest.warns(UserWarning, match="tag ZERR not recognized"):
+            prov2 = AirssProvider.from_str(string)
+        assert prov2.structure == provider.structure
+
     def test_raise(self, provider: AirssProvider):
         entry = provider.entry
         string = ResWriter(entry).string

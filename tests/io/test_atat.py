@@ -85,6 +85,10 @@ class TestAtat(MatSciTest):
 
         assert Mcsqs(struct).to_str() == ref_str
 
+        # Whitespace-only lines used to be kept as empty token lists, raising IndexError
+        struct_back = Mcsqs.structure_from_str(ref_str.replace("\n1.0 0.0 0.0", "\n  \n1.0 0.0 0.0") + "\n \t \n")
+        assert struct_back == struct
+
     def test_mcsqs_cif_nacl(self):
         # CIF file from str2cif (utility distributed with atat)
         struct_from_cif = Structure.from_file(f"{TEST_DIR}/bestsqs_nacl.cif")
