@@ -88,8 +88,33 @@ class TestAdsorbateSiteFinder(MatSciTest):
         sites = self.asf_110.find_adsorption_sites()
         assert len(sites["all"]) == 4
         sites = self.asf_211.find_adsorption_sites()
+        assert {key: len(val) for key, val in sites.items()} == {"ontop": 2, "bridge": 4, "hollow": 4, "all": 10}
         # Test on structure
         sites = self.asf_struct.find_adsorption_sites()
+
+    def test_find_adsorption_sites_obtuse_hollow(self):
+        # Square (100) and rectangular (110) surfaces only have hollow sites
+        # in right triangles, which are excluded by default
+        for asf in (self.asf_100, self.asf_110):
+            assert len(asf.find_adsorption_sites()["hollow"]) == 0
+            sites = asf.find_adsorption_sites(no_obtuse_hollow=False)
+            assert len(sites["hollow"]) == 1
+        sites = self.asf_100.find_adsorption_sites(positions=["hollow"], no_obtuse_hollow=False)
+        assert set(sites) == {"hollow", "all"}
+        assert len(sites["all"]) == 1
+
+    def test_symm_and_near_reduce(self):
+        slab = self.asf_111.slab
+        coords = [site.coords for site in slab if site.surface_properties == "surface"]
+        # Shift all coords by a lattice vector: duplicates under PBC
+        shifted = [coord + slab.lattice.matrix[0] for coord in coords]
+        assert len(self.asf_111.near_reduce(coords + shifted)) == len(coords)
+        # All surface sites are symmetrically equivalent on the (111) surface
+        reduced = self.asf_111.symm_reduce(coords + shifted)
+        assert len(reduced) == 1
+        assert_allclose(reduced[0], coords[0])
+        assert self.asf_111.symm_reduce([]) == []
+        assert self.asf_111.near_reduce([]) == []
 
     def test_generate_adsorption_structures(self):
         atol = 1e-9  # required for comparing values ~0 using assert_allclose

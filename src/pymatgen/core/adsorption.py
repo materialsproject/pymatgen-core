@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from typing import Self
 
     from matplotlib.axes import Axes
-    from numpy.typing import ArrayLike
+    from numpy.typing import ArrayLike, NDArray
 
     from pymatgen.core.surface import Slab
 
@@ -273,22 +273,22 @@ class AdsorbateSiteFinder:
             symm_op = get_rot(self.slab)
             dt = Delaunay([symm_op.operate(m.coords)[:2] for m in mesh])
             # TODO: refactor below to properly account for >3-fold
-            for v in dt.simplices:
-                if -1 not in v:
-                    dots = []
-                    for i_corner, i_opp in zip(range(3), ((1, 2), (0, 2), (0, 1)), strict=True):
-                        corner, opp = v[i_corner], [v[o] for o in i_opp]
-                        vecs = [mesh[d].coords - mesh[corner].coords for d in opp]
-                        vecs = [vec / np.linalg.norm(vec) for vec in vecs]
-                        dots.append(np.dot(*vecs))
-                        # Add bridge sites at midpoints of edges of D. Tri
-                        if "bridge" in positions:
-                            ads_sites["bridge"].append(self.ensemble_center(mesh, opp))
-                    # Prevent addition of hollow sites in obtuse triangles
-                    obtuse = no_obtuse_hollow and (np.array(dots) < 1e-5).any()
-                    # Add hollow sites at centers of D. Tri faces
-                    if "hollow" in positions and not obtuse:
-                        ads_sites["hollow"].append(self.ensemble_center(mesh, v))
+            mesh_coords = mesh.cart_coords
+            simplices = dt.simplices[np.all(dt.simplices != -1, axis=1)]
+            # For each triangle corner (axis 1), the indices of the two opposite corners (axis 2)
+            opposite = simplices[:, [(1, 2), (0, 2), (0, 1)]]
+            # Unit vectors from each corner to its two opposite corners
+            vecs = mesh_coords[opposite] - mesh_coords[simplices][:, :, None, :]
+            vecs /= np.linalg.norm(vecs, axis=-1, keepdims=True)
+            dots = np.sum(vecs[:, :, 0] * vecs[:, :, 1], axis=-1)
+            # Add bridge sites at midpoints of edges of D. Tri
+            if "bridge" in positions:
+                ads_sites["bridge"].extend(np.mean(mesh_coords[opposite], axis=2).reshape(-1, 3))
+            # Add hollow sites at centers of D. Tri faces,
+            # optionally preventing addition of hollow sites in obtuse triangles
+            if "hollow" in positions:
+                obtuse = np.any(dots < 1e-5, axis=1) if no_obtuse_hollow else np.zeros(len(simplices), dtype=bool)
+                ads_sites["hollow"].extend(np.mean(mesh_coords[simplices[~obtuse]], axis=1))
         for key, sites in ads_sites.items():
             # Pare off outer sites for bridge/hollow
             if key in ["bridge", "hollow"]:
@@ -322,19 +322,19 @@ class AdsorbateSiteFinder:
         """
         surf_sg = SpacegroupAnalyzer(self.slab, 0.1)
         symm_ops = surf_sg.get_symmetry_operations()
-        unique_coords = []
+        # Affine matrices of all operations, to apply them to a point at once
+        affine_ops = np.array([op.affine_matrix for op in symm_ops]).reshape(-1, 4, 4)
         # Convert to fractional
         coords_set = [self.slab.lattice.get_fractional_coords(coords) for coords in coords_set]
+        unique_coords = np.empty((len(coords_set), 3))
+        n_unique = 0
         for coords in coords_set:
-            in_coord = False
-            for op in symm_ops:
-                if in_coord_list_pbc(unique_coords, op.operate(coords), atol=threshold):
-                    in_coord = True
-                    break
-            if not in_coord:
-                unique_coords += [coords]
+            images = affine_ops[:, :3] @ np.append(coords, 1.0)
+            if not _any_in_coord_array_pbc(unique_coords[:n_unique], images, threshold):
+                unique_coords[n_unique] = coords
+                n_unique += 1
         # convert back to cartesian
-        return [self.slab.lattice.get_cartesian_coords(coords) for coords in unique_coords]
+        return [self.slab.lattice.get_cartesian_coords(coords) for coords in unique_coords[:n_unique]]
 
     def near_reduce(self, coords_set, threshold=1e-4):
         """Prune coordinate set for coordinates that are within threshold.
@@ -343,12 +343,14 @@ class AdsorbateSiteFinder:
             coords_set (Nx3 array-like): list or array of coordinates
             threshold (float): threshold value for distance
         """
-        unique_coords = []
         coords_set = [self.slab.lattice.get_fractional_coords(coords) for coords in coords_set]
+        unique_coords = np.empty((len(coords_set), 3))
+        n_unique = 0
         for coord in coords_set:
-            if not in_coord_list_pbc(unique_coords, coord, threshold):
-                unique_coords += [coord]
-        return [self.slab.lattice.get_cartesian_coords(coords) for coords in unique_coords]
+            if not _any_in_coord_array_pbc(unique_coords[:n_unique], coord[None, :], threshold):
+                unique_coords[n_unique] = coord
+                n_unique += 1
+        return [self.slab.lattice.get_cartesian_coords(coords) for coords in unique_coords[:n_unique]]
 
     @classmethod
     def ensemble_center(cls, site_list, indices, cartesian=True):
@@ -597,6 +599,23 @@ class AdsorbateSiteFinder:
 
         matcher = StructureMatcher()
         return [s[0] for s in matcher.group_structures(substituted_slabs)]
+
+
+def _any_in_coord_array_pbc(frac_coords: NDArray, points: NDArray, atol: float) -> bool:
+    """Check if any of the fractional points matches any of the fractional coords
+    within an absolute tolerance per component, taking periodic boundary conditions
+    into account. Vectorized equivalent of in_coord_list_pbc over several points.
+
+    Args:
+        frac_coords (NDArray): (n, 3) fractional coords to test against.
+        points (NDArray): (m, 3) fractional points to test.
+        atol (float): Absolute tolerance.
+    """
+    if len(frac_coords) == 0:
+        return False
+    frac_dist = frac_coords[None, :, :] - points[:, None, :]
+    frac_dist -= np.round(frac_dist)
+    return bool(np.any(np.all(np.abs(frac_dist) < atol, axis=-1)))
 
 
 def get_mi_vec(slab):
