@@ -24,6 +24,7 @@ from scipy.spatial import KDTree
 from scipy.stats import describe
 
 from pymatgen.core import Lattice, Molecule, PeriodicSite, Structure
+from pymatgen.core.sites import _decode_properties
 from pymatgen.core.structure import FunctionalGroups
 from pymatgen.util.coord import lattice_points_in_supercell
 
@@ -74,6 +75,16 @@ class ConnectedSite(NamedTuple):
     dist: float
 
 
+def _sort_sites(sites: Sequence, key: Callable | None, reverse: bool) -> tuple[list, dict[int, int]]:
+    """Sort sites as sorted(sites, key=key, reverse=reverse) does.
+
+    Returns:
+        tuple[list, dict[int, int]]: the sorted sites and a mapping from old to new site indices.
+    """
+    order = sorted(range(len(sites)), key=lambda idx: sites[idx] if key is None else key(sites[idx]), reverse=reverse)
+    return [sites[idx] for idx in order], {old_idx: new_idx for new_idx, old_idx in enumerate(order)}
+
+
 def _compare(g1, g2, i1, i2) -> bool:
     """Helper function called by isomorphic to ensure comparison of node identities."""
     return g1.vs[i1]["species"] == g2.vs[i2]["species"]
@@ -94,34 +105,266 @@ def _isomorphic(frag1: nx.Graph, frag2: nx.Graph) -> bool:
     Helper function to check if two graph objects are isomorphic, using igraph if
     if is available and networkx if it is not.
     """
-    f1_nodes = frag1.nodes(data=True)
-    f2_nodes = frag2.nodes(data=True)
-    if len(f1_nodes) != len(f2_nodes):
+    if frag1.number_of_nodes() != frag2.number_of_nodes():
         return False
-    f1_edges = frag1.edges()
-    f2_edges = frag2.edges()
-    if len(f1_edges) != len(f2_edges):
+    if frag1.number_of_edges() != frag2.number_of_edges():
         return False
-    f1_comp_dict = {}
-    f2_comp_dict = {}
-    for node in f1_nodes:
-        if node[1]["specie"] not in f1_comp_dict:
-            f1_comp_dict[node[1]["specie"]] = 1
-        else:
-            f1_comp_dict[node[1]["specie"]] += 1
-    for node in f2_nodes:
-        if node[1]["specie"] not in f2_comp_dict:
-            f2_comp_dict[node[1]["specie"]] = 1
-        else:
-            f2_comp_dict[node[1]["specie"]] += 1
-    if f1_comp_dict != f2_comp_dict:
+    if Counter(data["specie"] for _, data in frag1.nodes(data=True)) != Counter(
+        data["specie"] for _, data in frag2.nodes(data=True)
+    ):
         return False
     if igraph is not None:
         ifrag1 = _igraph_from_nxgraph(frag1)
         ifrag2 = _igraph_from_nxgraph(frag2)
         return ifrag1.isomorphic_vf2(ifrag2, node_compat_fn=_compare)
     nm = iso.categorical_node_match("specie", "ERROR")
-    return nx.is_isomorphic(frag1.to_undirected(), frag2.to_undirected(), node_match=nm)
+    # (to_undirected deep copies the graph, skip it for graphs that are already undirected)
+    return nx.is_isomorphic(
+        frag1.to_undirected() if frag1.is_directed() else frag1,
+        frag2.to_undirected() if frag2.is_directed() else frag2,
+        node_match=nm,
+    )
+
+
+def _empty_graph_data(
+    n_sites: int, name: str, edge_weight_name: str | None, edge_weight_units: str | None
+) -> dict[str, Any]:
+    """Adjacency data of a graph with one node per site and no edges, see from_empty_graph."""
+    if edge_weight_name and (edge_weight_units is None):
+        raise ValueError(
+            "Please specify units associated with your edge weights. Can be empty string if arbitrary or dimensionless."
+        )
+
+    # construct graph with one node per site
+    # graph attributes don't change behavior of graph,
+    # they're just for book-keeping
+    graph = nx.MultiDiGraph(edge_weight_name=edge_weight_name, edge_weight_units=edge_weight_units, name=name)
+    graph.add_nodes_from(range(n_sites))
+    return json_graph.adjacency_data(graph)
+
+
+def _graph_from_adjacency_data(graph_data: dict | None) -> nx.MultiDiGraph:
+    """Restore a graph from its adjacency data (as made by as_dict)."""
+    graph = json_graph.adjacency_graph(graph_data)
+
+    # tidy up edge attr dicts, reading to/from JSON duplicates information
+    for _, _, data in graph.edges(data=True):
+        for key in ("id", "key"):
+            data.pop(key, None)
+        # ensure images are tuples (conversion to lists happens when serializing back
+        # from json), it's important images are hashable/immutable
+        for key in ("to_jimage", "from_jimage"):
+            if image := data.get(key):
+                data[key] = tuple(image)
+    return graph
+
+
+def _set_node_attributes(graph: nx.MultiDiGraph, sites: Structure | Molecule) -> None:
+    """Store the species symbol, coords and properties of each site on the matching graph node."""
+    species = {}
+    coords = {}
+    properties = {}
+    for node in graph.nodes():
+        species[node] = sites[node].specie.symbol
+        coords[node] = sites[node].coords
+        properties[node] = sites[node].properties
+
+    nx.set_node_attributes(graph, species, "specie")
+    nx.set_node_attributes(graph, coords, "coords")
+    nx.set_node_attributes(graph, properties, "properties")
+
+
+def _diff_edge_sets(edges: set, edges_other: set) -> dict[str, Any]:
+    """Result of StructureGraph.diff / MoleculeGraph.diff for the given edge sets."""
+    if len(edges) == 0 and len(edges_other) == 0:
+        jaccard_dist = 0.0  # by definition
+    else:
+        jaccard_dist = 1.0 - len(edges & edges_other) / len(edges | edges_other)
+
+    return {
+        "self": edges - edges_other,
+        "other": edges_other - edges,
+        "both": edges & edges_other,
+        "dist": jaccard_dist,
+    }
+
+
+def _edges_to_str(g: nx.MultiDiGraph) -> str:
+    """Table of the edges of a StructureGraph/MoleculeGraph graph, used by their __str__ and __repr__."""
+    header = "from    to  to_image    "
+    header_line = "----  ----  ------------"
+    if print_weights := bool(g.graph["edge_weight_name"]):
+        edge_label = g.graph["edge_weight_name"]
+        if edge_weight_units := g.graph["edge_weight_units"]:
+            edge_label += f" ({edge_weight_units})"
+        header += f"  {edge_label}"
+        header_line += f"  {'-' * max([18, len(edge_label)])}"
+
+    out = [header, header_line]
+
+    # sort edges for consistent ordering
+    for u, v, data in sorted(g.edges(data=True), key=itemgetter(0, 1)):
+        line = f"{u:4}  {v:4}  {data.get('to_jimage', (0, 0, 0))!s:12}"
+        if print_weights:
+            line += f"  {data.get('weight', 0):.3e}"
+        out.append(line)
+
+    return "\n".join(out) + "\n"
+
+
+def _draw_graph_to_file(
+    owner: StructureGraph | MoleculeGraph,
+    sites: Structure | Molecule,
+    filename: str,
+    diff: Any,  # a graph of the same type as owner, or None
+    hide_unconnected_nodes: bool,
+    hide_image_edges: bool,
+    edge_colors: bool,
+    node_labels: bool,
+    weight_labels: bool,
+    image_labels: bool,
+    color_scheme: str,
+    keep_dot: bool,
+    algo: str,
+) -> None:
+    """Shared implementation of StructureGraph.draw_graph_to_file and MoleculeGraph.draw_graph_to_file,
+    see StructureGraph.draw_graph_to_file for details.
+
+    Args:
+        owner: the StructureGraph or MoleculeGraph to draw.
+        sites: the Structure or Molecule of owner.
+        filename: output filename, its extension sets the file type.
+        diff: graph to compare with, differing edges are colored.
+        hide_unconnected_nodes: if True, hide unconnected nodes.
+        hide_image_edges: if True, do not draw edges through periodic boundaries.
+        edge_colors: if True, use node colors to color edges.
+        node_labels: if True, label nodes with species and site index.
+        weight_labels: if True, label edges with weights.
+        image_labels: if True, label edges with their periodic images.
+        color_scheme: "VESTA" or "Jmol".
+        keep_dot: keep GraphViz .dot file.
+        algo: GraphViz algorithm, e.g. "neato" or "fdp".
+    """
+    if not which(algo):
+        raise RuntimeError("StructureGraph graph drawing requires GraphViz binaries to be in the path.")
+
+    # Developer note: NetworkX also has methods for drawing
+    # graphs using matplotlib, these also work here. However,
+    # a dedicated tool like GraphViz allows for much easier
+    # control over graph appearance and also correctly displays
+    # multi-graphs (matplotlib can superimpose multiple edges).
+
+    g = owner.graph.copy()
+
+    g.graph = {"nodesep": 10.0, "dpi": 300, "overlap": "false"}
+
+    # add display options for nodes
+    for node in g.nodes():
+        # get label by species name
+        label = f"{sites[node].specie}({node})" if node_labels else ""
+
+        # use standard color scheme for nodes
+
+        c = EL_COLORS[color_scheme].get(str(sites[node].specie.symbol), [0, 0, 0])
+
+        # get contrasting font color
+        # magic numbers account for perceived luminescence
+        # https://stackoverflow.com/questions/1855884/determine-font-color-based-on-background-color
+        fontcolor = "#000000" if 1 - (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255 < 0.5 else "#ffffff"
+
+        # convert color to hex string
+        color = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
+
+        g.add_node(
+            node,
+            fillcolor=color,
+            fontcolor=fontcolor,
+            label=label,
+            fontname="Helvetica-bold",
+            style="filled",
+            shape="circle",
+        )
+
+    edges_to_delete = []
+
+    # add display options for edges
+    for u, v, k, d in g.edges(keys=True, data=True):
+        # retrieve from/to images, set as origin if not defined
+        to_image = d.get("to_jimage", (0, 0, 0))
+
+        # set edge style
+        d["style"] = "solid"
+        if to_image != (0, 0, 0):
+            d["style"] = "dashed"
+            if hide_image_edges:
+                edges_to_delete.append((u, v, k))
+
+        # don't show edge directions
+        d["arrowhead"] = "none"
+
+        # only add labels for images that are not the origin
+        if image_labels:
+            d["headlabel"] = "" if to_image == (0, 0, 0) else f"to {to_image}"
+            d["arrowhead"] = "normal" if d["headlabel"] else "none"
+
+        # optionally color edges using node colors
+        color_u = g.nodes[u]["fillcolor"]
+        color_v = g.nodes[v]["fillcolor"]
+        d["color_uv"] = f"{color_u};0.5:{color_v};0.5" if edge_colors else "#000000"
+
+        # optionally add weights to graph
+        if weight_labels:
+            units = g.graph.get("edge_weight_units", "")
+            if d.get("weight"):
+                d["label"] = f"{d['weight']:.2f} {units}"
+
+        # update edge with our new style attributes
+        g.edges[u, v, k].update(d)
+
+    # optionally remove periodic image edges,
+    # these can be confusing due to periodic boundaries
+    if hide_image_edges:
+        for edge_to_delete in edges_to_delete:
+            g.remove_edge(*edge_to_delete)
+
+    # optionally hide unconnected nodes,
+    # these can appear when removing periodic edges
+    if hide_unconnected_nodes:
+        g = g.subgraph([node for node, degree in g.degree() if degree != 0])
+
+    # optionally highlight differences with another graph
+    if diff:
+        _diff = owner.diff(diff, strict=True)
+        green_edges = []
+        red_edges = []
+        for u, v, k, d in g.edges(keys=True, data=True):
+            # MoleculeGraph edges usually have no to_jimage, MoleculeGraph.diff then uses (0, 0, 0)
+            edge = (u, v, d.get("to_jimage", (0, 0, 0)))
+            if edge in _diff["self"]:
+                # edge has been deleted
+                red_edges.append((u, v, k))
+            elif edge in _diff["other"]:
+                # edge has been added
+                green_edges.append((u, v, k))
+        for u, v, k in green_edges:
+            g.edges[u, v, k]["color_uv"] = "#00ff00"
+        for u, v, k in red_edges:
+            g.edges[u, v, k]["color_uv"] = "#ff0000"
+
+    basename, extension = os.path.splitext(filename)
+    extension = extension[1:]
+
+    write_dot(g, f"{basename}.dot")
+
+    with open(filename, mode="w", encoding="utf-8") as file:
+        args = [algo, "-T", extension, f"{basename}.dot"]
+        with subprocess.Popen(args, stdout=file, stdin=subprocess.PIPE, close_fds=True) as rs:
+            rs.communicate()
+            if rs.returncode != 0:
+                raise RuntimeError(f"{algo} exited with return code {rs.returncode}.")
+
+    if not keep_dot:
+        os.remove(f"{basename}.dot")
 
 
 class StructureGraph(MSONable):
@@ -159,18 +402,7 @@ class StructureGraph(MSONable):
             self.structure = structure.structure.copy()
         else:
             self.structure = structure
-        self.graph = nx.readwrite.json_graph.adjacency_graph(graph_data)
-
-        # tidy up edge attr dicts, reading to/from JSON duplicates information
-        for _, _, _, data in self.graph.edges(keys=True, data=True):
-            for key in ("id", "key"):
-                data.pop(key, None)
-            # ensure images are tuples (conversion to lists happens when serializing back
-            # from json), it's important images are hashable/immutable
-            if to_img := data.get("to_jimage"):
-                data["to_jimage"] = tuple(to_img)
-            if from_img := data.get("from_jimage"):
-                data["from_jimage"] = tuple(from_img)
+        self.graph = _graph_from_adjacency_data(graph_data)
 
     @classmethod
     def from_empty_graph(
@@ -194,26 +426,7 @@ class StructureGraph(MSONable):
             StructureGraph: an empty graph with no edges, only nodes defined
                 that correspond to sites in Structure.
         """
-        if edge_weight_name and (edge_weight_units is None):
-            raise ValueError(
-                "Please specify units associated "
-                "with your edge weights. Can be "
-                "empty string if arbitrary or "
-                "dimensionless."
-            )
-
-        # construct graph with one node per site
-        # graph attributes don't change behavior of graph,
-        # they're just for book-keeping
-        graph = nx.MultiDiGraph(
-            edge_weight_name=edge_weight_name,
-            edge_weight_units=edge_weight_units,
-            name=name,
-        )
-        graph.add_nodes_from(range(len(structure)))
-
-        graph_data = json_graph.adjacency_data(graph)
-
+        graph_data = _empty_graph_data(len(structure), name, edge_weight_name, edge_weight_units)
         return cls(structure, graph_data=graph_data)
 
     @classmethod
@@ -245,6 +458,7 @@ class StructureGraph(MSONable):
                 raise ValueError("Edges must be given as (from_index, to_index, from_image, to_image) tuples")
 
             if props is not None:
+                props = dict(props)  # copy, so that the caller's edges are not mutated
                 weight = props.pop("weight", None)
 
                 if len(props.items()) == 0:
@@ -497,12 +711,7 @@ class StructureGraph(MSONable):
             properties=site_properties,
         )
 
-        mapping = {}
-        for j in range(len(self.structure) - 1):
-            if j < idx:
-                mapping[j] = j
-            else:
-                mapping[j] = j + 1
+        mapping = {j: j if j < idx else j + 1 for j in range(len(self.structure) - 1)}
         nx.relabel_nodes(self.graph, mapping, copy=False)
 
         self.graph.add_node(idx)
@@ -526,17 +735,7 @@ class StructureGraph(MSONable):
         """Get each node a "specie" and a "coords" attribute, updated with the
         current species and coordinates.
         """
-        species = {}
-        coords = {}
-        properties = {}
-        for node in self.graph.nodes():
-            species[node] = self.structure[node].specie.symbol
-            coords[node] = self.structure[node].coords
-            properties[node] = self.structure[node].properties
-
-        nx.set_node_attributes(self.graph, species, "specie")
-        nx.set_node_attributes(self.graph, coords, "coords")
-        nx.set_node_attributes(self.graph, properties, "properties")
+        _set_node_attributes(self.graph, self.structure)
 
     def alter_edge(
         self,
@@ -764,33 +963,37 @@ class StructureGraph(MSONable):
         connected_sites = set()
         connected_site_images = set()
 
-        out_edges = [(u, v, d, "out") for u, v, d in self.graph.out_edges(n, data=True)]
-        in_edges = [(u, v, d, "in") for u, v, d in self.graph.in_edges(n, data=True)]
+        # (neighbor index, image of the neighbor relative to site n, edge data), incoming edges reversed
+        edges = [(v, data["to_jimage"], data) for _, v, data in self.graph.out_edges(n, data=True)]
+        edges += [
+            (u, tuple(-img for img in data["to_jimage"]), data) for u, _, data in self.graph.in_edges(n, data=True)
+        ]
 
-        for u, v, data, dirc in out_edges + in_edges:
-            to_jimage = data["to_jimage"]
+        n_site = cast("PeriodicSite", self.structure[n])  # tell mypy that n_site is a PeriodicSite
+        for v, relative_jimage, data in edges:
+            to_jimage = cast(
+                "tuple[int, int, int]",
+                tuple(int(img + shift) for img, shift in zip(relative_jimage, jimage, strict=True)),
+            )
+            if (v, to_jimage) in connected_site_images:
+                continue
 
-            if dirc == "in":
-                u, v = v, u
-                to_jimage = np.multiply(-1, to_jimage)
+            v_site = self.structure[v]
+            # equivalent to (but much cheaper than) an as_dict/from_dict round trip of the shifted site
+            site = PeriodicSite(
+                v_site.species,
+                v_site.frac_coords + to_jimage,
+                v_site.lattice,
+                properties=_decode_properties(v_site.properties),
+                label=v_site.label,
+                skip_checks=True,
+            )
+            dist = n_site.distance(v_site, jimage=relative_jimage)
 
-            to_jimage = tuple(map(int, np.add(to_jimage, jimage)))
-            site_d = self.structure[v].as_dict()
-            site_d["abc"] = np.add(site_d["abc"], to_jimage).tolist()
-            site = PeriodicSite.from_dict(site_d)
-
-            # from_site if jimage arg != (0, 0, 0)
-            relative_jimage = np.subtract(to_jimage, jimage)
-            u_site = cast("PeriodicSite", self.structure[u])  # tell mypy that u_site is a PeriodicSite
-            dist = u_site.distance(self.structure[v], jimage=relative_jimage)
-
-            weight = data.get("weight")
-
-            if (v, to_jimage) not in connected_site_images:
-                connected_site = ConnectedSite(site=site, jimage=to_jimage, index=v, weight=weight, dist=dist)
-
-                connected_sites.add(connected_site)
-                connected_site_images.add((v, to_jimage))
+            connected_sites.add(
+                ConnectedSite(site=site, jimage=to_jimage, index=v, weight=data.get("weight"), dist=dist)
+            )
+            connected_site_images.add((v, to_jimage))
 
         # return list sorted by closest sites first
         _connected_sites = list(connected_sites)
@@ -858,124 +1061,21 @@ class StructureGraph(MSONable):
             algo: any graphviz algo, "neato" (for simple graphs)
                 or "fdp" (for more crowded graphs) usually give good outputs
         """
-        if not which(algo):
-            raise RuntimeError("StructureGraph graph drawing requires GraphViz binaries to be in the path.")
-
-        # Developer note: NetworkX also has methods for drawing
-        # graphs using matplotlib, these also work here. However,
-        # a dedicated tool like GraphViz allows for much easier
-        # control over graph appearance and also correctly displays
-        # multi-graphs (matplotlib can superimpose multiple edges).
-
-        g = self.graph.copy()
-
-        g.graph = {"nodesep": 10.0, "dpi": 300, "overlap": "false"}
-
-        # add display options for nodes
-        for node in g.nodes():
-            # get label by species name
-            label = f"{self.structure[node].specie}({node})" if node_labels else ""
-
-            # use standard color scheme for nodes
-
-            c = EL_COLORS[color_scheme].get(str(self.structure[node].specie.symbol), [0, 0, 0])
-
-            # get contrasting font color
-            # magic numbers account for perceived luminescence
-            # https://stackoverflow.com/questions/1855884/determine-font-color-based-on-background-color
-            fontcolor = "#000000" if 1 - (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255 < 0.5 else "#ffffff"
-
-            # convert color to hex string
-            color = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-
-            g.add_node(
-                node,
-                fillcolor=color,
-                fontcolor=fontcolor,
-                label=label,
-                fontname="Helvetica-bold",
-                style="filled",
-                shape="circle",
-            )
-
-        edges_to_delete = []
-
-        # add display options for edges
-        for u, v, k, d in g.edges(keys=True, data=True):
-            # retrieve from/to images, set as origin if not defined
-            to_image = d["to_jimage"]
-
-            # set edge style
-            d["style"] = "solid"
-            if to_image != (0, 0, 0):
-                d["style"] = "dashed"
-                if hide_image_edges:
-                    edges_to_delete.append((u, v, k))
-
-            # don't show edge directions
-            d["arrowhead"] = "none"
-
-            # only add labels for images that are not the origin
-            if image_labels:
-                d["headlabel"] = "" if to_image == (0, 0, 0) else f"to {to_image}"
-                d["arrowhead"] = "normal" if d["headlabel"] else "none"
-
-            # optionally color edges using node colors
-            color_u = g.nodes[u]["fillcolor"]
-            color_v = g.nodes[v]["fillcolor"]
-            d["color_uv"] = f"{color_u};0.5:{color_v};0.5" if edge_colors else "#000000"
-
-            # optionally add weights to graph
-            if weight_labels:
-                units = g.graph.get("edge_weight_units", "")
-                if d.get("weight"):
-                    d["label"] = f"{d['weight']:.2f} {units}"
-
-            # update edge with our new style attributes
-            g.edges[u, v, k].update(d)
-
-        # optionally remove periodic image edges,
-        # these can be confusing due to periodic boundaries
-        if hide_image_edges:
-            for edge_to_delete in edges_to_delete:
-                g.remove_edge(*edge_to_delete)
-
-        # optionally hide unconnected nodes,
-        # these can appear when removing periodic edges
-        if hide_unconnected_nodes:
-            g = g.subgraph([node for node, degree in g.degree() if degree != 0])
-
-        # optionally highlight differences with another graph
-        if diff:
-            _diff = self.diff(diff, strict=True)
-            green_edges = []
-            red_edges = []
-            for u, v, k, d in g.edges(keys=True, data=True):
-                if (u, v, d["to_jimage"]) in _diff["self"]:
-                    # edge has been deleted
-                    red_edges.append((u, v, k))
-                elif (u, v, d["to_jimage"]) in _diff["other"]:
-                    # edge has been added
-                    green_edges.append((u, v, k))
-            for u, v, k in green_edges:
-                g.edges[u, v, k]["color_uv"] = "#00ff00"
-            for u, v, k in red_edges:
-                g.edges[u, v, k]["color_uv"] = "#ff0000"
-
-        basename, extension = os.path.splitext(filename)
-        extension = extension[1:]
-
-        write_dot(g, f"{basename}.dot")
-
-        with open(filename, mode="w", encoding="utf-8") as file:
-            args = [algo, "-T", extension, f"{basename}.dot"]
-            with subprocess.Popen(args, stdout=file, stdin=subprocess.PIPE, close_fds=True) as rs:
-                rs.communicate()
-                if rs.returncode != 0:
-                    raise RuntimeError(f"{algo} exited with return code {rs.returncode}.")
-
-        if not keep_dot:
-            os.remove(f"{basename}.dot")
+        _draw_graph_to_file(
+            self,
+            self.structure,
+            filename,
+            diff,
+            hide_unconnected_nodes=hide_unconnected_nodes,
+            hide_image_edges=hide_image_edges,
+            edge_colors=edge_colors,
+            node_labels=node_labels,
+            weight_labels=weight_labels,
+            image_labels=image_labels,
+            color_scheme=color_scheme,
+            keep_dot=keep_dot,
+            algo=algo,
+        )
 
     @property
     def types_and_weights_of_connections(self) -> dict:
@@ -1126,43 +1226,48 @@ class StructureGraph(MSONable):
         frac_lattice = lattice_points_in_supercell(scale_matrix)
         cart_lattice = new_lattice.get_cartesian_coords(frac_lattice)
 
+        n_sites = len(self.structure)
+        orig_nodes = list(self.graph.nodes(data=True))
+        orig_edges = list(self.graph.edges(keys=True, data=True))
+
         new_sites = []
-        new_graphs = []
+        # merge copies of the original graph, one per lattice point, into one big graph
+        # (node n of image i becomes node n + i * n_sites)
+        new_g = nx.MultiDiGraph()
+        new_g.graph.update(self.graph.graph)
 
-        for v in cart_lattice:
-            # create a map of nodes from original graph to its image
-            mapping = {n: n + len(new_sites) for n in range(len(self.structure))}
-
-            for site in self.structure:
-                site = PeriodicSite(
+        for lattice_vec in cart_lattice:
+            offset = len(new_sites)
+            new_sites.extend(
+                PeriodicSite(
                     site.species,
-                    site.coords + v,
+                    site.coords + lattice_vec,
                     new_lattice,
-                    properties=site.properties,
+                    # decoded copy, so supercell sites don't share mutable property values
+                    properties=_decode_properties(site.properties),
                     coords_are_cartesian=True,
                     to_unit_cell=False,
                 )
-
-                new_sites.append(site)
-
-            new_graphs.append(nx.relabel_nodes(self.graph, mapping, copy=True))
+                for site in self.structure
+            )
+            new_g.add_nodes_from((int(n) + offset, data) for n, data in orig_nodes)
+            new_g.add_edges_from((int(u) + offset, int(v) + offset, k, data) for u, v, k, data in orig_edges)
 
         new_structure = Structure.from_sites(new_sites)
-
-        # merge all graphs into one big graph
-        new_g = nx.MultiDiGraph()
-        for new_graph in new_graphs:
-            new_g = nx.union(new_g, new_graph)
 
         edges_to_remove = []  # tuple of (u, v, k)
         edges_to_add = []  # tuple of (u, v, attr_dict)
 
-        # list of new edges inside supercell
-        # for duplicate checking
-        edges_inside_supercell = [{u, v} for u, v, d in new_g.edges(data=True) if d["to_jimage"] == (0, 0, 0)]
-        new_periodic_images = []
+        # new edges inside supercell, for duplicate checking
+        edges_inside_supercell = {
+            frozenset((u, v)) for u, v, d in new_g.edges(data=True) if d["to_jimage"] == (0, 0, 0)
+        }
+        new_periodic_images = set()
 
-        orig_lattice = self.structure.lattice
+        # only edges through a periodic boundary need checking
+        periodic_edges = [
+            (u, v, k, data) for u, v, k, data in new_g.edges(keys=True, data=True) if data["to_jimage"] != (0, 0, 0)
+        ]
 
         # use k-d tree to match given position to an
         # existing Site in Structure
@@ -1172,41 +1277,43 @@ class StructureGraph(MSONable):
         # this could probably be a lot smaller
         tol = 0.05
 
-        for u, v, k, data in new_g.edges(keys=True, data=True):
-            to_jimage = data["to_jimage"]  # for node v
+        if periodic_edges:
+            u_idx = np.array([u for u, _, _, _ in periodic_edges])
+            v_idx = np.array([v for _, v, _, _ in periodic_edges])
+            to_jimages = np.array([data["to_jimage"] for _, _, _, data in periodic_edges])
 
-            # reduce unnecessary checking
-            if to_jimage != (0, 0, 0):
-                # get index in original site
-                n_u = u % len(self.structure)
-                n_v = v % len(self.structure)
+            # get Cartesian coordinates of where atoms defined by each edge are expected to be,
+            # relative to node u and the original lattice (keeping original lattice has
+            # significant benefits)
+            orig_lattice = self.structure.lattice
+            orig_frac = self.structure.frac_coords
+            v_image_cart = orig_lattice.get_cartesian_coords(orig_frac[v_idx % n_sites] + to_jimages)
+            u_cart = orig_lattice.get_cartesian_coords(orig_frac[u_idx % n_sites])
 
-                # get fractional coordinates of where atoms defined by edge are expected
-                # to be, relative to original lattice (keeping original lattice has
-                # significant benefits)
-                v_image_frac = np.add(self.structure[n_v].frac_coords, to_jimage)
-                u_frac = self.structure[n_u].frac_coords
+            # now retrieve position of node u in new supercell, and get absolute
+            # Cartesian coordinates of where atoms defined by edges are expected to be
+            v_expect = new_structure.cart_coords[u_idx] + (v_image_cart - u_cart)
 
-                # using the position of node u as a reference, get relative Cartesian
-                # coordinates of where atoms defined by edge are expected to be
-                v_image_cart = orig_lattice.get_cartesian_coords(v_image_frac)
-                u_cart = orig_lattice.get_cartesian_coords(u_frac)
-                v_rel = np.subtract(v_image_cart, u_cart)
+            # search in new structure for these atoms, query returns (distance, index)
+            inside_dists, inside_idx = kd_tree.query(v_expect)
 
-                # now retrieve position of node v in new supercell, and get absolute
-                # Cartesian coordinates of where atoms defined by edge are expected to be
-                v_expect = new_structure[u].coords + v_rel
+            # for edges whose image is not inside the supercell, find new_v such that
+            # we have full periodic boundary conditions, so that nodes on one side
+            # of supercell are connected to nodes on opposite side
+            v_expec_frac = new_structure.lattice.get_fractional_coords(v_expect)
+            # find new to_jimage
+            # use np.around to fix issues with finite precision leading to incorrect image
+            v_expec_images = np.around(v_expec_frac, decimals=3)
+            v_expec_images -= v_expec_images % 1
+            wrapped_cart = new_structure.lattice.get_cartesian_coords(v_expec_frac - v_expec_images)
+            wrapped_dists, wrapped_idx = kd_tree.query(wrapped_cart)
 
-                # now search in new structure for these atoms query returns (distance, index)
-                v_present = kd_tree.query(v_expect)
-                v_present = v_present[1] if v_present[0] <= tol else None
-
+            for idx, (u, v, k, data) in enumerate(periodic_edges):
                 # check if image sites now present in supercell
                 # and if so, delete old edge that went through
                 # periodic boundary
-                if v_present is not None:
-                    new_u = u
-                    new_v = v_present
+                if inside_dists[idx] <= tol:
+                    new_u, new_v = u, int(inside_idx[idx])
                     new_data = data.copy()
 
                     # node now inside supercell
@@ -1216,51 +1323,32 @@ class StructureGraph(MSONable):
 
                     # make sure we don't try to add duplicate edges
                     # will remove two edges for everyone one we add
-                    if {new_u, new_v} not in edges_inside_supercell:
+                    if frozenset((new_u, new_v)) not in edges_inside_supercell:
                         # normalize direction
                         if new_v < new_u:
                             new_u, new_v = new_v, new_u
 
-                        edges_inside_supercell.append({new_u, new_v})
+                        edges_inside_supercell.add(frozenset((new_u, new_v)))
                         edges_to_add.append((new_u, new_v, new_data))
 
-                else:
-                    # want to find new_v such that we have
-                    # full periodic boundary conditions
-                    # so that nodes on one side of supercell
-                    # are connected to nodes on opposite side
+                elif wrapped_dists[idx] <= tol:
+                    new_u, new_v = u, int(wrapped_idx[idx])
+                    new_data = data.copy()
+                    new_to_jimage = tuple(map(int, v_expec_images[idx]))
 
-                    v_expec_frac = new_structure.lattice.get_fractional_coords(v_expect)
+                    # normalize direction
+                    if new_v < new_u:
+                        new_u, new_v = new_v, new_u
+                        # reversing the edge negates its image in the *supercell* lattice
+                        new_to_jimage = tuple(-img for img in new_to_jimage)
 
-                    # find new to_jimage
-                    # use np.around to fix issues with finite precision leading to incorrect image
-                    v_expec_image = np.around(v_expec_frac, decimals=3)
-                    v_expec_image -= v_expec_image % 1
+                    new_data["to_jimage"] = new_to_jimage
 
-                    v_expec_frac = np.subtract(v_expec_frac, v_expec_image)
-                    v_expect = new_structure.lattice.get_cartesian_coords(v_expec_frac)
-                    v_present = kd_tree.query(v_expect)
-                    v_present = v_present[1] if v_present[0] <= tol else None
+                    edges_to_remove.append((u, v, k))
 
-                    if v_present is not None:
-                        new_u = u
-                        new_v = v_present
-                        new_data = data.copy()
-                        new_to_jimage = tuple(map(int, v_expec_image))
-
-                        # normalize direction
-                        if new_v < new_u:
-                            new_u, new_v = new_v, new_u
-                            # reversing the edge negates its image in the *supercell* lattice
-                            new_to_jimage = tuple(-img for img in new_to_jimage)
-
-                        new_data["to_jimage"] = new_to_jimage
-
-                        edges_to_remove.append((u, v, k))
-
-                        if (new_u, new_v, new_to_jimage) not in new_periodic_images:
-                            edges_to_add.append((new_u, new_v, new_data))
-                            new_periodic_images.append((new_u, new_v, new_to_jimage))
+                    if (new_u, new_v, new_to_jimage) not in new_periodic_images:
+                        edges_to_add.append((new_u, new_v, new_data))
+                        new_periodic_images.add((new_u, new_v, new_to_jimage))
 
         logger.debug(f"Removing {len(edges_to_remove)} edges, adding {len(edges_to_add)} new edges.")
 
@@ -1270,61 +1358,26 @@ class StructureGraph(MSONable):
         for u, v, data in edges_to_add:
             new_g.add_edge(u, v, **data)
 
-        # return new instance of StructureGraph with supercell
-        data = {
-            "@module": type(self).__module__,
-            "@class": type(self).__name__,
-            "structure": new_structure.as_dict(),
-            "graphs": json_graph.adjacency_data(new_g),
-        }
-
-        return type(self).from_dict(data)
+        # return new instance of StructureGraph with supercell (the formal charge is set explicitly,
+        # as was done by the as_dict/from_dict round trip formerly used here)
+        new_structure.set_charge(new_structure.charge)
+        return type(self)(new_structure, graph_data=json_graph.adjacency_data(new_g))
 
     def __rmul__(self, other):
         return self.__mul__(other)
-
-    @classmethod
-    def _edges_to_str(cls, g) -> str:
-        header = "from    to  to_image    "
-        header_line = "----  ----  ------------"
-        if g.graph["edge_weight_name"]:
-            print_weights = True
-            edge_label = g.graph["edge_weight_name"]
-            if edge_weight_units := g.graph["edge_weight_units"]:
-                edge_label += f" ({edge_weight_units})"
-            header += f"  {edge_label}"
-            header_line += f"  {'-' * max([18, len(edge_label)])}"
-        else:
-            print_weights = False
-
-        out = f"{header}\n{header_line}\n"
-
-        edges = list(g.edges(data=True))
-
-        # sort edges for consistent ordering
-        edges.sort(key=itemgetter(0, 1))
-
-        if print_weights:
-            for u, v, data in edges:
-                out += f"{u:4}  {v:4}  {data.get('to_jimage', (0, 0, 0))!s:12}  {data.get('weight', 0):.3e}\n"
-        else:
-            for u, v, data in edges:
-                out += f"{u:4}  {v:4}  {data.get('to_jimage', (0, 0, 0))!s:12}\n"
-
-        return out
 
     def __str__(self):
         out = "Structure Graph"
         out += f"\nStructure: \n{self.structure}"
         out += f"\nGraph: {self.name}\n"
-        out += self._edges_to_str(self.graph)
+        out += _edges_to_str(self.graph)
         return out
 
     def __repr__(self):
         out = "Structure Graph"
         out += f"\nStructure: \n{self.structure!r}"
         out += f"\nGraph: {self.name}\n"
-        out += self._edges_to_str(self.graph)
+        out += _edges_to_str(self.graph)
         return out
 
     def __len__(self):
@@ -1338,13 +1391,8 @@ class StructureGraph(MSONable):
             key: key to sort by
             reverse: reverse sort order
         """
-        old_structure = self.structure.copy()
-
-        # sort Structure
-        self.structure._sites = sorted(self.structure._sites, key=key, reverse=reverse)
-
-        # apply Structure ordering to graph
-        mapping = {idx: self.structure.index(site) for idx, site in enumerate(old_structure)}
+        # sort Structure and apply its ordering to graph
+        self.structure._sites, mapping = _sort_sites(self.structure._sites, key, reverse)
         self.graph = nx.relabel_nodes(self.graph, mapping, copy=True)
 
         # normalize directions of edges
@@ -1353,7 +1401,7 @@ class StructureGraph(MSONable):
         for u, v, keys, data in self.graph.edges(keys=True, data=True):
             if v < u:
                 new_v, new_u, new_d = u, v, data.copy()
-                new_d["to_jimage"] = tuple(np.multiply(-1, data["to_jimage"]).astype(int))
+                new_d["to_jimage"] = tuple(-int(img) for img in data["to_jimage"])
                 edges_to_remove.append((u, v, keys))
                 edges_to_add.append((new_u, new_v, new_d))
 
@@ -1445,17 +1493,7 @@ class StructureGraph(MSONable):
                 for u, v in other.graph.edges(keys=False)
             }
 
-        if len(edges) == 0 and len(edges_other) == 0:
-            jaccard_dist = 0.0  # by definition
-        else:
-            jaccard_dist = 1.0 - len(edges & edges_other) / len(edges | edges_other)
-
-        return {
-            "self": edges - edges_other,
-            "other": edges_other - edges,
-            "both": edges.intersection(edges_other),
-            "dist": jaccard_dist,
-        }
+        return _diff_edge_sets(edges, edges_other)
 
     def get_subgraphs_as_molecules(self, use_weights: bool = False) -> list[Molecule]:
         """
@@ -1490,16 +1528,11 @@ class StructureGraph(MSONable):
 
         # discount subgraphs that lie across *supercell* boundaries
         # these will subgraphs representing crystals
-        molecule_subgraphs = []
-        for subgraph in all_subgraphs:
-            intersects_boundary = any(d["to_jimage"] != (0, 0, 0) for u, v, d in subgraph.edges(data=True))
-            if not intersects_boundary:
-                molecule_subgraphs.append(nx.MultiDiGraph(subgraph))
-
-        # add specie names to graph to be able to test for isomorphism
-        for subgraph in molecule_subgraphs:
-            for n in subgraph:
-                subgraph.add_node(n, specie=str(supercell_sg.structure[n].specie))
+        molecule_subgraphs = [
+            subgraph
+            for subgraph in all_subgraphs
+            if all(d["to_jimage"] == (0, 0, 0) for _, _, d in subgraph.edges(data=True))
+        ]
 
         # now define how we test for isomorphism
         def node_match(n1, n2):
@@ -1511,15 +1544,40 @@ class StructureGraph(MSONable):
                 return Counter(d.get("weight") for d in e1.values()) == Counter(d.get("weight") for d in e2.values())
             return True
 
+        # Supercell node n is a copy of site n % n_sites, so two subgraphs with the same (unique) site
+        # indices and the same edges between them are lattice translations of each other, hence
+        # isomorphic. Such duplicates are skipped without a (costly) isomorphism test.
+        n_sites = len(self.structure)
+
+        def translation_key(subgraph) -> tuple | None:
+            site_indices = [n % n_sites for n in subgraph]
+            if len(set(site_indices)) != len(site_indices):
+                return None  # contains several images of one site, the key would be ambiguous
+            edges = Counter(
+                (*sorted((u % n_sites, v % n_sites)), d.get("weight") if use_weights else None)
+                for u, v, d in subgraph.edges(data=True)
+            )
+            return frozenset(site_indices), frozenset(edges.items())
+
         # prune duplicate subgraphs
         unique_subgraphs: list = []
+        seen_keys = set()
         for subgraph in molecule_subgraphs:
-            already_present = [
-                nx.is_isomorphic(subgraph, g, node_match=node_match, edge_match=edge_match) for g in unique_subgraphs
-            ]
+            key = translation_key(subgraph)
+            if key is not None:
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
 
-            if not any(already_present):
-                unique_subgraphs.append(subgraph)
+            # add specie names to graph to be able to test for isomorphism
+            mol_graph = nx.MultiDiGraph(subgraph)
+            for n in mol_graph:
+                mol_graph.add_node(n, specie=str(supercell_sg.structure[n].specie))
+
+            if not any(
+                nx.is_isomorphic(mol_graph, g, node_match=node_match, edge_match=edge_match) for g in unique_subgraphs
+            ):
+                unique_subgraphs.append(mol_graph)
 
         # get Molecule objects for each subgraph
         molecules = []
@@ -1582,20 +1640,7 @@ class MoleculeGraph(MSONable):
             self.molecule = molecule.molecule.copy()
         else:
             self.molecule = molecule
-        self.graph = nx.readwrite.json_graph.adjacency_graph(graph_data)
-
-        # tidy up edge attr dicts, reading to/from JSON duplicates
-        # information
-        for _, _, _, data in self.graph.edges(keys=True, data=True):
-            for key in ("id", "key"):
-                data.pop(key, None)
-            # ensure images are tuples (conversion to lists happens
-            # when serializing back from json), it's important images
-            # are hashable/immutable
-            if "to_jimage" in data:
-                data["to_jimage"] = tuple(data["to_jimage"])
-            if "from_jimage" in data:
-                data["from_jimage"] = tuple(data["from_jimage"])
+        self.graph = _graph_from_adjacency_data(graph_data)
 
         self.set_node_attributes()
 
@@ -1617,26 +1662,7 @@ class MoleculeGraph(MSONable):
         Returns:
             MoleculeGraph
         """
-        if edge_weight_name and (edge_weight_units is None):
-            raise ValueError(
-                "Please specify units associated "
-                "with your edge weights. Can be "
-                "empty string if arbitrary or "
-                "dimensionless."
-            )
-
-        # construct graph with one node per site
-        # graph attributes don't change behavior of graph,
-        # they're just for book-keeping
-        graph = nx.MultiDiGraph(
-            edge_weight_name=edge_weight_name,
-            edge_weight_units=edge_weight_units,
-            name=name,
-        )
-        graph.add_nodes_from(range(len(molecule)))
-
-        graph_data = json_graph.adjacency_data(graph)
-
+        graph_data = _empty_graph_data(len(molecule), name, edge_weight_name, edge_weight_units)
         return cls(molecule, graph_data=graph_data)
 
     @classmethod
@@ -1668,6 +1694,7 @@ class MoleculeGraph(MSONable):
                 weight = None
 
             else:
+                props = dict(props)  # copy, so that the caller's edges are not mutated
                 weight = props.pop("weight", None)
                 if len(props.items()) == 0:
                     props = None
@@ -1854,12 +1881,7 @@ class MoleculeGraph(MSONable):
             properties=site_properties,
         )
 
-        mapping = {}
-        for j in range(len(self.molecule) - 1):
-            if j < idx:
-                mapping[j] = j
-            else:
-                mapping[j] = j + 1
+        mapping = {j: j if j < idx else j + 1 for j in range(len(self.molecule) - 1)}
         nx.relabel_nodes(self.graph, mapping, copy=False)
 
         self.graph.add_node(idx)
@@ -1882,17 +1904,7 @@ class MoleculeGraph(MSONable):
         Replicates molecule site properties (specie, coords, etc.) in the
         MoleculeGraph.
         """
-        species = {}
-        coords = {}
-        properties = {}
-        for node in self.graph.nodes():
-            species[node] = self.molecule[node].specie.symbol
-            coords[node] = self.molecule[node].coords
-            properties[node] = self.molecule[node].properties
-
-        nx.set_node_attributes(self.graph, species, "specie")
-        nx.set_node_attributes(self.graph, coords, "coords")
-        nx.set_node_attributes(self.graph, properties, "properties")
+        _set_node_attributes(self.graph, self.molecule)
 
     def alter_edge(self, from_index, to_index, new_weight=None, new_edge_properties=None):
         """
@@ -1991,14 +2003,20 @@ class MoleculeGraph(MSONable):
         if nx.is_weakly_connected(self.graph):
             return [copy.deepcopy(self)]
 
-        original = copy.deepcopy(self)
+        # deep copy the graph so that the fragments share no data with self
+        return self._split_disconnected_graph(copy.deepcopy(self.graph), return_index_map=return_index_map)
+
+    def _split_disconnected_graph(self, graph: nx.MultiDiGraph, return_index_map: bool = False):
+        """Create a MoleculeGraph for each weakly connected component of graph (a copy of self.graph
+        with the same nodes). Implements get_disconnected_fragments, the fragments reuse the data of graph.
+        """
         sub_mols = []
 
         # Had to use nx.weakly_connected_components because of deprecation
         # of nx.weakly_connected_component_subgraphs
         new_to_old_index = []
-        for c in nx.weakly_connected_components(original.graph):
-            subgraph = original.graph.subgraph(c)
+        for c in nx.weakly_connected_components(graph):
+            subgraph = graph.subgraph(c)
             nodes = sorted(subgraph.nodes)
             new_to_old_index += list(nodes)
             # Molecule indices are essentially list-based, so node indices
@@ -2081,15 +2099,13 @@ class MoleculeGraph(MSONable):
 
         # alter any bonds before partition, to avoid remapping
         if alterations is not None:
-            for u, v in alterations:
-                if "weight" in alterations[u, v]:
-                    weight = alterations[u, v].pop("weight")
-                    edge_properties = alterations[u, v] if len(alterations[u, v]) != 0 else None
-                    original.alter_edge(u, v, new_weight=weight, new_edge_properties=edge_properties)
-                else:
-                    original.alter_edge(u, v, new_edge_properties=alterations[u, v])
+            for (u, v), alteration in alterations.items():
+                edge_properties = dict(alteration)  # copy, "weight" is popped below
+                weight = edge_properties.pop("weight", None)
+                original.alter_edge(u, v, new_weight=weight, new_edge_properties=edge_properties or None)
 
-        return original.get_disconnected_fragments()
+        # original is already a private deep copy, no need to copy it again
+        return original._split_disconnected_graph(original.graph)
 
     def build_unique_fragments(self):
         """Find all possible fragment combinations of the MoleculeGraphs (in other
@@ -2108,10 +2124,8 @@ class MoleculeGraph(MSONable):
                 subgraph = nx.subgraph(graph, combination)
                 if nx.is_connected(subgraph):
                     key = f"{comp} {len(subgraph.edges())}"
-                    if key not in frag_dict:
-                        frag_dict[key] = [copy.deepcopy(subgraph)]
-                    else:
-                        frag_dict[key].append(copy.deepcopy(subgraph))
+                    # (a deep copy of the subgraph view would also deep copy the whole graph)
+                    frag_dict.setdefault(key, []).append(subgraph.copy())
 
         # narrow to all unique fragments using graph isomorphism
         unique_frag_dict = {}
@@ -2125,7 +2139,7 @@ class MoleculeGraph(MSONable):
                         break
                 if not found:
                     unique_frags.append(frag)
-            unique_frag_dict[key] = copy.deepcopy(unique_frags)
+            unique_frag_dict[key] = unique_frags
 
         # convert back to molecule graphs
         unique_mol_graph_dict = {}
@@ -2510,123 +2524,21 @@ class MoleculeGraph(MSONable):
             algo: any graphviz algo, "neato" (for simple graphs)
                 or "fdp" (for more crowded graphs) usually give good outputs
         """
-        if not which(algo):
-            raise RuntimeError("StructureGraph graph drawing requires GraphViz binaries to be in the path.")
-
-        # Developer note: NetworkX also has methods for drawing
-        # graphs using matplotlib, these also work here. However,
-        # a dedicated tool like GraphViz allows for much easier
-        # control over graph appearance and also correctly displays
-        # multi-graphs (matplotlib can superimpose multiple edges).
-
-        g = self.graph.copy()
-
-        g.graph = {"nodesep": 10.0, "dpi": 300, "overlap": "false"}
-
-        # add display options for nodes
-        for node in g.nodes():
-            # get label by species name
-            label = f"{self.molecule[node].specie}({node})" if node_labels else ""
-
-            # use standard color scheme for nodes
-            c = EL_COLORS[color_scheme].get(str(self.molecule[node].specie.symbol), [0, 0, 0])
-
-            # get contrasting font color
-            # magic numbers account for perceived luminescence
-            # https://stackoverflow.com/questions/1855884/determine-font-color-based-on-background-color
-            fontcolor = "#000000" if 1 - (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) / 255 < 0.5 else "#ffffff"
-
-            # convert color to hex string
-            color = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-
-            g.add_node(
-                node,
-                fillcolor=color,
-                fontcolor=fontcolor,
-                label=label,
-                fontname="Helvetica-bold",
-                style="filled",
-                shape="circle",
-            )
-
-        edges_to_delete = []
-
-        # add display options for edges
-        for u, v, k, d in g.edges(keys=True, data=True):
-            # retrieve from/to images, set as origin if not defined
-            to_image = d.get("to_jimage", (0, 0, 0))
-
-            # set edge style
-            d["style"] = "solid"
-            if to_image != (0, 0, 0):
-                d["style"] = "dashed"
-                if hide_image_edges:
-                    edges_to_delete.append((u, v, k))
-
-            # don't show edge directions
-            d["arrowhead"] = "none"
-
-            # only add labels for images that are not the origin
-            if image_labels:
-                d["headlabel"] = "" if to_image == (0, 0, 0) else f"to {to_image}"
-                d["arrowhead"] = "normal" if d["headlabel"] else "none"
-
-            # optionally color edges using node colors
-            color_u = g.nodes[u]["fillcolor"]
-            color_v = g.nodes[v]["fillcolor"]
-            d["color_uv"] = f"{color_u};0.5:{color_v};0.5" if edge_colors else "#000000"
-
-            # optionally add weights to graph
-            if weight_labels:
-                units = g.graph.get("edge_weight_units", "")
-                if d.get("weight"):
-                    d["label"] = f"{d['weight']:.2f} {units}"
-
-            # update edge with our new style attributes
-            g.edges[u, v, k].update(d)
-
-        # optionally remove periodic image edges,
-        # these can be confusing due to periodic boundaries
-        if hide_image_edges:
-            for edge_to_delete in edges_to_delete:
-                g.remove_edge(*edge_to_delete)
-
-        # optionally hide unconnected nodes,
-        # these can appear when removing periodic edges
-        if hide_unconnected_nodes:
-            g = g.subgraph([node for node, degree in g.degree() if degree != 0])
-
-        # optionally highlight differences with another graph
-        if diff:
-            diff = self.diff(diff, strict=True)
-            green_edges = []
-            red_edges = []
-            for u, v, k, d in g.edges(keys=True, data=True):
-                if (u, v, d["to_jimage"]) in diff["self"]:
-                    # edge has been deleted
-                    red_edges.append((u, v, k))
-                elif (u, v, d["to_jimage"]) in diff["other"]:
-                    # edge has been added
-                    green_edges.append((u, v, k))
-            for u, v, k in green_edges:
-                g.edges[u, v, k]["color_uv"] = "#00ff00"
-            for u, v, k in red_edges:
-                g.edges[u, v, k]["color_uv"] = "#ff0000"
-
-        basename, extension = os.path.splitext(filename)
-        extension = extension[1:]
-
-        write_dot(g, f"{basename}.dot")
-
-        with open(filename, mode="w", encoding="utf-8") as file:
-            args = [algo, "-T", extension, f"{basename}.dot"]
-            with subprocess.Popen(args, stdout=file, stdin=subprocess.PIPE, close_fds=True) as rs:
-                rs.communicate()
-                if rs.returncode != 0:
-                    raise RuntimeError(f"{algo} exited with return code {rs.returncode}.")
-
-        if not keep_dot:
-            os.remove(f"{basename}.dot")
+        _draw_graph_to_file(
+            self,
+            self.molecule,
+            filename,
+            diff,
+            hide_unconnected_nodes=hide_unconnected_nodes,
+            hide_image_edges=hide_image_edges,
+            edge_colors=edge_colors,
+            node_labels=node_labels,
+            weight_labels=weight_labels,
+            image_labels=image_labels,
+            color_scheme=color_scheme,
+            keep_dot=keep_dot,
+            algo=algo,
+        )
 
     def as_dict(self):
         """
@@ -2649,48 +2561,18 @@ class MoleculeGraph(MSONable):
         mol = Molecule.from_dict(dct["molecule"])
         return cls(mol, dct["graphs"])
 
-    @classmethod
-    def _edges_to_str(cls, g):
-        header = "from    to  to_image    "
-        header_line = "----  ----  ------------"
-        if g.graph["edge_weight_name"]:
-            print_weights = ["weight"]
-            edge_label = g.graph["edge_weight_name"]
-            if edge_weight_units := g.graph["edge_weight_units"]:
-                edge_label += f" ({edge_weight_units})"
-            header += f"  {edge_label}"
-            header_line += f"  {'-' * max([18, len(edge_label)])}"
-        else:
-            print_weights = False
-
-        out = f"{header}\n{header_line}\n"
-
-        edges = list(g.edges(data=True))
-
-        # sort edges for consistent ordering
-        edges.sort(key=itemgetter(0, 1))
-
-        if print_weights:
-            for u, v, data in edges:
-                out += f"{u:4}  {v:4}  {data.get('to_jimage', (0, 0, 0))!s:12}  {data.get('weight', 0):.3e}\n"
-        else:
-            for u, v, data in edges:
-                out += f"{u:4}  {v:4}  {data.get('to_jimage', (0, 0, 0))!s:12}\n"
-
-        return out
-
     def __str__(self) -> str:
         out = "Molecule Graph"
         out += f"\nMolecule: \n{self.molecule}"
         out += f"\nGraph: {self.name}\n"
-        out += self._edges_to_str(self.graph)
+        out += _edges_to_str(self.graph)
         return out
 
     def __repr__(self) -> str:
         out = "Molecule Graph"
         out += f"\nMolecule: \n{self.molecule!r}"
         out += f"\nGraph: {self.name}\n"
-        out += self._edges_to_str(self.graph)
+        out += _edges_to_str(self.graph)
         return out
 
     def __len__(self) -> int:
@@ -2704,13 +2586,8 @@ class MoleculeGraph(MSONable):
             key (callable, optional): Sort key. Defaults to None.
             reverse (bool, optional): Reverse sort order. Defaults to False.
         """
-        old_molecule = self.molecule.copy()
-
-        # sort Molecule
-        self.molecule._sites = sorted(self.molecule._sites, key=key, reverse=reverse)
-
-        # apply Molecule ordering to graph
-        mapping = {idx: self.molecule.index(site) for idx, site in enumerate(old_molecule)}
+        # sort Molecule and apply its ordering to graph
+        self.molecule._sites, mapping = _sort_sites(self.molecule._sites, key, reverse)
         self.graph = nx.relabel_nodes(self.graph, mapping, copy=True)
 
         # normalize directions of edges
@@ -2827,14 +2704,4 @@ class MoleculeGraph(MSONable):
                 (str(other.molecule[u].specie), str(other.molecule[v].specie)) for u, v in other.graph.edges(keys=False)
             }
 
-        if len(edges) == 0 and len(edges_other) == 0:
-            jaccard_dist = 0.0  # by definition
-        else:
-            jaccard_dist = 1.0 - len(edges & edges_other) / len(edges | edges_other)
-
-        return {
-            "self": edges - edges_other,
-            "other": edges_other - edges,
-            "both": edges & edges_other,
-            "dist": jaccard_dist,
-        }
+        return _diff_edge_sets(edges, edges_other)
