@@ -401,9 +401,9 @@ class Vasprun(MSONable):
                 )
                 self.nionic_steps = len(self.md_data) if self.md_data else len(self.ionic_steps)
 
-            if parse_potcar_file:
-                self.update_potcar_spec(parse_potcar_file)
-                self.update_charge_from_potcar(parse_potcar_file)
+        if parse_potcar_file:
+            self.update_potcar_spec(parse_potcar_file)
+            self.update_charge_from_potcar(parse_potcar_file)
 
         if self.incar.get("ALGO") not in {"Chi", "Bse"} and not self.converged and self.parameters.get("IBRION") != 0:
             msg = f"{filename} is an unconverged VASP run.\n"
@@ -882,6 +882,7 @@ class Vasprun(MSONable):
             10: "DFT-D2",
             11: "DFT-D3",
             12: "DFT-D3-BJ",
+            13: "DFT-D4",
             2: "TS",
             20: "TS",
             21: "TS-H",
@@ -1622,7 +1623,7 @@ class Vasprun(MSONable):
             kpoint = Kpoints(
                 comment="Kpoints from vasprun.xml",
                 style=Kpoints.supported_modes.Reciprocal,
-                num_kpts=len(kpoint.kpts),
+                num_kpts=len(actual_kpoints),
                 kpts=actual_kpoints,
                 kpts_weights=weights,  # type: ignore[arg-type]
             )
@@ -2172,6 +2173,10 @@ class Outcar:
 
         # Iterate the cached lines in reverse (replaces reverse_readfile +
         # all_lines accumulation; same memory footprint).
+        # Only the first match in reverse (i.e. the last value in the file) is kept,
+        # so truncated/running OUTCARs without the final timing block still report
+        # the values of the last ionic step rather than the first one.
+        efermi_found: bool = False
         for line in reversed(self._lines):
             clean = line.strip()
             if clean.find("soft stop encountered!  aborting job") != -1:
@@ -2189,19 +2194,20 @@ class Outcar:
                     continue
 
                 if match := efermi_patt.search(clean):
-                    try:
-                        # try-catch because VASP sometimes prints
-                        # 'E-fermi: ********     XC(G=0):  -6.1327
-                        # alpha+bet : -1.8238'
-                        efermi = float(match[1])
-                        continue
-                    except ValueError:
-                        efermi = None
-                        continue
-                if match := nelect_patt.search(clean):
+                    if not efermi_found:
+                        efermi_found = True
+                        try:
+                            # try-catch because VASP sometimes prints
+                            # 'E-fermi: ********     XC(G=0):  -6.1327
+                            # alpha+bet : -1.8238'
+                            efermi = float(match[1])
+                        except ValueError:
+                            efermi = None
+                    continue
+                if nelect is None and (match := nelect_patt.search(clean)):
                     nelect = float(match[1])
 
-                if match := mag_patt.search(clean):
+                if total_mag is None and (match := mag_patt.search(clean)):
                     total_mag = float(match[1])
 
                 if e_fr_energy is None and (match := e_fr_energy_pattern.search(clean)):
@@ -2211,7 +2217,7 @@ class Outcar:
                 if e0 is None and (match := e0_pattern.search(clean)):
                     e0 = float(match[1])
 
-            if nelect is not None and total_mag is not None and efermi is not None and run_stats:
+            if nelect is not None and total_mag is not None and efermi_found and run_stats:
                 break
 
         # For single atom systems, VASP doesn't print a total line, so
