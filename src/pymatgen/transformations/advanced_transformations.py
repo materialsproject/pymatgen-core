@@ -216,7 +216,8 @@ class MultipleSubstitutionTransformation:
         outputs = []
         for charge, el_list in self.substitution_dict.items():
             sign = "+" if charge > 0 else "-"
-            dummy_sp = f"X{charge}{sign}"
+            # use the magnitude of the charge so that negative charges give e.g. "X2-", not "X-2-"
+            dummy_sp = f"X{abs(charge)}{sign}"
             mapping = {
                 self.sp_to_replace: {
                     self.sp_to_replace: 1 - self.r_fraction,
@@ -232,8 +233,7 @@ class MultipleSubstitutionTransformation:
                 dummy_structure = OrderDisorderedStructureTransformation().apply_transformation(dummy_structure)  # type:ignore[assignment]
 
             for el in el_list:
-                sign = "+" if charge > 0 else "-"
-                st = SubstitutionTransformation({f"X{charge}+": f"{el}{charge}{sign}"})
+                st = SubstitutionTransformation({dummy_sp: f"{el}{abs(charge)}{sign}"})
                 new_structure = st.apply_transformation(dummy_structure)
                 outputs.append({"structure": new_structure})
         return outputs
@@ -370,11 +370,14 @@ class EnumerateStructureTransformation(AbstractTransformation):
             )
             structures = [structure.copy()]
 
-        if self.max_disordered_sites:
+        if structures is not None:
+            # ordered structure: nothing to enumerate
+            max_cell_sizes: Iterable[int] = []
+        elif self.max_disordered_sites:
             n_disordered = sum(1 for site in structure if not site.is_ordered)
             if n_disordered > self.max_disordered_sites:
                 raise ValueError(f"Too many disordered sites! ({n_disordered} > {self.max_disordered_sites})")
-            max_cell_sizes: Iterable[int] = range(
+            max_cell_sizes = range(
                 self.min_cell_size,
                 math.floor(self.max_disordered_sites / n_disordered) + 1,
             )

@@ -105,9 +105,15 @@ class TestChemicalPotentialDiagram(MatSciTest):
         )
 
         centroid = get_centroid_2d(vertices)
-        centroid_desired = np.array([-0.00069433, -0.00886174])
+        # area-weighted centroid from the closed-polygon shoelace formula
+        centroid_desired = np.array([0.59164929, -0.03825845])
 
         assert centroid == approx(centroid_desired, abs=1e-6)
+
+        # the centroid of a square is its center (regardless of orientation)
+        square = np.array([[5, 5], [7, 5], [7, 7], [5, 7]], dtype=float)
+        assert get_centroid_2d(square) == approx([6, 6])
+        assert get_centroid_2d(square[::-1]) == approx([6, 6])
 
     def test_get_2d_orthonormal_vector(self):
         pts_1 = np.array([[1, 1], [2, 2]])

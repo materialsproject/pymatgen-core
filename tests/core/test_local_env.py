@@ -1129,7 +1129,7 @@ class TestLocalStructOrderParams(MatSciTest):
 
         # Pentagonal planar.
         op_vals = ops_101.get_order_parameters(self.pentagonal_planar.sites, 0, indices_neighs=[1, 2, 3, 4, 5])
-        assert op_vals[12] == approx(0.1260699690)
+        assert op_vals[12] == approx(0.0911029411)
         assert op_vals[16] == approx(1)
         assert op_vals[31] == approx(1)
 
@@ -1140,7 +1140,7 @@ class TestLocalStructOrderParams(MatSciTest):
         # Square pyramid motif.
         op_vals = ops_101.get_order_parameters(self.square_pyramid, 0)
         assert op_vals[11] == approx(1)
-        assert op_vals[12] == approx(2 / 3)
+        assert op_vals[12] == approx(0.75)
         assert op_vals[17] == approx(1)
 
         # Pentagonal pyramid motif.
@@ -1600,6 +1600,49 @@ def test_voronoi_disordered_neighbors():
 
 
 @pytest.mark.parametrize("nn_cls", [VoronoiNN, IsayevNN])
+def test_voronoi_single_element_target(nacl, nn_cls):
+    # a single Element (not wrapped in a list) is accepted as target
+    assert nn_cls(targets=Element("Cl")).get_cn(nacl, 0) == 6
+    assert nn_cls(targets=[Element("Cl")]).get_cn(nacl, 0) == 6
+
+
+@pytest.mark.parametrize("nn_cls", [VoronoiNN, IsayevNN])
+def test_voronoi_no_target_neighbors(nacl, nn_cls):
+    # Na shares Voronoi facets only with Cl, so restricting targets to Na leaves no neighbors
+    assert nn_cls(targets=[Element("Na")]).get_nn_info(nacl, 0) == []
+    assert nn_cls(targets=[Element("Na")]).get_cn(nacl, 0) == 0
+
+
+@pytest.mark.parametrize(
+    "nn", [MinimumDistanceNN(cutoff=1), MinimumOKeeffeNN(cutoff=1), MinimumVIRENN(cutoff=1)], ids=type
+)
+def test_min_dist_nn_no_neighbors_within_cutoff(nacl, nn):
+    assert nn.get_nn_info(nacl, 0) == []
+    assert nn.get_cn(nacl, 0) == 0
+
+
+def test_get_bonded_structure_decorate_does_not_mutate_input(nacl, methane):
+    struct_graph = MinimumDistanceNN().get_bonded_structure(nacl, decorate=True)
+    assert "order_parameters" in struct_graph.structure.site_properties
+    assert "order_parameters" not in nacl.site_properties
+
+    mol_graph = CovalentBondNN().get_bonded_structure(methane, decorate=True)
+    assert "order_parameters" in mol_graph.molecule.site_properties
+    assert "order_parameters" not in methane.site_properties
+
+
+def test_crystal_nn_cation_anion_no_adjacent_targets():
+    # the only anion in this fcc supercell does not share a Voronoi facet with site 13
+    prim = Structure(Lattice([[0, 1.8, 1.8], [1.8, 0, 1.8], [1.8, 1.8, 0]]), [Species("Na", 1)], [[0, 0, 0]])
+    struct = prim * (3, 3, 3)
+    struct.replace(0, Species("Cl", -1))
+    idx = next(i for i, site in enumerate(struct) if np.allclose(site.frac_coords, [1 / 3, 1 / 3, 1 / 3]))
+    nn_data = CrystalNN(cation_anion=True).get_nn_data(struct, idx)
+    assert nn_data.cn_weights == {0: 1.0}
+    assert CrystalNN(cation_anion=True).get_cn(struct, idx) == 0
+
+
+@pytest.mark.parametrize("nn_cls", [VoronoiNN, IsayevNN])
 def test_voronoi_get_all_nn_info(nacl, nn_cls):
     all_nn = nn_cls().get_all_nn_info(nacl)
     assert len(all_nn) == len(nacl)
@@ -1759,6 +1802,29 @@ class TestLocalStructOrderParamsExtra:
         lsop._params[0] = None
         with pytest.raises(RuntimeError, match="param of idx=0 is None"):
             lsop.get_order_parameters(nacl, 0)
+
+    @pytest.mark.parametrize("op_type", ["tri_bipyr", "sq_bipyr", "oct_max", "sq_plan_max", "see_saw_rect"])
+    def test_south_pole_contributions_independent_of_op_order(self, op_type):
+        # South pole contributions used to be applied only to the last OP type in the list,
+        # so the value of an OP depended on which other OP types were requested after it.
+        coords = [[0, 0, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-0.5, 3**0.5 / 2, 0], [-0.5, -(3**0.5) / 2, 0]]
+        mol = Molecule(["C"] + ["H"] * 5, coords)
+        neighs = [1, 2, 3, 4, 5]
+        alone = LocalStructOrderParams([op_type]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        combined = LocalStructOrderParams([op_type, "cn"]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        reversed_ = LocalStructOrderParams(["cn", op_type]).get_order_parameters(mol, 0, indices_neighs=neighs)
+        assert combined[0] == approx(alone[0])
+        assert reversed_[1] == approx(alone[0])
+
+    @pytest.mark.parametrize("cutoff", [-10.0, 3.0])
+    @pytest.mark.parametrize(("target_spec", "oxidized"), [("Cl", False), (Element("Cl"), False), ("Cl-", True)])
+    def test_target_spec_types(self, nacl, cutoff, target_spec, oxidized):
+        # Voronoi (negative cutoff) and fixed-cutoff neighbor finding both accept str/Element/Species targets
+        if oxidized:
+            nacl.add_oxidation_state_by_element({"Na": 1, "Cl": -1})
+        lsop = LocalStructOrderParams(["cn"], cutoff=cutoff)
+        assert lsop.get_order_parameters(nacl, 0, target_spec=target_spec) == approx([6.0])
+        assert lsop.get_order_parameters(nacl, 0, target_spec="Na+" if oxidized else "Na") == approx([0.0])
 
 
 class TestEconNNExtra:

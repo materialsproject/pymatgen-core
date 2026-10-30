@@ -6,10 +6,12 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+import numpy as np
 from monty.io import zopen
 from monty.re import regrep
 
 from pymatgen.core import Element, Lattice, Structure
+from pymatgen.core.units import bohr_to_angstrom
 from pymatgen.util.io_utils import clean_lines
 
 if TYPE_CHECKING:
@@ -289,20 +291,35 @@ class PWInput:
         """
         lines = list(clean_lines(string.splitlines(), rstrip_only=True))
 
+        def card_option(line: str, default: str) -> str:
+            """Card option, e.g. 'angstrom' from 'ATOMIC_POSITIONS (angstrom)' or '{angstrom}'."""
+            tokens = line.split(maxsplit=1)
+            if len(tokens) < 2:
+                return default
+            return re.sub(r"[(){}\s]", "", tokens[1]).lower() or default
+
         def input_mode(line):
             if line[0] == "&":
                 return ("sections", line[1:].lower())
             if "ATOMIC_SPECIES" in line:
                 return ("pseudo",)
             if "K_POINTS" in line:
-                return "kpoints", line.split()[1]
+                return "kpoints", card_option(line, "tpiba")
             if "OCCUPATIONS" in line:
                 return "occupations"
-            if "CELL_PARAMETERS" in line or "ATOMIC_POSITIONS" in line:
-                return "structure", line.split()[1]
+            if "CELL_PARAMETERS" in line:
+                return "structure", card_option(line, "")
+            if "ATOMIC_POSITIONS" in line:
+                return "structure", card_option(line, "alat")
             if line == "/":
                 return None
             return mode
+
+        # Real number, optionally in Fortran exponent notation (e.g. 1.0d-5)
+        num = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eEdD][-+]?\d+)?"
+
+        def to_float(val: str) -> float:
+            return float(val.lower().replace("d", "e"))
 
         sections: dict[str, dict] = {
             "control": {},
@@ -321,7 +338,8 @@ class PWInput:
         kpoints_mode = None
         kpoints_grid = (1, 1, 1)
         kpoints_shift = (0, 0, 0)
-        coords_are_cartesian = False
+        lattice_unit = ""
+        positions_unit = "crystal"
         format_options = {}
 
         for line in lines:
@@ -340,8 +358,6 @@ class PWInput:
                             val_ = [0.0] * 20  # MAX NTYP DEFINITION
                             val_[int(key_) - 1] = PWInput.proc_val(key, val)
                             sections[section][key] = val_
-
-                            site_properties[key] = []
                         else:
                             sections[section][key][int(key_) - 1] = PWInput.proc_val(key, val)
                     else:
@@ -361,17 +377,20 @@ class PWInput:
                     kpoints_mode = mode[1]
 
             elif mode[0] == "structure":
-                m_l = re.match(r"^(\s*)(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)", line)
-                m_p = re.match(
-                    r"^(\s*)(\w+\d*[\+-]?)\s+(-?\d+\.\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)",
-                    line,
-                )
+                if "CELL_PARAMETERS" in line:
+                    lattice_unit = mode[1]
+                    continue
+                if "ATOMIC_POSITIONS" in line:
+                    positions_unit = mode[1]
+                    continue
+                m_l = re.match(rf"^(\s*)({num})\s+({num})\s+({num})", line)
+                m_p = re.match(rf"^(\s*)(\w+\d*[\+-]?)\s+({num})\s+({num})\s+({num})", line)
                 if m_l:
                     format_options["indent"] = len(m_l[1])
                     lattice += [
-                        float(m_l[2]),
-                        float(m_l[3]),
-                        float(m_l[4]),
+                        to_float(m_l[2]),
+                        to_float(m_l[3]),
+                        to_float(m_l[4]),
                     ]
                     decimals = max(
                         # length of decimal digits; 0 if no decimal digits
@@ -387,7 +406,7 @@ class PWInput:
                     format_options["indent"] = len(m_p[1])
                     site_properties["pseudo"].append(pseudo[m_p[2]])
                     species.append(m_p[2])
-                    coords += [[float(m_p[3]), float(m_p[4]), float(m_p[5])]]
+                    coords += [[to_float(m_p[3]), to_float(m_p[4]), to_float(m_p[5])]]
                     decimals = max(
                         # length of decimal digits; 0 if no decimal digits
                         (len(dec[1]) if len(dec := v.split(".")) == 2 else 0)
@@ -398,11 +417,35 @@ class PWInput:
                         decimals,
                     )
 
-                    if mode[1] == "angstrom":
-                        coords_are_cartesian = True
+        # Convert CELL_PARAMETERS and ATOMIC_POSITIONS to Angstrom. "alat" is celldm(1) (in Bohr)
+        # or A (in Angstrom) from &SYSTEM.
+        system = sections["system"]
+        alat = None
+        if celldm := system.get("celldm"):
+            alat = celldm[0] * bohr_to_angstrom
+        elif (a_param := system.get("A", system.get("a"))) is not None:
+            alat = a_param
+        # QE's (deprecated) default when the CELL_PARAMETERS option is omitted
+        lattice_unit = lattice_unit or ("alat" if alat else "bohr")
+
+        def length_scale(unit: str) -> float:
+            if unit == "angstrom":
+                return 1.0
+            if unit == "bohr":
+                return bohr_to_angstrom
+            if unit == "alat":
+                if alat is None:
+                    raise ValueError("'alat' units require celldm(1) or A in the &SYSTEM namelist.")
+                return alat
+            raise ValueError(f"Unsupported unit {unit!r} in PWscf input.")
+
+        lattice_matrix = np.reshape(lattice, (3, 3)) * length_scale(lattice_unit)
+        coords_are_cartesian = positions_unit not in {"crystal", "crystal_sg"}
+        if coords_are_cartesian:
+            coords = (np.asarray(coords) * length_scale(positions_unit)).tolist()
 
         structure = Structure(
-            Lattice(lattice),
+            Lattice(lattice_matrix),
             species,
             coords,
             coords_are_cartesian=coords_are_cartesian,

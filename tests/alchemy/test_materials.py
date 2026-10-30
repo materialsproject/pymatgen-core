@@ -48,6 +48,38 @@ class TestTransformedStructure(MatSciTest):
         )
         assert len(alt) == 2
 
+    def test_append_transformation_alternatives_history(self):
+        struct = Structure(
+            [[3.84, 0, 0], [1.92, 3.33, 0], [0, -2.22, 3.14]], ["Si4+", "Si4+"], [[0, 0, 0], [0.75, 0.5, 0.75]]
+        )
+        struct.make_supercell([2, 1, 1])
+        t_struct = TransformedStructure(struct, [])
+        trafo = PartialRemoveSpecieTransformation("Si4+", 0.5, algo=PartialRemoveSpecieTransformation.ALGO_COMPLETE)
+        alts = t_struct.append_transformation(trafo, 5)
+        assert len(alts) == 2
+        # the recorded input structure used to be the last alternative instead of the actual input
+        assert Structure.from_dict(t_struct.history[-1]["input_structure"]) == struct
+        assert t_struct.structures[0] == struct
+        for alt in alts:
+            assert Structure.from_dict(alt.history[-1]["input_structure"]) == struct
+        t_struct.undo_last_change()
+        assert t_struct.final_structure == struct
+
+    def test_append_transformation_does_not_mutate_ranked_list(self):
+        struct = Structure(
+            [[3.84, 0, 0], [1.92, 3.33, 0], [0, -2.22, 3.14]], ["Si4+", "Si4+"], [[0, 0, 0], [0.75, 0.5, 0.75]]
+        )
+        struct.make_supercell([2, 1, 1])
+        ranked_list = [
+            {"structure": struct.copy(), "energy": 0.0},
+            {"structure": struct.copy(), "energy": 1.0},
+        ]
+        trafo = PartialRemoveSpecieTransformation("Si4+", 0.5)
+        trafo.apply_transformation = lambda *args, **kwargs: ranked_list
+        TransformedStructure(struct, []).append_transformation(trafo, 2)
+        # popping "structure" used to mutate the dicts returned (and possibly cached) by the transformation
+        assert all("structure" in dct for dct in ranked_list)
+
     def test_append_filter(self):
         f3 = ContainsSpecieFilter(["O2-"], strict_compare=True, AND=False)
         self.trans.append_filter(f3)
@@ -166,6 +198,22 @@ class TestTransformedStructure(MatSciTest):
         s = str(ts)
         assert "Current structure" in s
         assert "NaFePO4" in s
+        # str() used to pop input_structure from the history, breaking undo and structures
+        assert "input_structure" in ts.history[-1]
+        assert len(ts.structures) == 2
+        ts.undo_last_change()
+        assert ts.final_structure.reduced_formula == "LiFePO4"
+
+    def test_snl_does_not_mutate_history(self):
+        hist = ("testname", "testURL", {"test": "testing"})
+        struct_nl = StructureNL(self.structure, [("will", "will@test.com")], history=[hist])
+        t_struct = TransformedStructure.from_snl(struct_nl)
+        # from_snl used to add "_snl" to the SNL's own history descriptions
+        assert struct_nl.history[0].description == {"test": "testing"}
+        # to_snl used to pop "_snl" from the TransformedStructure history
+        t_struct.to_snl([("notwill", "notwill@test.com")])
+        assert t_struct.history[0]["_snl"] == {"url": "testURL", "name": "testname"}
+        assert t_struct.to_snl([("notwill", "notwill@test.com")]).history == [hist]
 
     def test_was_modified(self):
         ts = TransformedStructure(self.structure, [SubstitutionTransformation({"Li": "Na"})])

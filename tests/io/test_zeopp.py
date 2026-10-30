@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pytest import approx
 
-from pymatgen.core import Molecule, Species, Structure
+from pymatgen.core import Lattice, Molecule, Species, Structure
 from pymatgen.core.bond_valence import BVAnalyzer
 from pymatgen.io.zeopp import (
     ZeoCssr,
@@ -15,8 +15,8 @@ from pymatgen.io.zeopp import (
 )
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR
 
-if not zeo_found:
-    pytest.skip("neither zeo nor pyzeo is installed", allow_module_level=True)
+# Only the Voronoi analysis needs Zeo++; the file I/O classes are pure Python
+requires_zeo = pytest.mark.skipif(not zeo_found, reason="neither zeo nor pyzeo is installed")
 
 TEST_DIR = f"{TEST_FILES_DIR}/io/zeopp"
 
@@ -69,6 +69,15 @@ class TestZeoCssr:
         zeo_cssr = ZeoCssr.from_file(filename)
         assert isinstance(zeo_cssr.structure, Structure)
 
+    def test_round_trip(self):
+        # from_str used to rotate the lattice parameters to (b, c, a) while rotating the
+        # coordinates back to (a, b, c), giving a different structure for non-cubic cells
+        lattice = Lattice.from_parameters(3, 4, 5, 80, 90, 100)
+        struct = Structure(lattice, ["Na", "Cl"], [[0.1, 0.2, 0.3], [0.5, 0.5, 0.5]])
+        struct_back = ZeoCssr.from_str(str(ZeoCssr(struct))).structure
+        assert struct_back.lattice.parameters == approx(lattice.parameters, abs=1e-3)
+        assert struct_back.frac_coords == approx(struct.frac_coords, abs=1e-4)
+
 
 class TestZeoCssrOxi:
     def setup_method(self):
@@ -111,6 +120,9 @@ class TestZeoCssrOxi:
         filename = f"{TEST_FILES_DIR}/io/cssr/EDI_oxistate_decorated.cssr"
         zeocssr = ZeoCssr.from_file(filename)
         assert isinstance(zeocssr.structure, Structure)
+        # Species such as "O2-" did not match the (\w+) pattern, so no sites were read
+        assert len(zeocssr.structure) == 15
+        assert Species("O", -2) in zeocssr.structure.composition
 
 
 class TestZeoVoronoiXYZ:
@@ -143,6 +155,7 @@ H -0.363000 -0.513360 0.889165 0.200000"""
         assert isinstance(voronoi.molecule, Molecule)
 
 
+@requires_zeo
 class TestGetVoronoiNodes:
     def setup_method(self):
         filepath = f"{VASP_IN_DIR}/POSCAR"
@@ -166,6 +179,7 @@ class TestGetVoronoiNodes:
         assert isinstance(vor_face_center_struct, Structure)
 
 
+@requires_zeo
 @pytest.mark.xfail(reason="TODO: file free_sph.cif not present")
 class TestGetFreeSphereParams:
     def setup_method(self):
@@ -188,6 +202,7 @@ class TestGetFreeSphereParams:
         assert free_sph_params["inc_sph_along_free_sph_path_max_dia"] == approx(2.58251, abs=1e-1)
 
 
+@requires_zeo
 class TestGetHighAccuracyVoronoiNodes:
     def setup_method(self):
         filepath = f"{VASP_IN_DIR}/POSCAR"
@@ -207,6 +222,7 @@ class TestGetHighAccuracyVoronoiNodes:
         assert isinstance(vor_node_struct, Structure)
 
 
+@requires_zeo
 class TestGetVoronoiNodesMultiOxi:
     def setup_method(self):
         filepath = f"{VASP_IN_DIR}/POSCAR"

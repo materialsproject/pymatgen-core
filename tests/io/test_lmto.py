@@ -6,7 +6,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core.structure import Structure
+from pymatgen.core.structure import Lattice, Structure
 from pymatgen.core.units import Ry_to_eV
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.lmto import LMTOCopl, LMTOCtrl
@@ -42,6 +42,16 @@ class TestCtrl(MatSciTest):
         self.ref_bise.write_file(filename=ctrl_path)
         ctrl_file = LMTOCtrl.from_file(filename=ctrl_path)
         assert self.ref_bise.structure.matches(ctrl_file.structure)
+
+    def test_classes_unsorted_set_order(self):
+        # Inequivalent-site representatives {0, 4, 8} iterate as [0, 8, 4] in a set; classes used
+        # to be indexed in that order, raising IndexError
+        struct = Structure(Lattice.tetragonal(4, 9), ["Na", "Cl", "K"], [[0, 0, 0], [0.5, 0.5, 0.3], [0, 0, 0.6]])
+        struct.make_supercell([2, 2, 1])
+        struct = struct.get_sorted_structure()
+        ctrl_dict = LMTOCtrl(struct).as_dict()
+        assert [cls["ATOM"] for cls in ctrl_dict["CLASS"]] == ["K", "Na", "Cl"]
+        assert [site["ATOM"] for site in ctrl_dict["SITE"]] == [str(site.specie) for site in struct]
 
 
 class TestCopl(MatSciTest):

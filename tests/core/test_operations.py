@@ -182,6 +182,20 @@ class TestSymmOp(MatSciTest):
         assert self.op.are_symmetrically_related_vectors(to_a, from_a, -r_a, from_b, to_b, r_b)[0]
         assert self.op.are_symmetrically_related_vectors(to_a, from_a, -r_a, from_b, to_b, r_b)[1]
 
+    def test_are_symmetrically_related_vectors_tol(self):
+        # Every coordinate comparison must honor tol, including the vector end points
+        identity = SymmOp.from_rotation_and_translation()
+        from_a, to_a, r_a = np.array([0.1, 0.1, 0.1]), np.array([0.5, 0.5, 0.5]), np.zeros(3)
+        noise = np.array([5e-4, 0, 0])
+        assert identity.are_symmetrically_related_vectors(from_a, to_a, r_a, from_a, to_a + noise, r_a, tol=1e-3) == (
+            True,
+            False,
+        )
+        assert identity.are_symmetrically_related_vectors(from_a, to_a, r_a, to_a + noise, from_a, r_a, tol=1e-3) == (
+            True,
+            True,
+        )
+
     def test_as_from_dict(self):
         dct = self.op.as_dict()
         op = SymmOp.from_dict(dct)

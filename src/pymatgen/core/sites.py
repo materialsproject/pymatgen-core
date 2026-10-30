@@ -25,6 +25,13 @@ if TYPE_CHECKING:
     from pymatgen.util.typing import CompositionLike, SpeciesLike
 
 
+def _decode_properties(props: dict | None) -> dict | None:
+    """Decode serialized site properties into a new dict, leaving the input dict untouched."""
+    if props is None:
+        return None
+    return {key: json.loads(json.dumps(val, cls=MontyEncoder), cls=MontyDecoder) for key, val in props.items()}
+
+
 class Site(collections.abc.Hashable, MSONable):
     """A generalized *non-periodic* site. This is essentially a composition
     at a point in space, with some optional properties associated with it. A
@@ -302,10 +309,7 @@ class Site(collections.abc.Hashable, MSONable):
             else:
                 sp = Element(sp_occu["element"])
             atoms_n_occu[sp] = sp_occu["occu"]
-        props = dct.get("properties")
-        if props is not None:
-            for key in props:
-                props[key] = json.loads(json.dumps(props[key], cls=MontyEncoder), cls=MontyDecoder)
+        props = _decode_properties(dct.get("properties"))
         label = dct.get("label")
         return cls(atoms_n_occu, dct["xyz"], properties=props, label=label)
 
@@ -362,6 +366,8 @@ class PeriodicSite(Site, MSONable):
         frac_coords = np.asarray(frac_coords, dtype=np.float64)
 
         if not skip_checks:
+            # Own the coordinates (as Site does) so the caller's array is not aliased and mutated
+            frac_coords = frac_coords.copy()
             if frac_coords.shape != (3,):
                 raise ValueError(
                     f"Coordinates {frac_coords} for species {species} are not xyz-shaped (shape {frac_coords.shape})."
@@ -681,10 +687,7 @@ class PeriodicSite(Site, MSONable):
                 sp = Element(sp_occu["element"])
             species[sp] = sp_occu["occu"]
 
-        props = dct.get("properties")
-        if props is not None:
-            for key in props:
-                props[key] = json.loads(json.dumps(props[key], cls=MontyEncoder), cls=MontyDecoder)
+        props = _decode_properties(dct.get("properties"))
         label = dct.get("label")
         lattice = lattice or Lattice.from_dict(dct["lattice"])
         return cls(species, dct["abc"], lattice, properties=props, label=label)

@@ -364,3 +364,29 @@ class TestEwaldMinimizerExtra:
         assert EwaldMinimizer.get_next_index(matrix, [0, 1, sub, "X"], set(sub)) == sub[np.argmax(sums[sub])]
         # f == 1 picks the index with the smallest row sum
         assert EwaldMinimizer.get_next_index(matrix, [1, 1, sub, "X"], set(sub)) == sub[np.argmin(sums[sub])]
+
+
+def _nacl_oxi() -> Structure:
+    struct = Structure.from_spacegroup("Fm-3m", Lattice.cubic(5.6), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    struct.add_oxidation_state_by_element({"Na": 1, "Cl": -1})
+    return struct
+
+
+def test_ewald_minimizer_does_not_mutate_m_list():
+    matrix = EwaldSummation(_nacl_oxi()).total_energy_matrix
+    m_list = [[0.0, 2, [0, 1, 2, 3], None]]
+    EwaldMinimizer(matrix, m_list, num_to_return=2)
+    # the recursion used to remove indices from the caller's index list
+    assert m_list == [[0.0, 2, [0, 1, 2, 3], None]]
+
+
+def test_compute_sub_structure_uncharged_site():
+    struct = _nacl_oxi()
+    struct.replace(0, Species("Na", 0))
+    ewald = EwaldSummation(struct)
+    # used to raise ZeroDivisionError for the uncharged site
+    assert ewald.compute_sub_structure(struct) == approx(ewald.total_energy_matrix.sum())
+    charged = struct.copy()
+    charged.replace(0, Species("Na", 1))
+    with pytest.raises(ValueError, match="charges site 0, which is uncharged in the original structure"):
+        ewald.compute_sub_structure(charged)

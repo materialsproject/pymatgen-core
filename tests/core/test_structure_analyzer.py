@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
@@ -248,3 +249,11 @@ class TestMiscFunction(MatSciTest):
         # test for unphysical cells
         struct.scale_lattice(struct.volume * 10)
         assert sulfide_type(struct) == "sulfide"
+
+
+def test_voronoi_analyzer_open_cell_raises():
+    # all neighbors of site 0 lie on one side, so its Voronoi cell is unbounded within the cutoff
+    coords = [[15, 15, 15], [16, 15, 15], [16, 16.2, 15], [16.3, 15, 16], [16.5, 16, 16.4], [17, 15.5, 15.6]]
+    struct = Structure(Lattice.cubic(30), ["C"] * 6, coords, coords_are_cartesian=True)
+    with pytest.raises(ValueError, match="Cutoff too short"):
+        VoronoiAnalyzer(cutoff=5).analyze(struct, 0)

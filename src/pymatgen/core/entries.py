@@ -769,8 +769,8 @@ class ComputedStructureEntry(ComputedEntry):
                 struct,
                 dct["energy"],
                 correction=dct["correction"],
-                parameters={k: MontyDecoder().process_decoded(v) for k, v in dct.get("parameters", {}).items()},
-                data={k: MontyDecoder().process_decoded(v) for k, v in dct.get("data", {}).items()},
+                parameters={k: MontyDecoder().process_decoded(v) for k, v in (dct.get("parameters") or {}).items()},
+                data={k: MontyDecoder().process_decoded(v) for k, v in (dct.get("data") or {}).items()},
                 entry_id=dct.get("entry_id"),
             )
         # this is the preferred / modern way of instantiating ComputedEntry
@@ -781,9 +781,10 @@ class ComputedStructureEntry(ComputedEntry):
             dct["energy"],
             composition=dct.get("composition"),
             correction=0,
-            energy_adjustments=[MontyDecoder().process_decoded(e) for e in dct.get("energy_adjustments", {})],
-            parameters={k: MontyDecoder().process_decoded(v) for k, v in dct.get("parameters", {}).items()},
-            data={k: MontyDecoder().process_decoded(v) for k, v in dct.get("data", {}).items()},
+            # None values must be handled as in ComputedEntry.from_dict
+            energy_adjustments=[MontyDecoder().process_decoded(e) for e in (dct.get("energy_adjustments") or [])],
+            parameters={k: MontyDecoder().process_decoded(v) for k, v in (dct.get("parameters") or {}).items()},
+            data={k: MontyDecoder().process_decoded(v) for k, v in (dct.get("data") or {}).items()},
             entry_id=dct.get("entry_id"),
         )
 

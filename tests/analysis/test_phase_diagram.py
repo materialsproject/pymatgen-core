@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import json
 import re
 from io import StringIO
 from itertools import combinations
@@ -12,7 +13,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 from matplotlib.colors import Normalize, same_color
-from monty.json import MontyDecoder
+from monty.json import MontyDecoder, MontyEncoder
 from monty.serialization import dumpfn, loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
@@ -168,6 +169,17 @@ class TestTransformedPDEntry:
         entry = TransformedPDEntry.from_dict(dct)
         assert entry.name == "LiFeO2" == self.transformed_entry.name
         assert entry.energy_per_atom == approx(53.0 / (23 / 15)) == self.transformed_entry.energy_per_atom
+
+    def test_as_from_dict_json(self):
+        # sp_mapping used to be stored with Composition keys (not JSON-serializable)
+        # and from_dict deleted "sp_mapping" from the input dict.
+        dct = json.loads(json.dumps(self.transformed_entry.as_dict(), cls=MontyEncoder))
+        entry = TransformedPDEntry.from_dict(dct)
+        assert "sp_mapping" in dct
+        assert TransformedPDEntry.from_dict(dct).composition == entry.composition
+        assert entry.sp_mapping == self.transformed_entry.sp_mapping
+        assert entry.composition == self.transformed_entry.composition
+        assert entry.energy_per_atom == approx(self.transformed_entry.energy_per_atom)
 
     def test_str(self):
         assert str(self.transformed_entry).startswith("TransformedPDEntry Xf0+0.46666667 Xg")
@@ -1548,6 +1560,18 @@ class TestPhaseDiagramEdgeCases:
         with pytest.raises(ValueError, match="No valid decomp found for"):
             phase_diagram._get_slsqp_decomp(Composition("Li2O"), competing)
 
+    def test_get_slsqp_decomp_fractional_composition(self):
+        # Compositions with fewer than one atom used to bound the amounts below 1,
+        # making the single-phase decomposition infeasible.
+        entries = [PDEntry("Li", -1.9), PDEntry("O2", -9.8), PDEntry("Li2O", -14.3), PDEntry("Li2O2", -19.0)]
+        pd = PhaseDiagram(entries)
+        decomp = phase_diagram._get_slsqp_decomp(Composition({"Li": 0.2, "O": 0.1}), list(pd.stable_entries))
+        assert {e.reduced_formula: amt for e, amt in decomp.items()} == approx({"Li2O": 1})
+
+        frac_entry = PDEntry({"Li": 0.2, "O": 0.1}, -14.3 * 0.1 + 0.03)
+        full_entry = PDEntry("Li2O", -14.3 + 0.3)
+        assert pd.get_phase_separation_energy(frac_entry) == approx(pd.get_phase_separation_energy(full_entry))
+
     def test_chempot_methods_invalid_element(self):
         with pytest.raises(ValueError, match="get_transition_chempots can only be called with elements"):
             self.pd.get_transition_chempots(Element("U"))
@@ -1603,10 +1627,20 @@ class TestGrandPotentialEdgeCases:
     def test_as_from_dict(self):
         dct = self.gppd.as_dict()
         assert dct["@class"] == "GrandPotentialPhaseDiagram"
-        assert dct["chempots"] == {Element("O"): -5}
+        assert dct["chempots"] == {"O": -5}
         gppd = GrandPotentialPhaseDiagram.from_dict(dct)
         assert gppd.chempots == self.gppd.chempots
         assert gppd.elements == self.gppd.elements
+        expected = {e.original_entry.reduced_formula: self.gppd.get_form_energy(e) for e in self.gppd.stable_entries}
+        actual = {e.original_entry.reduced_formula: gppd.get_form_energy(e) for e in gppd.stable_entries}
+        assert actual == approx(expected)
+
+    def test_as_from_dict_json(self):
+        # as_dict used to contain Element keys (not JSON-serializable) and from_dict
+        # wrapped the stored GrandPotPDEntry objects in a second GrandPotPDEntry.
+        gppd = MontyDecoder().decode(json.dumps(self.gppd.as_dict(), cls=MontyEncoder))
+        assert gppd.chempots == {Element("O"): -5}
+        assert all(not isinstance(e.original_entry, GrandPotPDEntry) for e in gppd.all_entries)
         expected = {e.original_entry.reduced_formula: self.gppd.get_form_energy(e) for e in self.gppd.stable_entries}
         actual = {e.original_entry.reduced_formula: gppd.get_form_energy(e) for e in gppd.stable_entries}
         assert actual == approx(expected)
@@ -1634,6 +1668,17 @@ class TestCompoundPhaseDiagramEdgeCases:
         cpd = CompoundPhaseDiagram(entries, [Composition("Li"), Composition("Li2O2")])
         # O2 and LiO8 lie outside the Li-Li2O2 segment (they need a negative amount of Li)
         assert sorted(e.original_entry.reduced_formula for e in cpd.all_entries) == ["Li", "Li2O2"]
+
+    def test_transform_entries_does_not_mutate_input(self):
+        entries = [
+            ComputedEntry("Li", -2, entry_id="mp-1"),
+            ComputedEntry("O2", -8, entry_id="mp-2"),
+            ComputedEntry("Li2O", -15, entry_id="mp-3"),
+        ]
+        cpd = CompoundPhaseDiagram(entries, [Composition("Li"), Composition("Li2O")])
+        assert not any(hasattr(entry, "attribute") for entry in entries)
+        # transformed entries are still labelled with the entry_id
+        assert sorted(e.attribute for e in cpd.all_entries) == ["mp-1", "mp-3"]
 
     def test_transformed_entry_negative_reactant_raises(self):
         sp_mapping = {Composition("Li"): DummySpecies("Xf"), Composition("Li2O2"): DummySpecies("Xg")}
@@ -1881,6 +1926,14 @@ class TestPDPlotterExtra:
         assert len(red_lines) == 2
         assert len(ax.texts) == 2
         assert all(same_color(text.get_color(), "r") for text in ax.texts)
+        plt.close("all")
+
+    def test_plot_element_profile_xlim(self):
+        # the last plateau used to be hard-coded to end at 5 eV regardless of xlim
+        plotter = PDPlotter(self.pd_ternary, backend="matplotlib")
+        ax = plotter.plot_element_profile(Element("O"), Composition("Li2O"), xlim=10)
+        assert ax.get_xlim() == (0, 10)
+        assert max(max(line.get_xdata()) for line in ax.get_lines()) == approx(10)
         plt.close("all")
 
     def test_chempot_range_map_plot(self):

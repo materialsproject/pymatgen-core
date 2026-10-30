@@ -5,6 +5,7 @@ import gzip
 import orjson
 from monty.json import MontyDecoder
 
+from pymatgen.core import Lattice, Structure
 from pymatgen.symmetry import site_symmetries as ss
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -52,3 +53,18 @@ class TestSiteSymmetries(MatSciTest):
             )
         )
         assert shared_ops == self.shared_ops
+
+    def test_get_site_symmetries_disordered(self):
+        # CsCl-type cell with a mixed-occupancy site: both sites have the full m-3m point group
+        struct = Structure(Lattice.cubic(4), [{"Na": 0.5, "K": 0.5}, "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        point_ops = ss.get_site_symmetries(struct)
+        assert [len(ops) for ops in point_ops] == [48, 48]
+
+    def test_get_site_symmetries_keeps_magmom(self):
+        # A-type AFM simple cubic: ferromagnetic (001) layers stacked antiparallel. The magnetic
+        # order lowers each site group from m-3m (48) to 4/mmm (16); magmom used to be dropped.
+        struct = Structure(Lattice.cubic(2.5), ["Fe"], [[0, 0, 0]]) * (2, 2, 2)
+        struct.add_site_property("magmom", [1 if site.frac_coords[2] < 0.25 else -1 for site in struct])
+        assert [len(ops) for ops in ss.get_site_symmetries(struct)] == [16] * 8
+        struct.remove_site_property("magmom")
+        assert [len(ops) for ops in ss.get_site_symmetries(struct)] == [48] * 8

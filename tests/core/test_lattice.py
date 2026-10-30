@@ -7,7 +7,7 @@ import pytest
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
-from pymatgen.core.lattice import Lattice, get_points_in_spheres
+from pymatgen.core.lattice import Lattice, get_integer_index, get_points_in_spheres
 from pymatgen.core.operations import SymmOp
 from pymatgen.util.testing import MatSciTest
 
@@ -174,6 +174,31 @@ class TestLattice(MatSciTest):
         assert not _identical(2, 3, 4, 100, 90, 90)
         assert not _identical(2, 3, 4, 90, 100, 90)
         assert not _identical(2, 3, 4, 100, 100, 100)
+
+    def test_get_lll_reduced_lattice_delta(self):
+        # For this basis delta=0.99 and delta=0.75 give different reduced bases
+        lattice = Lattice([[1, 20, -18], [3, 8, -45], [-1, 16, 9]])
+        for delta in (0.99, 0.75):
+            assert_allclose(lattice.get_lll_reduced_lattice(delta=delta).matrix, lattice._calculate_lll(delta=delta)[0])
+        assert not np.allclose(
+            lattice.get_lll_reduced_lattice(delta=0.99).matrix, lattice.get_lll_reduced_lattice(delta=0.75).matrix
+        )
+
+    @pytest.mark.parametrize("miller", [[1, 2, 0], np.array([1, 2, 0]), np.array([0.5, 1.0, 0.0])])
+    def test_get_integer_index_input_types(self, miller):
+        orig = np.array(miller, dtype=float)
+        assert get_integer_index(miller) == (1, 2, 0)
+        # The caller's array must not be modified in place
+        assert_allclose(miller, orig)
+
+    def test_get_points_in_spheres_empty_lists_not_aliased(self):
+        lattice = Lattice.cubic(3)
+        nbrs = get_points_in_spheres(
+            np.array([[0.0, 0.0, 0.0]]), np.array([[1.5, 1.5, 1.5], [1.6, 1.6, 1.6]]), 0.1, pbc=True, lattice=lattice
+        )
+        assert nbrs == [[], []]
+        nbrs[0].append("x")
+        assert nbrs[1] == []
 
     def test_get_lll_reduced_lattice(self):
         lattice = Lattice([1, 1, 1, -1, 0, 2, 3, 5, 6])

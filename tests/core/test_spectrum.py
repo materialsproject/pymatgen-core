@@ -18,6 +18,18 @@ class TestSpectrum(MatSciTest):
         self.multi_spec1 = Spectrum(np.arange(0, 10, 0.1), rng.standard_normal((100, 2)))
         self.multi_spec2 = Spectrum(np.arange(0, 10, 0.1), rng.standard_normal((100, 2)))
 
+    def test_normalize_and_smear_integer_y(self):
+        # in-place float ops on an integer y raised UFuncTypeError (and convolve1d truncated)
+        spec = Spectrum([1, 2, 3], [1, 2, 4])
+        spec.normalize(mode="max")
+        assert_allclose(spec.y, [0.25, 0.5, 1])
+
+        spec = Spectrum(np.arange(10), np.array([0, 0, 0, 0, 10, 0, 0, 0, 0, 0]))
+        ref = Spectrum(np.arange(10), np.array([0, 0, 0, 0, 10, 0, 0, 0, 0, 0], dtype=float))
+        spec.smear(1.0)
+        ref.smear(1.0)
+        assert_allclose(spec.y, ref.y)
+
     def test_normalize(self):
         self.spec1.normalize(mode="max")
         assert np.max(self.spec1.y) == approx(1)
