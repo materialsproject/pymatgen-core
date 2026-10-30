@@ -181,7 +181,8 @@ class BandOverlaps(LobsterFile):
                     raise ValueError("number_occ_bands_spin_down has to be specified")
                 num_occ_bands = number_occ_bands_spin_down
 
-            for overlap_matrix in self.band_overlaps["matrices"][spin]:
+            # A spin channel without any problematic k-points has no entry in band_overlaps
+            for overlap_matrix in self.band_overlaps["matrices"].get(spin, []):
                 sub_array = np.asarray(overlap_matrix)[:num_occ_bands, :num_occ_bands]
 
                 if not np.allclose(sub_array, np.identity(num_occ_bands), atol=limit_deviation, rtol=0):

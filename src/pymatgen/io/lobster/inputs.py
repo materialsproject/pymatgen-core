@@ -213,7 +213,7 @@ class Lobsterin(UserDict, MSONable):
         Returns:
             dict: {"Same": same_params, "Different": diff_params}
         """
-        same_params = {}
+        same_params: dict[str, Any] = {}
         diff_params = {}
 
         # Check self
@@ -234,6 +234,8 @@ class Lobsterin(UserDict, MSONable):
                 new_set2 = {value.strip().lower() for value in other[k1]}
                 if new_set1 != new_set2:
                     diff_params[k1] = {"lobsterin1": v1, "lobsterin2": other[k1]}
+                else:
+                    same_params[k1] = v1
 
             # Float/boolean keywords
             elif v1 != other[k1]:
@@ -820,10 +822,10 @@ class Lobsterin(UserDict, MSONable):
         elif option == "onlycobi":
             lobsterin_dict["skipdos"] = True
             lobsterin_dict["skipcohp"] = True
+            lobsterin_dict["skipcoop"] = True
             lobsterin_dict["skipPopulationAnalysis"] = True
             lobsterin_dict["skipGrossPopulation"] = True
             # LOBSTER-4.1.0
-            lobsterin_dict["skipcobi"] = True
             lobsterin_dict["skipMadelungEnergy"] = True
 
         elif option == "onlymadelung":

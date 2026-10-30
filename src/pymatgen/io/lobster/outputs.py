@@ -178,34 +178,21 @@ class Cohpcar:
                         "cells": None,
                     }
 
-                elif label in orb_cohp:
-                    orb_cohp[label] |= {
-                        bond_data["orb_label"]: {
-                            "COHP": cohp,
-                            "ICOHP": icohp,
-                            "orbitals": orbs,
-                            "length": bond_data["length"],
-                            "sites": bond_data["sites"],
-                            "cells": bond_data["cells"],
-                        }
-                    }
                 else:
-                    # Present for LOBSTER versions older than 2.2.0
+                    # LOBSTER versions older than 2.2.0 write only orbital-resolved lines (no total line
+                    # per bond). Then the bond label has to be taken from the "No.<n>:" prefix of each line.
                     if bond_num == 0:
                         older_than_2_2_0 = True
                     if older_than_2_2_0:
-                        bond_num += 1
-                        label = str(bond_num)
+                        label = lines[3 + bond].split(":", 1)[0].strip().removeprefix("No.")
 
-                    orb_cohp[label] = {
-                        bond_data["orb_label"]: {
-                            "COHP": cohp,
-                            "ICOHP": icohp,
-                            "orbitals": orbs,
-                            "length": bond_data["length"],
-                            "sites": bond_data["sites"],
-                            "cells": bond_data["cells"],
-                        }
+                    orb_cohp.setdefault(label, {})[bond_data["orb_label"]] = {
+                        "COHP": cohp,
+                        "ICOHP": icohp,
+                        "orbitals": orbs,
+                        "length": bond_data["length"],
+                        "sites": bond_data["sites"],
+                        "cells": bond_data["cells"],
                     }
 
             else:
@@ -262,12 +249,14 @@ class Cohpcar:
 
         # Present for LOBSTER older than 2.2.0
         if older_than_2_2_0:
-            for bond_str in orb_cohp:
+            for bond_str, orb_data in orb_cohp.items():
+                # Take length and sites from this bond's own orbital entries, not from the last bond parsed
+                first_orb = next(iter(orb_data.values()))
                 cohp_data[bond_str] = {
                     "COHP": None,
                     "ICOHP": None,
-                    "length": bond_data["length"],
-                    "sites": bond_data["sites"],
+                    "length": first_orb["length"],
+                    "sites": first_orb["sites"],
                 }
         self.orb_res_cohp = orb_cohp or None
         self.cohp_data = cohp_data
@@ -755,7 +744,12 @@ class Doscar:
         self._doscar = doscar
         self._is_lcfo = is_lcfo
 
-        self._final_structure = Structure.from_file(structure_file) if structure_file is not None else structure
+        if structure is not None:
+            self._final_structure = structure
+        elif structure_file is not None:
+            self._final_structure = Structure.from_file(structure_file)
+        else:
+            raise ValueError("Either structure_file or structure must be provided.")
 
         self._parse_doscar()
 
@@ -1737,7 +1731,8 @@ class Bandoverlaps(MSONable):
                     raise ValueError("number_occ_bands_spin_down has to be specified")
                 num_occ_bands = number_occ_bands_spin_down
 
-            for overlap_matrix in self.band_overlaps_dict[spin]["matrices"]:
+            # A spin channel without any problematic k-points has no entry in band_overlaps_dict
+            for overlap_matrix in self.band_overlaps_dict.get(spin, {}).get("matrices", []):
                 sub_array = np.asarray(overlap_matrix)[:num_occ_bands, :num_occ_bands]
 
                 if not np.allclose(sub_array, np.identity(num_occ_bands), atol=limit_deviation, rtol=0):
@@ -2310,11 +2305,13 @@ class LobsterMatrices:
             lines: list[str] = cast("list[str]", file.readlines())
         if len(lines) == 0:
             raise RuntimeError("Please check provided input file, it seems to be empty")
+        # Infer the matrix type from the file name only, not from the parent directories
+        basename = os.path.basename(self._filename)
 
         pattern_coeff_hamil_trans = r"(\d+)\s+kpoint\s+(\d+)"  # regex pattern to extract spin and k-point number
         pattern_overlap = r"kpoint\s+(\d+)"  # regex pattern to extract k-point number
 
-        if "hamilton" in self._filename:
+        if "hamilton" in basename:
             if e_fermi is None:
                 raise ValueError("Please provide the fermi energy in eV ")
             (
@@ -2323,21 +2320,21 @@ class LobsterMatrices:
                 self.hamilton_matrices,
             ) = self._parse_matrix(file_data=lines, pattern=pattern_coeff_hamil_trans, e_fermi=e_fermi)
 
-        elif "coefficient" in self._filename:
+        elif "coefficient" in basename:
             (
                 self.onsite_coefficients,
                 self.average_onsite_coefficient,
                 self.coefficient_matrices,
             ) = self._parse_matrix(file_data=lines, pattern=pattern_coeff_hamil_trans, e_fermi=0)
 
-        elif "transfer" in self._filename:
+        elif "transfer" in basename:
             (
                 self.onsite_transfer,
                 self.average_onsite_transfer,
                 self.transfer_matrices,
             ) = self._parse_matrix(file_data=lines, pattern=pattern_coeff_hamil_trans, e_fermi=0)
 
-        elif "overlap" in self._filename:
+        elif "overlap" in basename:
             (
                 self.onsite_overlaps,
                 self.average_onsite_overlaps,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -1915,3 +1916,32 @@ class TestMsonable(MatSciTest):
                 restored = getattr(instance_from_dict, attr_name)
 
                 assert _equals(restored, original)
+
+
+def test_band_overlaps_spin_polarized_without_spin_down_kpoints(tmp_path):
+    """No problematic spin-down k-points must not raise a KeyError in the quality check."""
+    filename = tmp_path / "bandOverlaps.lobster"
+    filename.write_text(
+        "Overlap Matrix (abs) of the orthonormalized projected bands for spin 1\n"
+        " at k-point 0 0 0\n"
+        "maxDeviation is: 0.05\n"
+        "   1 0.01\n"
+        "0.01    1\n"
+    )
+    band_overlaps = BandOverlaps(filename)
+    assert band_overlaps.spins == [Spin.up]
+    assert band_overlaps.has_good_quality_check_occupied_bands(
+        number_occ_bands_spin_up=2, number_occ_bands_spin_down=2, spin_polarized=True
+    )
+    assert not band_overlaps.has_good_quality_check_occupied_bands(
+        number_occ_bands_spin_up=2, number_occ_bands_spin_down=2, spin_polarized=True, limit_deviation=0.001
+    )
+
+
+def test_lobster_matrices_type_from_file_name_only(tmp_path):
+    """The matrix type must be inferred from the file name, not from the parent directories."""
+    directory = tmp_path / "hamilton_coefficient_overlap"
+    directory.mkdir()
+    filename = directory / "C_transferMatrices.lobster.gz"
+    shutil.copy(f"{TEST_DIR}/C_transferMatrices.lobster.gz", filename)
+    assert LobsterMatrices(filename=filename).matrix_type == "transfer"

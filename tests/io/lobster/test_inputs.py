@@ -581,6 +581,29 @@ class TestLobsterin(MatSciTest):
         new_lobsterin.to_json()
 
 
+def test_standard_settings_onlycobi():
+    """'onlycobi' must compute COBIs only, i.e. skip COOPs but not COBIs."""
+    lobsterin = Lobsterin.standard_calculations_from_vasp_files(
+        f"{VASP_IN_DIR}/POSCAR_Fe3O4",
+        f"{VASP_IN_DIR}/INCAR.lobster",
+        dict_for_basis={"Fe": "3d 4p 4s", "O": "2s 2p"},
+        option="onlycobi",
+    )
+    assert "skipcobi" not in lobsterin
+    assert lobsterin["skipcohp"]
+    assert lobsterin["skipcoop"]
+    assert lobsterin["skipdos"]
+
+
+def test_diff_same_list_keywords():
+    """Identical list keywords must be reported under 'Same'."""
+    settings = {"basisfunctions": ["Fe 3d 4s", "O 2p 2s"], "cohpstartenergy": -15.0}
+    diff = Lobsterin(settings).diff(Lobsterin(settings))
+    assert diff["Different"] == {}
+    assert diff["Same"]["basisfunctions"] == settings["basisfunctions"]
+    assert diff["Same"]["cohpstartenergy"] == approx(-15.0)
+
+
 class TestUtils(MatSciTest):
     def test_get_all_possible_basis_combinations(self):
         # this basis is just for testing (not correct)
