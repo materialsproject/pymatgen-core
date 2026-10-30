@@ -64,6 +64,27 @@ class TestSpecieProximityFilter(MatSciTest):
         sf = SpecieProximityFilter({"P": 5})
         assert not sf.test(struct)
 
+    @pytest.mark.parametrize(
+        ("min_dists", "expected"),
+        [
+            ({"Na": 2.9}, True),  # nearest Na-Na is the periodic image at 3 A
+            ({"Na": 3.1}, False),
+            ({"K": 10}, True),  # species not in structure
+            ({"Li": 1.5, "Na": 1.5}, True),  # Li-Na pairs are not checked, only like pairs
+            ({"Li": 2.1}, False),  # Li on the disordered site is 2 A from the pure Li
+            ({"Li": 1.9, "Na": 2.9}, True),
+            ({"Li": 1.9, "Na": 3.1}, False),
+        ],
+    )
+    def test_filter_pairs(self, min_dists, expected):
+        # Na at z = 0 A, Li at z = 1 A, (Li, Mg) at z = 3 A; periodic images are 3 A apart along a and b
+        struct = Structure(
+            Lattice.tetragonal(3, 6),
+            ["Na", "Li", {"Li": 0.5, "Mg": 0.5}],
+            [[0, 0, 0], [0, 0, 1 / 6], [0, 0, 0.5]],
+        )
+        assert SpecieProximityFilter(min_dists).test(struct) is expected
+
     def test_as_from_dict(self):
         sf = SpecieProximityFilter({"Li": 1})
         dct = sf.as_dict()

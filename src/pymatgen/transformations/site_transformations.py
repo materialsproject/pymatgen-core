@@ -271,23 +271,24 @@ class PartialRemoveSitesTransformation(AbstractTransformation):
         start_time = time.perf_counter()
 
         e_matrix = ewald_sum.total_energy_matrix
-        to_delete = []
+        to_delete: list[int] = []
 
         total_removals = sum(num_remove_dict.values())
         removed = dict.fromkeys(num_remove_dict, 0)
         for _ in range(total_removals):
-            max_idx = None
-            max_ene = float("-inf")
-            max_indices = None
-            for indices in num_remove_dict:
-                if removed[indices] < num_remove_dict[indices]:
-                    for ind in indices:
-                        if ind not in to_delete:
-                            energy = sum(e_matrix[:, ind]) + sum(e_matrix[:, ind]) - e_matrix[ind, ind]
-                            if energy > max_ene:
-                                max_idx = ind
-                                max_ene = energy
-                                max_indices = indices
+            # Candidate (group, site) pairs in iteration order, so that argmax picks the same
+            # (first) site as a sequential scan with a strict ">" comparison.
+            candidates = [
+                (indices, ind)
+                for indices in num_remove_dict
+                if removed[indices] < num_remove_dict[indices]
+                for ind in indices
+                if ind not in to_delete
+            ]
+            cand_indices = [ind for _, ind in candidates]
+            # interaction energy of each candidate site with all remaining sites
+            energies = 2 * e_matrix.sum(axis=0)[cand_indices] - e_matrix[cand_indices, cand_indices]
+            max_indices, max_idx = candidates[int(np.argmax(energies))]
             removed[max_indices] += 1
             to_delete.append(max_idx)
             e_matrix[:, max_idx] = 0
@@ -295,7 +296,7 @@ class PartialRemoveSitesTransformation(AbstractTransformation):
         struct = structure.copy()
         struct.remove_sites(to_delete)
         self.logger.debug(f"Minimizing Ewald took {time.perf_counter() - start_time} seconds.")
-        return [{"energy": sum(e_matrix), "structure": struct.get_sorted_structure()}]
+        return [{"energy": float(e_matrix.sum()), "structure": struct.get_sorted_structure()}]
 
     def _complete_ordering(self, structure: Structure, num_remove_dict):
         self.logger.debug("Performing complete ordering...")
@@ -330,6 +331,7 @@ class PartialRemoveSitesTransformation(AbstractTransformation):
                     set(sites_to_remove), set(t_sites), symm_prec=symprec
                 ):
                     already_tested = True
+                    break
 
             if not already_tested:
                 tested_sites.append(sites_to_remove)

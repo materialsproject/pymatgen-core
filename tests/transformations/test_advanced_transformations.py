@@ -12,10 +12,11 @@ from pytest import approx
 
 import pymatgen.transformations.advanced_transformations as advanced
 from pymatgen.command_line.enumlib_caller import _is_enumlib_jl
-from pymatgen.core import Composition, Lattice, Molecule, Species, Structure
+from pymatgen.core import Composition, DummySpecies, Lattice, Molecule, Species, Structure
 from pymatgen.core.energy_models import IsingModel, SymmetryModel
 from pymatgen.core.interface import GrainBoundaryGenerator
 from pymatgen.core.surface import SlabGenerator
+from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.icet import ClusterSpace
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.transformations.advanced_transformations import (
@@ -305,6 +306,36 @@ class TestSubstitutionPredictorTransformation:
         trafo = SubstitutionPredictorTransformation.from_dict(dct)
         assert trafo.threshold == 2, "incorrect threshold passed through dict"
         assert trafo._substitutor.p.alpha == -2, "incorrect alpha passed through dict"
+
+
+@pytest.mark.parametrize("magnetic_site_first", [True, False])
+def test_mag_ordering_ferromagnetic_no_enumeration(magnetic_site_first):
+    # order_parameter=1 needs no enumeration (no enumlib). This used to raise a RuntimeError
+    # when the magnetic site had index 0 and left Spin.up instead of the spin magnitude.
+    nio = Structure.from_spacegroup(225, Lattice.cubic(4.17), ["Ni", "O"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    nio = nio.get_sorted_structure(reverse=not magnetic_site_first)
+    nio.add_site_property("magmom", [0.0] * len(nio))
+    assert (nio[0].specie.symbol == "Ni") is magnetic_site_first
+
+    struct = MagOrderingTransformation({"Ni": 5}, order_parameter=1.0).apply_transformation(nio)
+    assert len(struct) == len(nio)
+    assert struct.composition.reduced_formula == "NiO"
+    assert sorted(str(site.specie) for site in struct) == ["Ni,spin=5"] * 4 + ["O"] * 4
+    assert struct.site_properties["magmom"] == [0.0] * len(nio)
+
+
+def test_mag_ordering_remove_dummy_species():
+    lattice = Lattice.cubic(4.17)
+    struct = Structure(lattice, ["Ni", "O", "Ni"], [[0, 0, 0], [0.5, 0.5, 0.5], [0.5, 0.5, 0]])
+    struct.append(DummySpecies("Mma", spin=Spin.down), [0, 0, 0])
+    struct.append(DummySpecies("Mma", spin=Spin.up), [0.5, 0.5, 0])
+    out = MagOrderingTransformation._remove_dummy_species(struct)
+    assert [site.specie.symbol for site in out] == ["Ni", "O", "Ni"]
+    assert [getattr(site.specie, "spin", None) for site in out] == [Spin.down, None, Spin.up]
+
+    struct.append(DummySpecies("Mma", spin=Spin.up), [0.25, 0.25, 0.25])  # no coincident site
+    with pytest.raises(RuntimeError, match="found 0 sites coincident"):
+        MagOrderingTransformation._remove_dummy_species(struct)
 
 
 @pytest.mark.skipif(not enumlib_present, reason="enum_lib not present.")
