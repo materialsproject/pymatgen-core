@@ -35,6 +35,16 @@ removal PR must reference the deprecation.
 
 ## Recent Breaking Changes
 
+### v2026.10.30
+
+* [breaking] Default Structure.relax/calculate/calc_property to TensorNet-PES-MatPES-r2SCAN-2025.2 by @shyuep in [#260](https://github.com/materialsproject/pymatgen-core/pull/260)
+
+  - `Structure.relax()`, `Structure.calculate()` and `Structure.calc_property()` now default to the r2SCAN foundation potential `TensorNet-PES-MatPES-r2SCAN-2025.2` instead of `TensorNet-MatPES-PBE-v2025.1-PES`. Energies, forces, stresses and relaxed geometries change accordingly; for example, r2SCAN-level energies are not on the PBE scale.
+    - To get PBE-level results (e.g. for Materials Project compatibility), pass `calculator="TensorNet-PES-MatPES-PBE-2025.2"`.
+  - The default `stress_weight` in `Structure.relax()` changes from `0.01` to `1 / 160.21766208` (GPa -> eV/A^3). Pass `stress_weight=0.01` explicitly to keep the old weighting on matgl < 4.0.2; newer matgl rejects it.
+  - The `matcalc` and `mlp` extras now need `matgl>=3.0.0`, and the `matcalc` extra needs `matcalc>=0.5.0`.
+
+
 ### v2026.8.30
 
 * [breaking] Do not record the identity as a rotation axis in PointGroupAnalyzer by @HiroYokoyama in [#134](https://github.com/materialsproject/pymatgen-core/pull/134)
