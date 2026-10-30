@@ -609,6 +609,9 @@ class OrderDisorderedStructureTransformation(AbstractTransformation):
             rand_structures = get_randomly_manipulated_structures(
                 struct=struct, manipulations=manipulations, n_return=n_to_return
             )
+            if self.no_oxi_states:
+                for rand_struct in rand_structures:
+                    rand_struct.remove_oxidation_states()
             if return_ranked_list:
                 return [
                     {"energy": 0.0, "energy_above_minimum": 0.0, "structure": s} for s in rand_structures[:n_to_return]
@@ -851,7 +854,15 @@ class DiscretizeOccupanciesTransformation(AbstractTransformation):
                     raise RuntimeError("Cannot discretize structure within tolerance!")
                 sp[k] = new_occ
 
-        return Structure(structure.lattice, species, structure.frac_coords)
+        return Structure(
+            structure.lattice,
+            species,
+            structure.frac_coords,
+            charge=structure.charge,
+            site_properties=structure.site_properties,
+            labels=structure.labels,
+            properties=structure.properties,
+        )
 
     def __repr__(self):
         return "DiscretizeOccupanciesTransformation"
@@ -941,7 +952,11 @@ class ScaleToRelaxedTransformation(AbstractTransformation):
             match = StructureMatcher()
             s_map = match.get_best_electronegativity_anonymous_mapping(self.unrelaxed_structure, structure)
         else:
-            s_map = self.species_map
+            # accept string keys/values and a list of tuples, as documented
+            s_map = {
+                get_el_sp(key): val if isinstance(val, dict) else get_el_sp(val)
+                for key, val in dict(self.species_map).items()
+            }
 
         params = list(structure.lattice.abc)
         params.extend(structure.lattice.angles)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from shutil import which
+from unittest.mock import patch
 
 import numpy as np
 import orjson
@@ -11,7 +12,7 @@ from pytest import approx
 
 import pymatgen.transformations.advanced_transformations as advanced
 from pymatgen.command_line.enumlib_caller import _is_enumlib_jl
-from pymatgen.core import Lattice, Molecule, Species, Structure
+from pymatgen.core import Composition, Lattice, Molecule, Species, Structure
 from pymatgen.core.energy_models import IsingModel, SymmetryModel
 from pymatgen.core.interface import GrainBoundaryGenerator
 from pymatgen.core.surface import SlabGenerator
@@ -129,6 +130,22 @@ class TestMultipleSubstitutionTransformation:
         struct = Structure(lattice, ["Li+", "Li+", "O2-", "O2-"], coords)
         assert len(trafo.apply_transformation(struct, return_ranked_list=True)) == 2
 
+    def test_apply_transformation_negative_charge(self):
+        # negative charges used to produce a malformed dummy species ("X-2-") and crash
+        trafo = MultipleSubstitutionTransformation("O2-", 0.5, {-2: ["S", "Se"]}, None)
+        coords = [[0, 0, 0], [0.75, 0.75, 0.75], [0.5, 0.5, 0.5], [0.25, 0.25, 0.25]]
+        lattice = [
+            [3.8401979337, 0.00, 0.00],
+            [1.9200989668, 3.3257101909, 0.00],
+            [0.00, -2.2171384943, 3.1355090603],
+        ]
+        struct = Structure(lattice, ["Li+", "Li+", "O2-", "O2-"], coords)
+        outputs = trafo.apply_transformation(struct, return_ranked_list=True)
+        assert [out["structure"].composition for out in outputs] == [
+            Composition({"Li+": 2, "O2-": 1, "S2-": 1}),
+            Composition({"Li+": 2, "O2-": 1, "Se2-": 1}),
+        ]
+
 
 class TestChargeBalanceTransformation:
     def test_apply_transformation(self):
@@ -153,6 +170,20 @@ class TestChargeBalanceTransformation:
         struct_trafo = trafo.apply_transformation(struct)
 
         assert struct_trafo.charge == approx(0, abs=1e-5)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"max_cell_size": None, "max_disordered_sites": 5}])
+def test_enumerate_structure_transformation_ordered_input(kwargs):
+    # Ordered input used to be passed to enumlib anyway (overwriting the copy and
+    # failing) or raise ZeroDivisionError with max_disordered_sites.
+    struct = Structure(Lattice.cubic(4), ["Li+", "Cl-"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    est = EnumerateStructureTransformation(**kwargs)
+    with (
+        patch.object(advanced, "EnumlibAdaptor", side_effect=AssertionError("enumlib should not run")),
+        pytest.warns(UserWarning, match="because it is ordered"),
+    ):
+        out = est.apply_transformation(struct)
+    assert out == struct
 
 
 @pytest.mark.skipif(not enumlib_present, reason="enum_lib not present.")
