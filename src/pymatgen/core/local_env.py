@@ -35,10 +35,12 @@ except Exception:
     openbabel = None
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from typing import Any, Self, TypeAlias
 
     from pymatgen.core.composition import SpeciesLike
     from pymatgen.core.graphs import MoleculeGraph
+    from pymatgen.core.structure import Molecule, Neighbor
 
 
 __author__ = "Shyue Ping Ong, Geoffroy Hautier, Sai Jayaraman, "
@@ -53,11 +55,11 @@ __date__ = "August 17, 2017"
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 with open(f"{MODULE_DIR}/op_params.yaml", encoding="utf-8") as _file:
-    DEFAULT_OP_PARAMS: dict[str, dict[str | int, float] | None] = YAML().load(_file)
+    DEFAULT_OP_PARAMS: dict[str, dict[str | int, float] | None] = YAML(typ="safe").load(_file)
 default_op_params = DEFAULT_OP_PARAMS  # needed externally
 
 with open(f"{MODULE_DIR}/cn_opt_params.yaml", encoding="utf-8") as _file:
-    CN_OPT_PARAMS: dict[int, dict[str, list[str | dict[str, float]]]] = YAML().load(_file)
+    CN_OPT_PARAMS: dict[int, dict[str, list[str | dict[str, float]]]] = YAML(typ="safe").load(_file)
 cn_opt_params = CN_OPT_PARAMS  # needed externally
 
 with open(f"{MODULE_DIR}/ionic_radii.json", "rb") as file:
@@ -131,13 +133,14 @@ class ValenceIonicRadiusEvaluator:
 
             el = site.specie.symbol
             oxi_state = round(site.specie.oxi_state)
-            coord_no = round(vnn.get_cn(self._structure, idx))
+            cn = vnn.get_cn(self._structure, idx)
+            coord_no = round(cn)
             try:
                 tab_oxi_states = sorted(map(int, _ION_RADII[el]))
                 oxi_state = nearest_key(tab_oxi_states, oxi_state)
                 radius = _ION_RADII[el][str(oxi_state)][str(coord_no)]
             except KeyError:
-                new_coord_no = coord_no + (1 if vnn.get_cn(self._structure, idx) - coord_no > 0 else -1)
+                new_coord_no = coord_no + (1 if cn - coord_no > 0 else -1)
                 try:
                     radius = _ION_RADII[el][str(oxi_state)][str(new_coord_no)]
                     coord_no = new_coord_no
@@ -238,6 +241,79 @@ def _handle_disorder(structure: Structure, on_disorder: on_disorder_options):
         site.species = max_specie  # set site species in copied structure to max specie
 
     return structure
+
+
+def _get_filtered_neighbors(
+    structure: Structure | IStructure | Molecule,
+    site: Site,
+    r: float,
+    keep: Callable[[np.ndarray, np.ndarray], np.ndarray],
+) -> tuple[list[PeriodicNeighbor] | list[Neighbor], np.ndarray]:
+    """Get the neighbors of site within r that pass a distance-based filter.
+
+    Equivalent to filtering ``structure.get_neighbors(site, r)`` (same neighbors, same order),
+    but for periodic structures only the neighbors that pass ``keep`` are instantiated as
+    PeriodicNeighbor objects. This matters for strategies that search a generous cutoff
+    (e.g. 10 Å) to keep only a handful of bonded neighbors.
+
+    Args:
+        structure: Structure or Molecule.
+        site: The central site.
+        r: Search radius in Å.
+        keep: Function mapping the arrays of distances and site indices of all neighbors
+            within r to a boolean mask of the neighbors to return. Only called with non-empty arrays.
+
+    Returns:
+        tuple: (kept neighbors, distances of all neighbors within r)
+    """
+    if not isinstance(structure, IStructure):
+        neighbors = structure.get_neighbors(site, r)
+        dists = np.array([nn.nn_distance for nn in neighbors], dtype=float)
+        if not neighbors:
+            return [], dists
+        is_kept = keep(dists, np.array([nn.index for nn in neighbors]))
+        return [nn for nn, keep_nn in zip(neighbors, is_kept, strict=True) if keep_nn], dists
+
+    # Mirrors Structure.get_all_neighbors(r, sites=[site]), including its exclusion of the
+    # central site itself, but defers construction of the neighbor objects.
+    numerical_tol = 1e-8
+    _, points_indices, images, distances = structure.get_neighbor_list(
+        r=r, sites=[cast("PeriodicSite", site)], numerical_tol=numerical_tol
+    )
+    all_sites = structure.sites
+    is_neighbor = np.ones(len(distances), dtype=bool)
+    for idx in np.flatnonzero(distances <= numerical_tol):
+        psite = all_sites[points_indices[idx]]
+        is_neighbor[idx] = (
+            psite.species != site.species
+            or not np.allclose(psite.coords, site.coords, atol=Site.position_atol)
+            or psite.properties != site.properties
+        )
+    points_indices, images, distances = points_indices[is_neighbor], images[is_neighbor], distances[is_neighbor]
+    if len(distances) == 0:
+        return [], distances
+
+    is_kept = keep(distances, points_indices)
+    f_coords = structure.frac_coords[points_indices[is_kept]] + images[is_kept]
+    lattice = structure.lattice
+    kept = []
+    for pindex, image, f_coord, dist in zip(
+        points_indices[is_kept], images[is_kept], f_coords, distances[is_kept], strict=True
+    ):
+        psite = all_sites[pindex]
+        kept.append(
+            PeriodicNeighbor(
+                species=psite.species,
+                coords=f_coord,
+                lattice=lattice,
+                properties=psite.properties,
+                nn_distance=dist,
+                index=pindex,
+                image=tuple(image),
+                label=psite.label,
+            )
+        )
+    return kept, distances
 
 
 class NearNeighbors:
@@ -822,13 +898,24 @@ class VoronoiNN(NearNeighbors):
                 - volume - Volume of Voronoi cell for this face
                 - n_verts - Number of vertices on the facet
         """
+        return self._get_all_voronoi_polyhedra(structure)[0]
+
+    def _get_all_voronoi_polyhedra(self, structure: Structure) -> tuple[list[dict], list[PeriodicSite]]:
+        """Get the Voronoi polyhedra for all sites, see get_all_voronoi_polyhedra.
+
+        Returns:
+            tuple: (polyhedra, root_sites) where root_sites[idx] is the copy of structure[idx]
+                used in the tessellation (and as neighbor "site" in the polyhedra).
+                Unlike the other neighbors, these are not PeriodicNeighbor objects carrying
+                their index and image.
+        """
         # Special case: For atoms with 1 site, the atom in the root image is not
         # included in the get_all_neighbors output. Rather than creating logic to add
         # that atom to the neighbor list, which requires detecting whether it will be
         # translated to reside within the unit cell before neighbor detection, it is
         # less complex to just call the one-by-one operation
         if len(structure) == 1:
-            return [self.get_voronoi_polyhedra(structure, 0)]
+            return [self.get_voronoi_polyhedra(structure, 0)], []
 
         # Assemble the list of neighbors used in the tessellation
         targets = structure.elements if self.targets is None else self.targets
@@ -836,9 +923,13 @@ class VoronoiNN(NearNeighbors):
         # Initialize the list of sites with the atoms in the origin unit cell
         # The `get_all_neighbors` function returns neighbors for each site's image in
         # the original unit cell. We start off with these central atoms to ensure they
-        # are included in the tessellation
-
-        sites = [x.to_unit_cell() for x in structure]
+        # are included in the tessellation. They must not be wrapped into the unit cell:
+        # neighbor images are relative to the (possibly out-of-cell) site coordinates.
+        root_sites = [
+            PeriodicSite(site.species, site.frac_coords, site.lattice, properties=site.properties, label=site.label)
+            for site in structure
+        ]
+        sites = list(root_sites)
         indices = [(idx, 0, 0, 0) for idx in range(len(structure))]
 
         # Get all neighbors within a certain cutoff. Record both the list of these neighbors and the site indices.
@@ -864,10 +955,31 @@ class VoronoiNN(NearNeighbors):
         voro = Voronoi(qvoronoi_input)
 
         # Get the information for each neighbor
-        return [
+        polyhedra = [
             self._extract_cell_info(idx, sites, targets, voro, self.compute_adj_neighbors)
             for idx in root_images.tolist()
         ]
+        return polyhedra, root_sites
+
+    def _get_image_and_index(
+        self, structure: Structure, site: PeriodicSite, root_site_indices: dict[int, int]
+    ) -> tuple[tuple[int, int, int], int]:
+        """Get the image and original site index of a neighbor from get_all_voronoi_polyhedra.
+
+        Args:
+            structure: The structure.
+            site: A neighbor site from the polyhedra.
+            root_site_indices: Map from id() of the root sites (see _get_all_voronoi_polyhedra)
+                to their index in structure. Avoids the O(N) search in _get_original_site.
+
+        Returns:
+            tuple: (image, site_index)
+        """
+        site_index = root_site_indices.get(id(site))
+        if site_index is None:
+            return self._get_image(structure, site), self._get_original_site(structure, site)
+        image = np.around(np.subtract(site.frac_coords, structure[site_index].frac_coords))
+        return tuple(image.astype(int)), site_index
 
     def _extract_cell_info(self, site_idx, sites, targets, voro, compute_adj_neighbors=False):
         """Get the information about a certain atom from the results of a tessellation.
@@ -1028,22 +1140,34 @@ class VoronoiNN(NearNeighbors):
         Returns:
             All nn info for all sites.
         """
-        all_voro_cells = self.get_all_voronoi_polyhedra(structure)
-        return [self._extract_nn_info(structure, cell) for cell in all_voro_cells]
+        all_voro_cells, root_sites = self._get_all_voronoi_polyhedra(structure)
+        root_site_indices = {id(site): idx for idx, site in enumerate(root_sites)}
+        targets = structure.elements if self.targets is None else self.targets
+        return [self._extract_nn_info(structure, cell, targets, root_site_indices) for cell in all_voro_cells]
 
-    def _extract_nn_info(self, structure: Structure, nns):
+    def _extract_nn_info(
+        self,
+        structure: Structure,
+        nns,
+        targets: list | None = None,
+        root_site_indices: dict[int, int] | None = None,
+    ):
         """Given Voronoi NNs, extract the NN info in the form needed by NearestNeighbors.
 
         Args:
             structure (Structure): Structure being evaluated
             nns ([dicts]): Nearest neighbor information for a structure
+            targets (list): Target elements. Defaults to self.targets or all elements in structure.
+            root_site_indices (dict): Map from id() of the root sites of get_all_voronoi_polyhedra
+                to their index in structure.
 
         Returns:
             list[tuple[PeriodicSite, np.ndarray, float]]: tuples of the form
                 (site, image, weight). See nn_info.
         """
         # Get the target information
-        targets = structure.elements if self.targets is None else self.targets
+        if targets is None:
+            targets = structure.elements if self.targets is None else self.targets
 
         # Extract the NN info
         if not nns:  # no neighbors among the target elements
@@ -1053,11 +1177,12 @@ class VoronoiNN(NearNeighbors):
         for nstats in nns.values():
             site = nstats["site"]
             if nstats[self.weight] > self.tol * max_weight and _is_in_targets(site, targets):
+                image, site_index = self._get_image_and_index(structure, site, root_site_indices or {})
                 nn_info = {
                     "site": site,
-                    "image": self._get_image(structure, site),
+                    "image": image,
                     "weight": nstats[self.weight] / max_weight,
-                    "site_index": self._get_original_site(structure, site),
+                    "site_index": site_index,
                 }
 
                 if self.extra_nn_info:
@@ -1140,22 +1265,35 @@ class IsayevNN(VoronoiNN):
             List of near neighbor information for each site. See get_nn_info for the
             format of the data for each site.
         """
-        all_nns = self.get_all_voronoi_polyhedra(structure)
-        return [self._filter_nns(structure, n, nns) for n, nns in enumerate(all_nns)]
+        all_nns, root_sites = self._get_all_voronoi_polyhedra(structure)
+        root_site_indices = {id(site): idx for idx, site in enumerate(root_sites)}
+        targets = structure.elements if self.targets is None else self.targets
+        return [self._filter_nns(structure, n, nns, targets, root_site_indices) for n, nns in enumerate(all_nns)]
 
-    def _filter_nns(self, structure: Structure, n: int, nns: dict[str, Any]) -> list[dict[str, Any]]:
+    def _filter_nns(
+        self,
+        structure: Structure,
+        n: int,
+        nns: dict[str, Any],
+        targets: list | None = None,
+        root_site_indices: dict[int, int] | None = None,
+    ) -> list[dict[str, Any]]:
         """Extract and filter the NN info into the format needed by NearestNeighbors.
 
         Args:
             structure: The structure.
             n: The central site index.
             nns: Nearest neighbor information for the structure.
+            targets: Target elements. Defaults to self.targets or all elements in structure.
+            root_site_indices: Map from id() of the root sites of get_all_voronoi_polyhedra
+                to their index in structure.
 
         Returns:
             See get_nn_info for the format of the returned data.
         """
         # Get the target information
-        targets = structure.elements if self.targets is None else self.targets
+        if targets is None:
+            targets = structure.elements if self.targets is None else self.targets
 
         site = structure[n]
 
@@ -1174,11 +1312,12 @@ class IsayevNN(VoronoiNN):
             # by default VoronoiNN only returns neighbors which share a Voronoi facet
             # therefore we don't need do to additional filtering based on the weight
             if _is_in_targets(nn, targets) and nn_distance <= cov_distance + self.tol:
+                image, site_index = self._get_image_and_index(structure, nn, root_site_indices or {})
                 nn_info = {
                     "site": nn,
-                    "image": self._get_image(structure, nn),
+                    "image": image,
                     "weight": nstats["area"] / max_weight,
-                    "site_index": self._get_original_site(structure, nn),
+                    "site_index": site_index,
                 }
 
                 if self.extra_nn_info:
@@ -1219,6 +1358,13 @@ def _get_elements(site):
         return site.species.elements
 
 
+@lru_cache(maxsize=1)
+def _load_jmol_radii() -> dict[str, Any]:
+    """Load the Jmol/OpenBabel elemental bonding radii table (cached; callers must copy before mutating)."""
+    with open(f"{MODULE_DIR}/bonds_jmol_ob.yaml", encoding="utf-8") as file:
+        return YAML(typ="safe").load(file)
+
+
 class JmolNN(NearNeighbors):
     """
     Determine near-neighbor sites and coordination number using an emulation
@@ -1246,9 +1392,8 @@ class JmolNN(NearNeighbors):
         self.tol = tol
         self.min_bond_distance = min_bond_distance
 
-        # Load elemental radii table
-        with open(f"{MODULE_DIR}/bonds_jmol_ob.yaml", encoding="utf-8") as _file:
-            self.el_radius = YAML().load(_file)
+        # Load elemental radii table (copied so per-instance updates don't leak into the cache)
+        self.el_radius: dict[Any, float] = dict(_load_jmol_radii())
 
         # Update any user preference elemental radii
         if el_radius_updates:
@@ -1398,35 +1543,25 @@ class MinimumDistanceNN(NearNeighbors):
                 neighbor site, its image location, and its weight.
         """
         site = structure[n]
-        neighs_dists = structure.get_neighbors(site, self.cutoff)
-        is_periodic = isinstance(structure, Structure | IStructure)
-        siw = []
+        is_periodic = isinstance(structure, IStructure)
+        neighbors: list[PeriodicNeighbor] | list[Neighbor]
         if self.get_all_sites:
-            for nn in neighs_dists:
-                weight = nn.nn_distance
-                siw.append(
-                    {
-                        "site": nn,
-                        "image": (self._get_image(structure, nn) if is_periodic else None),
-                        "weight": weight,
-                        "site_index": self._get_original_site(structure, nn),
-                    }
-                )
-        elif neighs_dists:
-            min_dist = min(nn.nn_distance for nn in neighs_dists)
-            for nn in neighs_dists:
-                dist = nn.nn_distance
-                if dist < (1 + self.tol) * min_dist:
-                    weight = min_dist / dist
-                    siw.append(
-                        {
-                            "site": nn,
-                            "image": (self._get_image(structure, nn) if is_periodic else None),
-                            "weight": weight,
-                            "site_index": self._get_original_site(structure, nn),
-                        }
-                    )
-        return siw
+            neighbors = structure.get_neighbors(site, self.cutoff)
+            weights = [nn.nn_distance for nn in neighbors]
+        else:
+            neighbors, dists = _get_filtered_neighbors(
+                structure, site, self.cutoff, lambda dists, _: dists < (1 + self.tol) * dists.min()
+            )
+            weights = [dists.min() / nn.nn_distance for nn in neighbors]
+        return [
+            {
+                "site": nn,
+                "image": (self._get_image(structure, nn) if is_periodic else None),
+                "weight": weight,
+                "site_index": self._get_original_site(structure, nn),
+            }
+            for nn, weight in zip(neighbors, weights, strict=True)
+        ]
 
 
 class OpenBabelNN(NearNeighbors):
@@ -1814,40 +1949,13 @@ class MinimumOKeeffeNN(NearNeighbors):
                 of which represents a neighbor site, its image location,
                 and its weight.
         """
-        site = structure[n]
-        neighs_dists = structure.get_neighbors(site, self.cutoff)
-        try:
-            eln = site.specie.element
-        except Exception:
-            eln = site.species_string
-
-        rel_dists_neighs = []
-        for nn in neighs_dists:
-            neigh = nn
-            dist = nn.nn_distance
-            try:
-                el2 = neigh.specie.element
-            except Exception:
-                el2 = neigh.species_string
-            rel_dists_neighs.append([dist / get_okeeffe_distance_prediction(eln, el2), neigh])
-
-        if not rel_dists_neighs:  # no neighbors within cutoff
-            return []
-        siw = []
-        min_rel_dist = min(reldist for reldist, neigh in rel_dists_neighs)
-        for rel_dist, site in rel_dists_neighs:
-            if rel_dist < (1 + self.tol) * min_rel_dist:
-                w = min_rel_dist / rel_dist
-                siw.append(
-                    {
-                        "site": site,
-                        "image": self._get_image(structure, site),
-                        "weight": w,
-                        "site_index": self._get_original_site(structure, site),
-                    }
-                )
-
-        return siw
+        eln = _get_okeeffe_element(structure[n])
+        return _get_min_relative_distance_nn_info(
+            self,
+            structure,
+            n,
+            lambda idx: get_okeeffe_distance_prediction(eln, _get_okeeffe_element(structure[idx])),
+        )
 
 
 class MinimumVIRENN(NearNeighbors):
@@ -1903,29 +2011,66 @@ class MinimumVIRENN(NearNeighbors):
                 and its weight.
         """
         vire = _get_vire(structure)
-        site = vire.structure[n]
-        neighs_dists = vire.structure.get_neighbors(site, self.cutoff)
-        rn = vire.radii[vire.structure[n].species_string]
+        # both properties build a new object on every access, so fetch them once
+        vire_structure, radii = vire.structure, vire.radii
+        rn = radii[vire_structure[n].species_string]
+        return _get_min_relative_distance_nn_info(
+            self, vire_structure, n, lambda idx: radii[vire_structure[idx].species_string] + rn
+        )
 
-        reldists_neighs = [[nn.nn_distance / (vire.radii[nn.species_string] + rn), nn] for nn in neighs_dists]
 
-        if not reldists_neighs:  # no neighbors within cutoff
-            return []
-        siw = []
-        min_reldist = min(reldist for reldist, _neigh in reldists_neighs)
-        for reldist, s in reldists_neighs:
-            if reldist < (1 + self.tol) * min_reldist:
-                w = min_reldist / reldist
-                siw.append(
-                    {
-                        "site": s,
-                        "image": self._get_image(vire.structure, s),
-                        "weight": w,
-                        "site_index": self._get_original_site(vire.structure, s),
-                    }
-                )
+def _get_okeeffe_element(site: Site) -> Element | str:
+    """Get the element of a site used to look up O'Keeffe bond valence parameters."""
+    try:
+        return site.specie.element
+    except Exception:
+        return site.species_string
 
-        return siw
+
+def _get_min_relative_distance_nn_info(
+    strategy: MinimumOKeeffeNN | MinimumVIRENN,
+    structure: Structure,
+    n: int,
+    get_bond_length: Callable[[int], float],
+) -> list[dict[str, Any]]:
+    """Shared implementation of MinimumOKeeffeNN and MinimumVIRENN.
+
+    Neighbors whose relative distance (distance / expected bond length) is within a factor
+    (1 + strategy.tol) of the shortest relative distance are bonded, with weight equal to
+    the shortest relative distance divided by their own.
+
+    Args:
+        strategy: The NearNeighbors object (provides cutoff and tol).
+        structure: Input structure.
+        n: Index of the central site.
+        get_bond_length: Function mapping the index of a neighboring site in structure to
+            the expected bond length between it and site n.
+
+    Returns:
+        list[dict]: near-neighbor info as returned by NearNeighbors.get_nn_info.
+    """
+    bond_lengths: dict[int, float] = {}
+    min_rel_dist = 0.0
+
+    def is_close(dists: np.ndarray, indices: np.ndarray) -> np.ndarray:
+        nonlocal min_rel_dist
+        site_indices = indices.tolist()
+        for idx in set(site_indices) - bond_lengths.keys():
+            bond_lengths[idx] = get_bond_length(idx)
+        rel_dists = dists / np.array([bond_lengths[idx] for idx in site_indices])
+        min_rel_dist = rel_dists.min()
+        return rel_dists < (1 + strategy.tol) * min_rel_dist
+
+    neighbors, _ = _get_filtered_neighbors(structure, structure[n], strategy.cutoff, is_close)
+    return [
+        {
+            "site": nn,
+            "image": strategy._get_image(structure, nn),
+            "weight": min_rel_dist / (nn.nn_distance / bond_lengths[nn.index]),
+            "site_index": strategy._get_original_site(structure, nn),
+        }
+        for nn in neighbors
+    ]
 
 
 def _get_vire(structure: Structure | IStructure):
@@ -2026,7 +2171,7 @@ def get_okeeffe_params(el_symbol):
         dict: atom-size ('r') and electronegativity-related ('c') parameter.
     """
     el = Element(el_symbol)
-    if el not in list(BV_PARAMS):
+    if el not in BV_PARAMS:
         raise RuntimeError(
             "Could not find O'Keeffe parameters for element"
             f' {el_symbol!r} in "BV_PARAMS" dictionary provided by pymatgen'
@@ -2166,6 +2311,13 @@ def site_is_of_motif_type(struct, n, approach="min_dist", delta=0.1, cutoff=10, 
         motif_type = "multiple assignments"
 
     return motif_type
+
+
+def _clipped_arccos(cosines: np.ndarray) -> np.ndarray:
+    """Element-wise arccos of cosines clipped to [-1, 1]; NaN is mapped to -1 (i.e. pi),
+    matching the scalar idiom math.acos(max(-1.0, min(x, 1.0))).
+    """
+    return np.arccos(np.clip(np.nan_to_num(cosines, nan=-1.0), -1.0, 1.0))
 
 
 def gramschmidt(vin, uin):
@@ -2949,34 +3101,20 @@ class LocalStructOrderParams:
         n_neighbors = len(neighsites)
         self._last_nneigh = n_neighbors
 
-        # Prepare angle calculations, if applicable.
-        rij: list[np.ndarray] = []
-        rjk: list[list[np.ndarray]] = []
-        rij_norm: list[np.ndarray] = []
-        rjknorm: list[list[np.ndarray]] = []
+        # Prepare angle calculations, if applicable (vectorized over all neighbors).
+        centvec = centsite.coords
+        neigh_coords = np.array([neigh.coords for neigh in neighsites], dtype=float).reshape(-1, 3)
+        rij_norm = np.empty((0, 3))
         dist: list[float] = []
         distjk_unique: list[float] = []
-        distjk: list[list[float]] = []
-        centvec = centsite.coords
         if self._computerijs:
-            for j, neigh in enumerate(neighsites):
-                rij.append(neigh.coords - centvec)
-                dist.append(float(np.linalg.norm(rij[j])))
-                rij_norm.append(rij[j] / dist[j])
+            rij = neigh_coords - centvec
+            dist_arr = np.linalg.norm(rij, axis=1)
+            rij_norm = rij / dist_arr[:, None]
+            dist = dist_arr.tolist()
         if self._computerjks:
-            for j, neigh in enumerate(neighsites):
-                rjk.append([])
-                rjknorm.append([])
-                distjk.append([])
-                kk = 0
-                for k, neigh_2 in enumerate(neighsites):
-                    if j != k:
-                        rjk[j].append(neigh_2.coords - neigh.coords)
-                        distjk[j].append(float(np.linalg.norm(rjk[j][kk])))
-                        if k > j:
-                            distjk_unique.append(distjk[j][kk])
-                        rjknorm[j].append(rjk[j][kk] / distjk[j][kk])
-                        kk += 1
+            idx_j, idx_k = np.triu_indices(n_neighbors, k=1)
+            distjk_unique = np.linalg.norm(neigh_coords[idx_k] - neigh_coords[idx_j], axis=1).tolist()
         # Initialize OP list and, then, calculate OPs.
         ops: list[float | None] = [0.0 for _t in self._types]
         # norms = [[[] for j in range(nneigh)] for t in self._types]
@@ -3000,7 +3138,7 @@ class LocalStructOrderParams:
         if self._boops:
             thetas = []
             phis = []
-            for vec in rij_norm:
+            for vec in rij_norm.tolist():
                 # z is North pole --> theta between vec and (0, 0, 1)^T.
                 # Because vec is normalized, dot product is simply vec[2].
                 thetas.append(math.acos(max(-1.0, min(vec[2], 1.0))))
@@ -3046,32 +3184,61 @@ class LocalStructOrderParams:
             piover2 = math.pi / 2.0
             onethird = 1 / 3
             twothird = 2 / 3.0
+            # All angles (and azimuths, below) are precomputed with numpy for every
+            # neighbor pair, so that the loops below only do scalar arithmetic.
+            # thetas_all[j][m]: angle between neighbors j and m seen from the central site.
+            thetas_all = _clipped_arccos(rij_norm @ rij_norm.T).tolist()
+            # OPs that receive South-pole contributions from every third neighbor m
+            south_pole_ops = [
+                (idx, param)
+                for idx, (typ, param) in enumerate(zip(self._types, self._params, strict=True))
+                if param is not None
+                and typ
+                in {
+                    "tri_bipyr",
+                    "sq_bipyr",
+                    "pent_bipyr",
+                    "hex_bipyr",
+                    "oct_max",
+                    "sq_plan_max",
+                    "hex_plan_max",
+                    "see_saw_rect",
+                }
+            ]
             for j in range(n_neighbors):  # Neighbor j is put to the North pole.
                 zaxis = rij_norm[j]
+                thetas_j = thetas_all[j]
+                # Gram-Schmidt: parts of all neighbor vectors orthogonal to zaxis, normalized.
+                perps = rij_norm - np.outer(rij_norm @ zaxis / (zaxis @ zaxis), zaxis)
+                perp_norms = np.linalg.norm(perps, axis=1)
+                is_on_axis = perp_norms < very_small
+                on_axis = is_on_axis.tolist()
+                xhats = np.divide(perps, perp_norms[:, None], out=np.zeros_like(perps), where=~is_on_axis[:, None])
+                # phis_j[k][m]: azimuth of neighbor m w.r.t. the prime meridian set by neighbor k.
+                cos_phis = xhats @ xhats.T
+                phis_j = _clipped_arccos(cos_phis).tolist()
+                y_small: list[bool] | None = None
+                phi2s_j: list[list[float]] | None = None
+                if self._comp_azi:
+                    yaxes = np.cross(zaxis, xhats)
+                    y_norms = np.linalg.norm(yaxes, axis=1)
+                    has_yaxis = y_norms > very_small
+                    y_small = (~has_yaxis).tolist()
+                    yhats = np.divide(yaxes, y_norms[:, None], out=np.zeros_like(yaxes), where=has_yaxis[:, None])
+                    # signed azimuth of neighbor m in the (xaxis, yaxis) frame set by neighbor k
+                    phi2s_j = np.arctan2(yhats @ xhats.T, cos_phis).tolist()
+
                 kc = idx = 0
                 for k in range(n_neighbors):  # From neighbor k, we construct
                     if j != k:  # the prime meridian.
                         for idx in range(len(self._types)):
                             qsp_theta[idx][j].append(0.0)
                             norms[idx][j].append(0)
-                        tmp = max(-1.0, min(np.inner(zaxis, rij_norm[k]), 1.0))
-                        thetak = math.acos(tmp)
-                        xaxis = gramschmidt(rij_norm[k], zaxis)
-                        if np.linalg.norm(xaxis) < very_small:
-                            flag_xaxis = True
-                        else:
-                            xaxis /= np.linalg.norm(xaxis)
-                            flag_xaxis = False
-
-                        if self._comp_azi:
-                            flag_yaxis = True
-                            yaxis = np.cross(zaxis, xaxis)
-                            if np.linalg.norm(yaxis) > very_small:
-                                yaxis /= np.linalg.norm(yaxis)
-                                flag_yaxis = False
-                        else:
-                            yaxis = None
-                            flag_yaxis = False
+                        thetak = thetas_j[k]
+                        flag_xaxis = on_axis[k]
+                        flag_yaxis = y_small is not None and y_small[k]
+                        phis_jk = phis_j[k]
+                        phi2s_jk = phi2s_j[k] if phi2s_j is not None else None
 
                         # Contributions of j-i-k angles, where i represents the
                         # central atom and j and k two of the neighbors.
@@ -3162,42 +3329,15 @@ class LocalStructOrderParams:
                                 norms[idx][j][kc] += 1
 
                         for m in range(n_neighbors):
-                            if m not in {j, k} and (not flag_xaxis):
-                                tmp = max(-1.0, min(np.inner(zaxis, rij_norm[m]), 1.0))
-                                thetam = math.acos(tmp)
-                                x_two_axis_tmp = gramschmidt(rij_norm[m], zaxis)
-                                norm = np.linalg.norm(x_two_axis_tmp)
-                                phi2 = 0.0
-                                if norm < very_small:
-                                    flag_xtwoaxis = True
-                                    phi = 0.0
-                                else:
-                                    xtwoaxis = x_two_axis_tmp / norm
-                                    phi = math.acos(max(-1.0, min(np.inner(xtwoaxis, xaxis), 1.0)))
-                                    flag_xtwoaxis = False
-                                    if self._comp_azi:
-                                        phi2 = math.atan2(
-                                            np.dot(xtwoaxis, cast("np.ndarray", yaxis)),
-                                            np.dot(xtwoaxis, xaxis),
-                                        )
+                            if m not in (j, k) and not flag_xaxis:
+                                thetam = thetas_j[m]
+                                flag_xtwoaxis = on_axis[m]
+                                phi = 0.0 if flag_xtwoaxis else phis_jk[m]
+                                phi2 = phi2s_jk[m] if phi2s_jk is not None and not flag_xtwoaxis else 0.0
                                 # South pole contributions of m (for every requested OP type,
                                 # not only the last one in self._types).
-                                for idx, typ in enumerate(self._types):
-                                    if (
-                                        typ
-                                        in {
-                                            "tri_bipyr",
-                                            "sq_bipyr",
-                                            "pent_bipyr",
-                                            "hex_bipyr",
-                                            "oct_max",
-                                            "sq_plan_max",
-                                            "hex_plan_max",
-                                            "see_saw_rect",
-                                        }
-                                        and (param := self._params[idx]) is not None
-                                        and thetam >= param["min_SPP"]
-                                    ):
+                                for idx, param in south_pole_ops:
+                                    if thetam >= param["min_SPP"]:
                                         tmp = param["IGW_SPP"] * (thetam * ipi - 1.0)
                                         qsp_theta[idx][j][kc] += math.exp(-0.5 * tmp * tmp)
                                         norms[idx][j][kc] += 1
@@ -3424,20 +3564,10 @@ class LocalStructOrderParams:
         # neighbors.
         if self._geomops2:
             # Compute all (unique) angles and sort the resulting list.
-            aijs = sorted(
-                [
-                    math.acos(max(-1.0, min(np.inner(r, rij_norm[j]), 1.0)))
-                    for ir, r in enumerate(rij_norm, start=1)
-                    for j in range(ir, len(rij_norm))
-                ]
-            )
+            aijs = sorted(_clipped_arccos(rij_norm @ rij_norm.T)[np.triu_indices(n_neighbors, k=1)].tolist())
 
             # Compute height, side and diagonal length estimates.
-            neighscent = np.array([0.0, 0.0, 0.0])
-            for neigh in neighsites:
-                neighscent += neigh.coords
-            if n_neighbors > 0:
-                neighscent /= float(n_neighbors)
+            neighscent = neigh_coords.mean(axis=0) if n_neighbors > 0 else np.zeros(3)
             h = np.linalg.norm(neighscent - centvec)
             b = min(distjk_unique) if len(distjk_unique) > 0 else 0
             dhalf = max(distjk_unique) / 2 if len(distjk_unique) > 0 else 0
@@ -3462,6 +3592,46 @@ class LocalStructOrderParams:
                             ops[idx] *= math.exp(-0.5 * ((aijs[j] - a) * param[0]) ** 2)  # type: ignore[operator]
 
         return ops
+
+
+def _get_brunner_nn_info(
+    strategy: BrunnerNNReal | BrunnerNNReciprocal | BrunnerNNRelative,
+    structure: Structure,
+    n: int,
+    get_gaps: Callable[[np.ndarray], np.ndarray],
+) -> list[dict[str, Any]]:
+    """Shared implementation of the Brunner neighbor-finding strategies.
+
+    All neighbors closer than the largest gap in the sorted interatomic distances
+    (plus strategy.tol) are bonded, with weight shortest distance / distance.
+
+    Args:
+        strategy: The Brunner NearNeighbors object (provides cutoff and tol).
+        structure: Input structure.
+        n: Index of the central site.
+        get_gaps: Function mapping the sorted distances to the gaps between consecutive
+            distances (real, reciprocal or relative).
+
+    Returns:
+        list[dict]: near-neighbor info as returned by NearNeighbors.get_nn_info.
+    """
+
+    def is_within_gap(dists: np.ndarray, _indices: np.ndarray) -> np.ndarray:
+        sorted_dists = np.sort(dists)
+        # a single neighbor has no gap and is bonded
+        d_max = sorted_dists[np.argmax(get_gaps(sorted_dists))] if len(dists) > 1 else sorted_dists[0]
+        return dists < d_max + strategy.tol
+
+    neighbors, dists = _get_filtered_neighbors(structure, structure[n], strategy.cutoff, is_within_gap)
+    return [
+        {
+            "site": nn,
+            "image": strategy._get_image(structure, nn),
+            "weight": dists.min() / nn.nn_distance,
+            "site_index": strategy._get_original_site(structure, nn),
+        }
+        for nn in neighbors
+    ]
 
 
 class BrunnerNNReciprocal(NearNeighbors):
@@ -3512,27 +3682,7 @@ class BrunnerNNReciprocal(NearNeighbors):
             list[tuples[Site, array, float]]: tuples, each one of which represents a
                 coordinated site, its image location, and its weight.
         """
-        site = structure[n]
-        neighs_dists = structure.get_neighbors(site, self.cutoff)
-        ds = sorted(idx.nn_distance for idx in neighs_dists)
-
-        ns = [1 / ds[idx] - 1 / ds[idx + 1] for idx in range(len(ds) - 1)]
-
-        d_max = ds[ns.index(max(ns))]
-        siw = []
-        for nn in neighs_dists:
-            site, dist = nn, nn.nn_distance
-            if dist < d_max + self.tol:
-                w = ds[0] / dist
-                siw += [
-                    {
-                        "site": site,
-                        "image": self._get_image(structure, site),
-                        "weight": w,
-                        "site_index": self._get_original_site(structure, site),
-                    }
-                ]
-        return siw
+        return _get_brunner_nn_info(self, structure, n, lambda ds: 1 / ds[:-1] - 1 / ds[1:])
 
 
 class BrunnerNNRelative(NearNeighbors):
@@ -3584,27 +3734,7 @@ class BrunnerNNRelative(NearNeighbors):
                 of which represents a coordinated site, its image location,
                 and its weight.
         """
-        site = structure[n]
-        neighs_dists = structure.get_neighbors(site, self.cutoff)
-        ds = sorted(idx.nn_distance for idx in neighs_dists)
-
-        ns = [ds[idx + 1] / ds[idx] for idx in range(len(ds) - 1)]
-
-        d_max = ds[ns.index(max(ns))]
-        siw = []
-        for nn in neighs_dists:
-            s, dist = nn, nn.nn_distance
-            if dist < d_max + self.tol:
-                w = ds[0] / dist
-                siw.append(
-                    {
-                        "site": s,
-                        "image": self._get_image(structure, s),
-                        "weight": w,
-                        "site_index": self._get_original_site(structure, s),
-                    }
-                )
-        return siw
+        return _get_brunner_nn_info(self, structure, n, lambda ds: ds[1:] / ds[:-1])
 
 
 class BrunnerNNReal(NearNeighbors):
@@ -3656,27 +3786,7 @@ class BrunnerNNReal(NearNeighbors):
                 of which represents a coordinated site, its image location,
                 and its weight.
         """
-        site = structure[n]
-        neighs_dists = structure.get_neighbors(site, self.cutoff)
-        ds = sorted(idx.nn_distance for idx in neighs_dists)
-
-        ns = [ds[idx + 1] - ds[idx] for idx in range(len(ds) - 1)]
-
-        d_max = ds[ns.index(max(ns))]
-        siw = []
-        for nn in neighs_dists:
-            s, dist = nn, nn.nn_distance
-            if dist < d_max + self.tol:
-                w = ds[0] / dist
-                siw.append(
-                    {
-                        "site": s,
-                        "image": self._get_image(structure, s),
-                        "weight": w,
-                        "site_index": self._get_original_site(structure, s),
-                    }
-                )
-        return siw
+        return _get_brunner_nn_info(self, structure, n, np.diff)
 
 
 class EconNN(NearNeighbors):

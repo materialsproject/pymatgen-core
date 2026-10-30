@@ -9,7 +9,7 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Element, Lattice, Molecule, Species, Structure
+from pymatgen.core import Element, Lattice, Molecule, PeriodicNeighbor, Species, Structure
 from pymatgen.core.graphs import MoleculeGraph, StructureGraph
 from pymatgen.core.local_env import (
     CN_OPT_PARAMS,
@@ -1878,3 +1878,46 @@ def test_get_radius_helpers(nacl):
     # element without a tabulated covalent radius falls back to the atomic radius
     es_site = Structure(lattice, ["Es"], [[0, 0, 0]])[0]
     assert _get_default_radius(es_site) == Element("Es").atomic_radius
+
+
+@pytest.mark.parametrize("nn_cls", [BrunnerNNReal, BrunnerNNReciprocal, BrunnerNNRelative])
+def test_brunner_nn_fewer_than_two_neighbors(nn_cls):
+    # An H2 dimer in a large box: each H has a single neighbor within the cutoff and hence no
+    # gap between neighbor distances (used to raise "max() arg is an empty sequence").
+    dimer = Structure(Lattice.cubic(20), ["H", "H"], [[0, 0, 0], [0.74, 0, 0]], coords_are_cartesian=True)
+    nn_info = nn_cls(cutoff=3).get_nn_info(dimer, 0)
+    assert [(info["site_index"], info["weight"]) for info in nn_info] == [(1, 1.0)]
+    # no neighbors at all within the cutoff
+    assert nn_cls(cutoff=0.5).get_nn_info(dimer, 0) == []
+    assert nn_cls(cutoff=0.5).get_cn(dimer, 0) == 0
+
+
+@pytest.mark.parametrize("nn", [MinimumDistanceNN(), MinimumDistanceNN(tol=0.5), BrunnerNNReal()], ids=repr)
+def test_distance_nn_matches_get_neighbors(nacl, nn):
+    # Only the kept neighbors are instantiated; check the result against filtering
+    # Structure.get_neighbors, including for a site overlapping another one.
+    struct = nacl.copy()
+    struct.append("Cl", struct[4].frac_coords)
+    for idx in (0, 4, len(struct) - 1):
+        nn_info = nn.get_nn_info(struct, idx)
+        max_dist = max(info["site"].nn_distance for info in nn_info)
+        neighbors = struct.get_neighbors(struct[idx], nn.cutoff)
+        expected = [(nbr.index, nbr.image) for nbr in neighbors if nbr.nn_distance <= max_dist]
+        assert [(info["site_index"], info["image"]) for info in nn_info] == expected
+        assert {type(info["site"]) for info in nn_info} == {PeriodicNeighbor}
+
+
+@pytest.mark.parametrize("nn_cls", [VoronoiNN, IsayevNN])
+def test_voronoi_get_all_nn_info_out_of_cell_coords(nacl, nn_cls):
+    # sites stored outside the unit cell used to break the global tessellation in get_all_nn_info
+    struct = nacl.copy()
+    struct.translate_sites([0, 5], [1, -2, 0.5], frac_coords=True, to_unit_cell=False)
+    for idx, nn_info in enumerate(nn_cls().get_all_nn_info(struct)):
+        assert sorted((info["site_index"], tuple(info["image"])) for info in nn_info) == sorted(
+            (info["site_index"], tuple(info["image"])) for info in nn_cls().get_nn_info(struct, idx)
+        )
+
+
+def test_jmol_nn_radius_updates_are_per_instance():
+    assert JmolNN(el_radius_updates={"Li": 1}).el_radius["Li"] == 1
+    assert JmolNN().el_radius["Li"] == approx(0.68)
