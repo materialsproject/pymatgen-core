@@ -7,6 +7,7 @@ from __future__ import annotations
 import collections
 import collections.abc
 import math
+import numbers
 import os
 import re
 import string
@@ -275,6 +276,12 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """
         if not isinstance(other, type(self) | dict):
             return NotImplemented
+        if isinstance(other, dict):
+            # a plain dict may be keyed by str symbols, which never match Element keys
+            try:
+                other = Composition(other, allow_negative=True)
+            except (ValueError, TypeError):
+                return False
 
         # elements with amounts < Composition.amount_tolerance don't show up
         # in the el_map, so checking len enables us to only check one
@@ -341,14 +348,14 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         """Multiply a Composition by an integer or a float.
         Fe2O3 * 4 -> Fe8O12.
         """
-        if not isinstance(other, int | float):
+        if not isinstance(other, numbers.Real):
             return NotImplemented
         return type(self)({el: amt * other for el, amt in self.items()}, allow_negative=self.allow_negative)
 
     __rmul__ = __mul__
 
     def __truediv__(self, other: object) -> Self:
-        if not isinstance(other, int | float):
+        if not isinstance(other, numbers.Real):
             return NotImplemented
         return type(self)({el: amt / other for el, amt in self.items()}, allow_negative=self.allow_negative)
 
@@ -653,7 +660,9 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         if "block" in category:
             return category[0] in [el.block for el in self.elements]
 
-        return any(getattr(el, f"is_{category}") for el in self.elements)
+        # Element names the rare-earth predicate is_rare_earth, not is_rare_earth_metal
+        attr = "is_rare_earth" if category == "rare_earth_metal" else f"is_{category}"
+        return any(getattr(el, attr) for el in self.elements)
 
     @staticmethod
     def _parse_formula(formula: str, strict: bool = True) -> dict[str, float]:
@@ -684,9 +693,10 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         prototyping formulas. For example, all stoichiometric perovskites have
         anonymized_formula ABC3.
         """
+        # reduce the element amounts, not the per-key ones: Fe2+ Fe3+ O2 is Fe2O2 -> FeO
         reduced = self.element_composition
-        if all(val == int(val) for val in self.values()):
-            reduced /= math.gcd(*(int(i) for i in self.values()))
+        if all(val == int(val) for val in reduced.values()):
+            reduced /= math.gcd(*(int(i) for i in reduced.values()))
 
         anon = ""
         for elem, amt in zip(string.ascii_uppercase, sorted(reduced.values()), strict=False):
@@ -938,7 +948,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 oxidation state across all sites in that composition. If the
                 composition is not charge balanced, an empty list is returned.
         """
-        if len(self.elements) == 1:
+        if len(self.elements) == 1 and target_charge == 0:
             return ({self.elements[0].symbol: 0.0},)
         return self._get_oxi_state_guesses(all_oxi_states, max_sites, oxi_states_override, target_charge)[0]
 
@@ -953,7 +963,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
         Returns:
             Composition: New object with elements remapped according to elem_map.
         """
-        # Drop inapplicable substitutions
+        # Drop inapplicable substitutions (on a copy: don't mutate the caller's dict)
         invalid_elems = [key for key in elem_map if key not in self]
         if invalid_elems:
             warnings.warn(
@@ -961,8 +971,7 @@ class Composition(collections.abc.Hashable, collections.abc.Mapping, MSONable, S
                 f"Problematic element = {invalid_elems}; {self}",
                 stacklevel=2,
             )
-        for elem in invalid_elems:
-            elem_map.pop(elem)
+        elem_map = {key: val for key, val in elem_map.items() if key not in invalid_elems}
 
         # Start with elements that remain unchanged (not in elem_map)
         new_comp = {elem: amount for elem, amount in self.as_dict().items() if elem not in elem_map}

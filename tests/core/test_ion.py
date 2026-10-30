@@ -258,3 +258,19 @@ class TestIon:
         ]
         all_latex = [c.to_latex_string() for c in self.comp]
         assert all_latex == correct_latex
+
+    def test_rmul_div_copy_keep_charge(self):
+        ion = Ion.from_formula("Fe+3")
+        # Composition.__rmul__/__truediv__/copy rebuilt the Ion without its charge
+        assert (2 * ion) == ion * 2 == Ion(Composition("Fe2"), 6)
+        assert ion * 2 / 2 == ion
+        assert ion.copy() == ion
+        assert Ion.from_formula("Fe2[+6]").reduced_composition == ion
+        assert Ion.from_formula("Fe2[+6]").fractional_composition.charge == pytest.approx(3)
+
+    def test_from_formula_square_bracket_groups(self):
+        # square brackets that hold a formula group, not a charge, must be kept
+        expected = Ion(Composition("FeC6N6"), -3)
+        assert Ion.from_formula("[Fe(CN)6]-3") == expected
+        assert Ion.from_formula("Fe[CN]6[-3]") == expected
+        assert Ion.from_formula("[Fe(CN)6][3-]") == expected
