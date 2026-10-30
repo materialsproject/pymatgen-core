@@ -7,7 +7,7 @@ import re
 import textwrap
 import warnings
 from collections import defaultdict, deque
-from functools import partial
+from functools import cache, partial
 from inspect import getfullargspec
 from io import StringIO
 from itertools import groupby
@@ -26,7 +26,6 @@ from pymatgen.symmetry.analyzer import SpacegroupAnalyzer, SpacegroupOperations
 from pymatgen.symmetry.groups import SYMM_DATA, SpaceGroup
 from pymatgen.symmetry.maggroups import MagneticSpaceGroup
 from pymatgen.symmetry.structure import SymmetrizedStructure
-from pymatgen.util.coord import find_in_coord_list_pbc, in_coord_list_pbc
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -309,8 +308,6 @@ class CifParser:
     """
     CIF file parser. Attempt to fix CIFs that are out-of-spec, but will issue warnings
     if corrections applied. These are also stored in the CifParser's warnings attribute.
-    CIF file parser. Attempt to fix CIFs that are out-of-spec, but will issue warnings
-    if corrections applied. These are also stored in the CifParser's errors attribute.
     """
 
     def __init__(
@@ -639,57 +636,66 @@ class CifParser:
         """Generate unique coordinates using coordinates and symmetry
         positions, and their corresponding magnetic moments if supplied.
         """
-        coords_out: list[NDArray] = []
-        labels_out: list[str] = []
+        if magmoms and len(magmoms) != len(coords):
+            raise ValueError("Length of magmoms and coords don't match.")
         labels = labels or {}
+        ops = self.symmetry_operations
+        affine = _stack_affine(ops)
 
-        if magmoms:
-            if len(magmoms) != len(coords):
-                raise ValueError("Length of magmoms and coords don't match.")
+        # Images are deduplicated greedily in (coord, op) order: an image is kept iff it does not
+        # coincide (within site_tolerance, under PBC) with any previously kept image.
+        coords_out = np.empty((len(coords) * len(ops), 3))
+        n_out = 0
+        kept: list[tuple[int, int]] = []  # (coord index, op index) of each kept image
+        for coord_idx, tmp_coord in enumerate(coords):
+            images = _apply_affine(affine, tmp_coord)
+            images -= np.floor(images)
+            is_new = ~_pbc_match_matrix(images, coords_out[:n_out], self._site_tolerance).any(axis=1)
+            if not is_new.any():
+                continue
+            self_match = _pbc_match_matrix(images, images, self._site_tolerance)
+            for op_idx in range(len(ops)):
+                if is_new[op_idx]:
+                    coords_out[n_out] = images[op_idx]
+                    n_out += 1
+                    kept.append((coord_idx, op_idx))
+                    is_new &= ~self_match[op_idx]
 
-            magmoms_out: list[Magmom] = []
-            for tmp_coord, tmp_magmom in zip(coords, magmoms, strict=True):
-                for op in self.symmetry_operations:
-                    coord = op.operate(tmp_coord)
-                    coord = np.array([i - math.floor(i) for i in coord])
-                    if isinstance(op, MagSymmOp):
-                        if lattice is None:
-                            raise ValueError("Lattice cannot be None.")
-                        # Up to this point, magmoms have been defined by components along
-                        # unit crystal axes, while op.rotation_matrix is expressed in
-                        # crystallographic axes. Convert both the moment and the rotation
-                        # matrix to Cartesian coordinates before operating; applying the
-                        # crystallographic-axes rotation matrix to unit-axis components
-                        # directly changes the moment magnitude whenever the op mixes axes
-                        # of unequal length.
-                        magmom_cart = Magmom.from_moment_relative_to_crystal_axes(
-                            cast("tuple[float, float, float]", tmp_magmom), lattice=lattice
-                        )
-                        rot_cart = lattice.matrix.T @ op.rotation_matrix @ np.linalg.inv(lattice.matrix.T)
-                        op_cart = MagSymmOp.from_rotation_and_translation_and_time_reversal(
-                            rot_cart, op.translation_vector, op.time_reversal
-                        )
-                        magmom = op_cart.operate_magmom(magmom_cart)
-                    else:
-                        magmom = Magmom(tmp_magmom)
+        labels_out = [labels.get(coords[coord_idx], "no_label") for coord_idx, _ in kept]
+        coords_list = list(coords_out[:n_out])
 
-                    if not in_coord_list_pbc(coords_out, coord, atol=self._site_tolerance):
-                        coords_out.append(coord)
-                        magmoms_out.append(magmom)
-                        labels_out.append(labels.get(tmp_coord, "no_label"))
+        if not magmoms:
+            return coords_list, [Magmom(0)] * n_out, labels_out
 
-            return coords_out, magmoms_out, labels_out
+        magmoms_out: list[Magmom] = []
+        inv_lattice_t = None
+        for coord_idx, op_idx in kept:
+            op = ops[op_idx]
+            tmp_magmom = magmoms[coord_idx]
+            if not isinstance(op, MagSymmOp):
+                magmoms_out.append(Magmom(tmp_magmom))
+                continue
+            if lattice is None:
+                raise ValueError("Lattice cannot be None.")
+            if inv_lattice_t is None:
+                inv_lattice_t = np.linalg.inv(lattice.matrix.T)
+            # Up to this point, magmoms have been defined by components along
+            # unit crystal axes, while op.rotation_matrix is expressed in
+            # crystallographic axes. Convert both the moment and the rotation
+            # matrix to Cartesian coordinates before operating; applying the
+            # crystallographic-axes rotation matrix to unit-axis components
+            # directly changes the moment magnitude whenever the op mixes axes
+            # of unequal length.
+            magmom_cart = Magmom.from_moment_relative_to_crystal_axes(
+                cast("tuple[float, float, float]", tmp_magmom), lattice=lattice
+            )
+            rot_cart = lattice.matrix.T @ op.rotation_matrix @ inv_lattice_t
+            op_cart = MagSymmOp.from_rotation_and_translation_and_time_reversal(
+                rot_cart, op.translation_vector, op.time_reversal
+            )
+            magmoms_out.append(op_cart.operate_magmom(magmom_cart))
 
-        for tmp_coord in coords:
-            for op in self.symmetry_operations:
-                coord = op.operate(tmp_coord)
-                coord = np.array([i - math.floor(i) for i in coord])
-                if not in_coord_list_pbc(coords_out, coord, atol=self._site_tolerance):
-                    coords_out.append(coord)
-                    labels_out.append(labels.get(tmp_coord, "no_label"))
-
-        dummy_magmoms = [Magmom(0)] * len(coords_out)
-        return coords_out, dummy_magmoms, labels_out
+        return coords_list, magmoms_out, labels_out
 
     def get_lattice(
         self,
@@ -788,9 +794,8 @@ class CifParser:
 
         sub_space_group = partial(re.sub, r"[\s_]", "")
 
-        space_groups = {sub_space_group(key): key for key in SYMM_DATA["space_group_encoding"]}
-
         if not sym_ops:
+            space_groups = _space_group_lookup()
             # Try to parse symbol
             for symmetry_label in (
                 "_symmetry_space_group_name_H-M",
@@ -813,7 +818,7 @@ class CifParser:
                     sg = sub_space_group(sg)
                     try:
                         if spg := space_groups.get(sg):
-                            sym_ops = list(SpaceGroup(spg).symmetry_ops)
+                            sym_ops = list(_space_group_symops(spg))
                             msg = msg_template.format(symmetry_label)
                             warnings.warn(msg, stacklevel=2)
                             self.warnings.append(msg)
@@ -822,8 +827,7 @@ class CifParser:
                         pass
 
                     try:
-                        cod_data = loadfn(Path(__file__).parents[1] / "symmetry" / "symm_ops.json")
-                        for _data in cod_data:
+                        for _data in _cod_symops_data():
                             if sg == re.sub(r"\s+", "", _data["hermann_mauguin"]):
                                 xyz = _data["symops"]
                                 sym_ops = [SymmOp.from_xyz_str(s) for s in xyz]
@@ -848,7 +852,7 @@ class CifParser:
                 if data.data.get(symmetry_label):
                     try:
                         integer = int(str2float(data.data.get(symmetry_label, "")))
-                        sym_ops = list(SpaceGroup.from_int_number(integer).symmetry_ops)
+                        sym_ops = list(_space_group_symops_from_int(integer))
                         break
                     except ValueError:
                         continue
@@ -1032,14 +1036,19 @@ class CifParser:
             coord_to_species: dict[tuple[float, float, float], Composition],
             coord: tuple[float, float, float],
         ) -> tuple[float, float, float] | Literal[False]:
-            """Find site by coordinate."""
+            """Find an existing site that is symmetry-equivalent to coord.
+
+            Returns the first match for the first symmetry operation (in order) that maps
+            coord onto any existing site, or False if there is none.
+            """
+            if not coord_to_species:
+                return False
             coords: list[tuple[float, float, float]] = list(coord_to_species)
-            for op in self.symmetry_operations:
-                frac_coord = op.operate(coord)
-                indices: NDArray = find_in_coord_list_pbc(coords, frac_coord, atol=self._site_tolerance)
-                if len(indices) > 0:
-                    return coords[indices[0]]
-            return False
+            matches = _pbc_match_matrix(_apply_affine(affine, coord), np.array(coords), self._site_tolerance)
+            op_has_match = matches.any(axis=1)
+            if not op_has_match.any():
+                return False
+            return coords[int(np.argmax(matches[np.argmax(op_has_match)]))]
 
         lattice = self.get_lattice(data)
 
@@ -1063,6 +1072,7 @@ class CifParser:
         else:
             self.symmetry_operations = self.get_symops(data)  # type:ignore[assignment]
             magmoms = {}
+        affine = _stack_affine(self.symmetry_operations)
 
         oxi_states = self._parse_oxi_states(data)
 
@@ -1566,6 +1576,58 @@ def str2float(text: str | list[str]) -> float:
             return 0.0
         raise
     raise ValueError(f"{text!s} cannot be converted to float")
+
+
+def _stack_affine(ops: Sequence[SymmOp]) -> NDArray:
+    """Stack the affine matrices of symmetry operations into an (n_ops, 4, 4) array."""
+    return np.array([op.affine_matrix for op in ops])
+
+
+def _apply_affine(affine: NDArray, coord: Sequence[float]) -> NDArray:
+    """Apply a stack of (n_ops, 4, 4) affine matrices to one coordinate, giving (n_ops, 3) images.
+
+    Equivalent to ``[op.operate(coord) for op in ops]`` but in a single numpy call.
+    """
+    return (affine @ np.append(coord, 1.0))[:, :3]
+
+
+def _pbc_match_matrix(coords1: NDArray, coords2: NDArray, atol: float) -> NDArray[np.bool_]:
+    """Boolean (len(coords1), len(coords2)) matrix of which fractional coords coincide
+    within atol along every axis under periodic boundary conditions.
+
+    Same criterion as pymatgen.util.coord.find_in_coord_list_pbc, but for all pairs at once.
+    """
+    frac_dist = coords1[:, None, :] - coords2[None, :, :]
+    frac_dist -= np.round(frac_dist)
+    return np.all(np.abs(frac_dist) < atol, axis=-1)
+
+
+@cache
+def _space_group_lookup() -> dict[str, str]:
+    """Map whitespace/underscore-stripped space group symbols to their keys in SYMM_DATA."""
+    return {re.sub(r"[\s_]", "", key): key for key in SYMM_DATA["space_group_encoding"]}
+
+
+@cache
+def _space_group_symops(symbol: str) -> tuple[SymmOp, ...]:
+    """Symmetry operations of a space group by symbol.
+
+    Cached since building a SpaceGroup's operations is expensive and the SpaceGroup instance
+    cache is weak-referenced, so it does not survive between CIFs.
+    """
+    return tuple(SpaceGroup(symbol).symmetry_ops)
+
+
+@cache
+def _space_group_symops_from_int(int_number: int) -> tuple[SymmOp, ...]:
+    """Symmetry operations of a space group by international number. Cached, see _space_group_symops."""
+    return tuple(SpaceGroup.from_int_number(int_number).symmetry_ops)
+
+
+@cache
+def _cod_symops_data() -> list[dict]:
+    """Space group symbols and symmetry operations from the COD, loaded once."""
+    return loadfn(Path(__file__).parents[1] / "symmetry" / "symm_ops.json")
 
 
 def _clean_species(sp: Element | Species | DummySpecies) -> str:

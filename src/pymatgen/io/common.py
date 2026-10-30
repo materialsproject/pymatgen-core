@@ -341,9 +341,9 @@ class VolumetricData(MSONable):
         a = self.dim
         self._distance_matrix = {} if self._distance_matrix is None else self._distance_matrix
         if ind not in self._distance_matrix or self._distance_matrix[ind]["max_radius"] < radius:
-            coords = []
-            for x, y, z in itertools.product(*(list(range(i)) for i in a)):
-                coords.append([x / a[0], y / a[1], z / a[2]])
+            # Fractional coords of all grid points, in C order of the data grid
+            grid = np.meshgrid(*(np.arange(n) / n for n in a), indexing="ij")
+            coords = np.stack(grid, axis=-1).reshape(-1, 3)
             sites_dist = struct.lattice.get_points_in_sphere(coords, struct[ind].coords, radius)
             self._distance_matrix[ind] = {
                 "max_radius": radius,
@@ -355,13 +355,13 @@ class VolumetricData(MSONable):
         # Use boolean indexing to find all charges within the desired distance.
         inds = data[:, 1] <= radius
         dists = data[inds, 1]
-        data_inds = np.rint(np.mod(list(data[inds, 0]), 1) * np.tile(a, (len(dists), 1))).astype(int)
-        vals = [self.data["diff"][x, y, z] for x, y, z in data_inds]
+        data_inds = np.rint(np.mod(list(data[inds, 0]), 1) * np.asarray(a)).astype(int)
+        vals = self.data["diff"][tuple(data_inds.T)]
 
         hist, edges = np.histogram(dists, bins=nbins, range=(0, radius), weights=vals)
         data = np.zeros((nbins, 2))
         data[:, 0] = edges[1:]
-        data[:, 1] = [sum(hist[0 : i + 1]) / self.ngridpts for i in range(nbins)]
+        data[:, 1] = np.cumsum(hist) / self.ngridpts
         return data
 
     def get_average_along_axis(self, ind: int) -> NDArray:
@@ -469,10 +469,11 @@ class VolumetricData(MSONable):
                     f"{ang_to_bohr * site.coords[2]} \n"
                 )
 
-            for idx, dat in enumerate(self.data[self.data_key].flatten(), start=1):
-                file.write(f"{' ' if dat > 0 else ''}{dat:.6e} ")
-                if idx % 6 == 0:
-                    file.write("\n")
+            # Six values per line; a trailing partial line gets no newline
+            values = [f"{' ' if dat > 0 else ''}{dat:.6e} " for dat in self.data[self.data_key].ravel().tolist()]
+            file.write("\n".join("".join(values[idx : idx + 6]) for idx in range(0, len(values), 6)))
+            if values and len(values) % 6 == 0:
+                file.write("\n")
 
     @classmethod
     def from_cube(cls, filename: PathLike) -> Self:
