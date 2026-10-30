@@ -120,6 +120,41 @@ class TestGruneisenParameterDebyeTempShim:
             gruneisen.debye_temp_phonopy()
 
 
+class TestAverageGruneisen:
+    def test_weights_and_acoustic_modes_index_the_right_axis(self):
+        # frequencies/gruneisen have shape (n_bands, n_qpoints) and multiplicities one entry
+        # per q-point. average_gruneisen used to index the weights by band and take the
+        # first three q-points as the "acoustic modes".
+        rng = np.random.default_rng(0)
+        n_bands, n_qpts = 6, 4
+        freqs = np.sort(rng.uniform(0.5, 8, size=(n_bands, n_qpts)), axis=0)
+        freqs[0, 0] = -0.1  # an imaginary mode, must be skipped
+        gruneisen = rng.uniform(0.5, 2.5, size=(n_bands, n_qpts))
+        multiplicities = np.array([1, 6, 12, 8])
+        grun = GruneisenParameter(
+            qpoints=rng.random((n_qpts, 3)),
+            gruneisen=gruneisen,
+            frequencies=freqs,
+            multiplicities=multiplicities,
+        )
+
+        temp = 300
+        x = freqs * const.tera / (const.value("Boltzmann constant in Hz/K") * temp)
+        cv = np.where(freqs > 0, x**2 * np.exp(x) / np.expm1(x) ** 2, 0)
+        weights = np.broadcast_to(multiplicities, freqs.shape)
+
+        def expected(mask, squared):
+            gamma = gruneisen**2 if squared else gruneisen
+            avg = (weights * cv * gamma)[mask].sum() / (weights * cv)[mask].sum()
+            return np.sqrt(avg) if squared else avg
+
+        positive = freqs >= 0
+        acoustic = positive & (np.arange(n_bands) < 3)[:, None]
+        assert grun.average_gruneisen(t=temp) == approx(expected(positive, squared=True))
+        assert grun.average_gruneisen(t=temp, squared=False) == approx(expected(positive, squared=False))
+        assert grun.average_gruneisen(t=temp, limit_frequencies="acoustic") == approx(expected(acoustic, squared=True))
+
+
 @pytest.mark.skipif(TotalDos is None, reason="Phonopy not present")
 class TestGruneisenParameter(MatSciTest):
     # Parsing the mesh yaml files is slow, so load once per class. Tests must not mutate these objects.
@@ -168,16 +203,16 @@ class TestGruneisenParameter(MatSciTest):
         assert self.gruneisen_obj.phdos.cv(298.15) == approx(45.17772584681599)
 
     def test_average_gruneisen(self):
-        assert self.gruneisen_obj.average_gruneisen() == approx(1.164231026696211)
-        assert self.gruneisen_obj.average_gruneisen(squared=False) == approx(0.849759667411049)
-        assert self.gruneisen_obj.average_gruneisen(limit_frequencies="debye") == approx(0.848865124114612)
-        assert self.gruneisen_obj.average_gruneisen(limit_frequencies="acoustic") == approx(1.283180896570312)
-        assert self.gruneisen_obj_Si.average_gruneisen() == approx(1.1090815951892143)
+        assert self.gruneisen_obj.average_gruneisen() == approx(1.1327827283219214)
+        assert self.gruneisen_obj.average_gruneisen(squared=False) == approx(0.6547326857785946)
+        assert self.gruneisen_obj.average_gruneisen(limit_frequencies="debye") == approx(0.8511832975568538)
+        assert self.gruneisen_obj.average_gruneisen(limit_frequencies="acoustic") == approx(0.8511832975568538)
+        assert self.gruneisen_obj_Si.average_gruneisen() == approx(1.1184641206671346)
 
     def test_thermal_conductivity_slack(self):
-        assert self.gruneisen_obj.thermal_conductivity_slack() == approx(77.97582174520458)
-        assert self.gruneisen_obj.thermal_conductivity_slack(t=300) == approx(88.94562145031158)
-        assert self.gruneisen_obj_Si.thermal_conductivity_slack(t=300) == approx(127.69008331982265)
+        assert self.gruneisen_obj.thermal_conductivity_slack() == approx(82.68257209206129)
+        assert self.gruneisen_obj.thermal_conductivity_slack(t=300) == approx(94.31452714528649)
+        assert self.gruneisen_obj_Si.thermal_conductivity_slack(t=300) == approx(125.4193305607479)
 
     def test_debye_temp_phonopy(self):
         # This is the correct conversion when starting from THz in the debye_freq
