@@ -1174,7 +1174,7 @@ class KPathLatimerMunro(KPathBase):
                 # work on a copy so the caller's structure keeps its magmoms
                 self._structure = self._structure.copy()
                 self._structure.remove_site_property("magmom")
-            sga = SpacegroupAnalyzer(self._structure)
+            sga = SpacegroupAnalyzer(self._structure, symprec=symprec, angle_tolerance=angle_tolerance)
             ops = sga.get_symmetry_operations()
             isomorphic_point_group = [op.rotation_matrix for op in ops]
 
