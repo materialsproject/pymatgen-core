@@ -37,7 +37,6 @@ from pymatgen.analysis.phase_diagram import (
 )
 from pymatgen.core import Composition, DummySpecies, Element
 from pymatgen.core.entries import ComputedEntry, ConstantEnergyAdjustment, EntrySet
-from pymatgen.util.coord import Simplex
 from pymatgen.util.string import htmlify
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -1506,11 +1505,48 @@ class TestPhaseDiagramEdgeCases:
         # Simulate a composition that lies in no simplex (e.g. due to numerical issues)
         comp = Composition("Li2O")
         assert len(self.pd._get_all_facets_and_simplexes(comp)) >= 1
-        with patch.object(Simplex, "in_simplex", return_value=False):
+        no_facets = np.zeros(len(self.pd.facets), dtype=bool)
+        with patch.object(PhaseDiagram, "_in_facets_mask", return_value=no_facets):
             with pytest.raises(RuntimeError, match="No facet found for comp"):
                 self.pd._get_facet_and_simplex(comp)
             with pytest.raises(RuntimeError, match="No facets found for comp"):
                 self.pd._get_all_facets_and_simplexes(comp)
+
+    def test_facet_search_matches_simplex_loop(self):
+        # The vectorized facet search must agree with testing each Simplex in turn
+        tol = PhaseDiagram.numerical_tol / 10
+        for entry in self.pd.all_entries:
+            comp = entry.composition
+            coords = self.pd.pd_coords(comp)
+            expected = [idx for idx, simplex in enumerate(self.pd.simplexes) if simplex.in_simplex(coords, tol)]
+            all_facets = self.pd._get_all_facets_and_simplexes(comp)
+            assert [list(f) for f in all_facets] == [list(self.pd.facets[idx]) for idx in expected]
+            facet, simplex = self.pd._get_facet_and_simplex(comp)
+            assert facet is self.pd.facets[expected[0]]
+            assert simplex is self.pd.simplexes[expected[0]]
+
+    def test_get_all_facet_chempots(self):
+        all_chempots = self.pd._get_all_facet_chempots()
+        assert all_chempots.shape == (len(self.pd.facets), self.pd.dim)
+        for facet, row in zip(self.pd.facets, all_chempots, strict=True):
+            chempots = self.pd._get_facet_chempots(facet)
+            assert_allclose(row, [chempots[el] for el in self.pd.elements], rtol=0, atol=1e-12)
+
+    @pytest.mark.parametrize(
+        ("energies", "elements", "n_facets", "expected"),
+        [
+            # binary without stable compounds: a single facet, no facet boundaries
+            ({"Li": -1, "O": -2, "Li2O2": 0}, ["Li"], 1, set()),
+            # ternary with fewer facets (2) than elements (3)
+            ({"Li": -1, "O": -2, "Fe": -3, "Li2O2": -10}, ["Li", "O"], 2, {"Li2O2", "Fe"}),
+        ],
+    )
+    def test_get_chempot_range_map_few_facets(self, energies, elements, n_facets, expected):
+        pd = PhaseDiagram([PDEntry(formula, energy) for formula, energy in energies.items()])
+        assert len(pd.facets) == n_facets
+        # used to raise IndexError when the PD had fewer facets than elements
+        chempot_ranges = pd.get_chempot_range_map([Element(el) for el in elements])
+        assert {entry.name for entry in chempot_ranges} == expected
 
     def test_get_decomp_and_e_above_hull_warn_on_missing_element(self):
         with pytest.warns(UserWarning, match="Unable to get decomposition for PDEntry : U1"):

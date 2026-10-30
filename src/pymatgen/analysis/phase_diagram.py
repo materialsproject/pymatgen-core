@@ -9,7 +9,7 @@ import os
 import re
 import warnings
 from collections import defaultdict
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, Any, cast, overload
 
 import matplotlib.pyplot as plt
@@ -559,17 +559,13 @@ class PhaseDiagram(MSONable):
         if dim == 1:
             facets = [qhull_data.argmin(axis=0)]
         else:
-            facets = get_facets(qhull_data)
-            final_facets = []
-            for facet in facets:
-                # Skip facets that include the extra point
-                if max(facet) == len(qhull_data) - 1:
-                    continue
-                mat = qhull_data[facet]
-                mat[:, -1] = 1
-                if abs(np.linalg.det(mat)) > 1e-14:
-                    final_facets.append(facet)
-            facets = final_facets
+            all_facets = get_facets(qhull_data)
+            # Skip facets that include the extra point
+            all_facets = all_facets[all_facets.max(axis=1) != len(qhull_data) - 1]
+            # Skip degenerate facets (zero volume in composition space)
+            mats = qhull_data[all_facets]
+            mats[..., -1] = 1
+            facets = list(all_facets[np.abs(np.linalg.det(mats)) > 1e-14])
 
         return {
             "facets": facets,
@@ -615,7 +611,8 @@ class PhaseDiagram(MSONable):
         Returns:
             set[Entry]: unstable entries in the phase diagram. Includes positive formation energy entries.
         """
-        return {e for e in self.all_entries if e not in self.stable_entries}
+        stable = self._stable_entries_set
+        return {e for e in self.all_entries if e not in stable}
 
     @property
     def stable_entries(self) -> set[Entry]:
@@ -624,6 +621,11 @@ class PhaseDiagram(MSONable):
             set[Entry]: of stable entries in the phase diagram.
         """
         return set(self._stable_entries)
+
+    @cached_property
+    def _stable_entries_set(self) -> frozenset[Entry]:
+        """Stable entries as a frozenset, hashed once for fast membership tests."""
+        return frozenset(self._stable_entries)
 
     @lru_cache(1)  # noqa: B019
     def _get_stable_entries_in_space(self, space: set[Element]) -> list[Entry]:
@@ -683,6 +685,24 @@ class PhaseDiagram(MSONable):
         """
         return self.get_form_energy(entry) / entry.composition.num_atoms
 
+    @cached_property
+    def _simplex_aug_invs(self) -> np.ndarray:
+        """Inverse augmented vertex matrices of all simplexes stacked into an array
+        of shape (n_facets, dim, dim), so that the barycentric coordinates of a point
+        with respect to every facet are obtained in a single matmul.
+        """
+        return np.array([simplex._aug_inv for simplex in self.simplexes]).reshape(-1, self.dim, self.dim)
+
+    def _in_facets_mask(self, comp: Composition) -> np.ndarray:
+        """Boolean mask over self.facets flagging the facets that contain a composition.
+        Vectorized equivalent of calling Simplex.in_simplex on every simplex.
+
+        Args:
+            comp (Composition): A composition
+        """
+        bary_coords = np.append(self.pd_coords(comp), 1) @ self._simplex_aug_invs
+        return (bary_coords >= -PhaseDiagram.numerical_tol / 10).all(axis=1)
+
     @lru_cache(1)  # noqa: B019
     def _get_facet_and_simplex(self, comp: Composition) -> tuple[list[int], Simplex]:
         """Get any facet that a composition falls into. Cached so successive
@@ -691,12 +711,11 @@ class PhaseDiagram(MSONable):
         Args:
             comp (Composition): A composition
         """
-        coord = self.pd_coords(comp)
-        for facet, simplex in zip(self.facets, self.simplexes, strict=True):
-            if simplex.in_simplex(cast("Sequence[float]", coord), PhaseDiagram.numerical_tol / 10):
-                return facet, simplex
-
-        raise RuntimeError(f"No facet found for {comp = }")
+        in_facets = self._in_facets_mask(comp)
+        if not in_facets.any():
+            raise RuntimeError(f"No facet found for {comp = }")
+        idx = int(in_facets.argmax())  # first facet containing comp
+        return self.facets[idx], self.simplexes[idx]
 
     def _get_all_facets_and_simplexes(self, comp: Composition) -> list:
         """Get all facets that a composition falls into.
@@ -704,13 +723,7 @@ class PhaseDiagram(MSONable):
         Args:
             comp (Composition): A composition
         """
-        coords = self.pd_coords(comp)
-
-        all_facets = [
-            facet
-            for facet, simplex in zip(self.facets, self.simplexes, strict=True)
-            if simplex.in_simplex(cast("Sequence[float]", coords), PhaseDiagram.numerical_tol / 10)
-        ]
+        all_facets = [self.facets[idx] for idx in np.flatnonzero(self._in_facets_mask(comp))]
 
         if not all_facets:
             raise RuntimeError(f"No facets found for {comp = }")
@@ -727,12 +740,32 @@ class PhaseDiagram(MSONable):
         Returns:
             dict[Element, float]: Chemical potentials for each element in the facet.
         """
-        comp_list = [self.qhull_entries[idx].composition for idx in facet]
-        energy_list = [self.qhull_entries[idx].energy_per_atom for idx in facet]
-        atom_frac_mat = [[c.get_atomic_fraction(e) for e in self.elements] for c in comp_list]
-        chempots = np.linalg.solve(atom_frac_mat, energy_list)
+        atom_fracs, energies = self._qhull_fracs_and_energies
+        indices = np.asarray(facet, dtype=int)
+        chempots = np.linalg.solve(atom_fracs[indices], energies[indices])
 
         return dict(zip(self.elements, chempots, strict=True))
+
+    @cached_property
+    def _qhull_fracs_and_energies(self) -> tuple[np.ndarray, np.ndarray]:
+        """Atomic fractions of self.elements, shape (n_qhull_entries, dim), and energies
+        per atom, shape (n_qhull_entries,), of the qhull entries.
+        """
+        atom_fracs = np.array(
+            [[entry.composition.get_atomic_fraction(el) for el in self.elements] for entry in self.qhull_entries]
+        )
+        energies = np.array([entry.energy_per_atom for entry in self.qhull_entries])
+        return atom_fracs, energies
+
+    def _get_all_facet_chempots(self) -> np.ndarray:
+        """Chemical potentials of self.elements in every facet, solved in one batch.
+
+        Returns:
+            np.ndarray: Shape (n_facets, dim), row i being the chemical potentials in self.facets[i].
+        """
+        atom_fracs, energies = self._qhull_fracs_and_energies
+        facets = np.array(self.facets, dtype=int).reshape(-1, self.dim)
+        return np.linalg.solve(atom_fracs[facets], energies[facets][..., None])[..., 0]
 
     def _get_simplex_intersections(self, c1, c2):
         """Get coordinates of the intersection of the tie line between two compositions
@@ -840,7 +873,7 @@ class PhaseDiagram(MSONable):
         """
         # Avoid computation for stable_entries.
         # NOTE scaled duplicates of stable_entries will not be caught.
-        if check_stable and entry in self.stable_entries:
+        if check_stable and entry in self._stable_entries_set:
             return {entry: 1.0}, 0.0
 
         try:
@@ -1122,10 +1155,7 @@ class PhaseDiagram(MSONable):
         if element not in self.elements:
             raise ValueError("get_transition_chempots can only be called with elements in the phase diagram.")
 
-        critical_chempots = []
-        for facet in self.facets:
-            chempots = self._get_facet_chempots(facet)
-            critical_chempots.append(chempots[element])
+        critical_chempots = self._get_all_facet_chempots()[:, self.elements.index(element)]
 
         clean_pots: list[float] = []
         for c in sorted(critical_chempots):
@@ -1275,37 +1305,33 @@ class PhaseDiagram(MSONable):
             simplices are the sides of the N-1 dim polytope bounding the
             allowable chemical potential range of each entry.
         """
-        all_chempots = []
-        for facet in self.facets:
-            chempots = self._get_facet_chempots(facet)
-            all_chempots.append([chempots[el] for el in self.elements])
+        all_chempots = self._get_all_facet_chempots()
 
         inds = [self.elements.index(el) for el in elements]
 
         if referenced:
-            el_energies = {el: self.el_refs[el].energy_per_atom for el in elements}
+            el_energies = np.array([self.el_refs[el].energy_per_atom for el in elements])
         else:
-            el_energies = dict.fromkeys(elements, 0)
+            el_energies = np.zeros(len(elements))
 
         chempot_ranges = defaultdict(list)
-        vertices = [list(range(len(self.elements)))]
+        # With no more facets than elements, all facets are taken as a single
+        # group (there may be fewer facets than elements, e.g. a binary with no
+        # stable compound has a single facet).
+        vertices = [list(range(len(all_chempots)))]
 
         if len(all_chempots) > len(self.elements):
             vertices = get_facets(all_chempots, joggle=joggle)
 
+        facet_sets = [set(facet) for facet in self.facets]
         for ufacet in vertices:
             for combi in itertools.combinations(ufacet, 2):
-                data1 = self.facets[combi[0]]
-                data2 = self.facets[combi[1]]
-                common_ent_ind = set(data1).intersection(set(data2))
+                common_ent_ind = facet_sets[combi[0]].intersection(facet_sets[combi[1]])
                 if len(common_ent_ind) == len(elements):
-                    common_entries = [self.qhull_entries[idx] for idx in common_ent_ind]
-                    data = np.array(
-                        [[all_chempots[ii][jj] - el_energies[self.elements[jj]] for jj in inds] for ii in combi]
-                    )
+                    data = all_chempots[np.ix_(combi, inds)] - el_energies
                     sim = Simplex(cast("Sequence[Sequence[float]]", data))
-                    for entry in common_entries:
-                        chempot_ranges[entry].append(sim)
+                    for idx in common_ent_ind:
+                        chempot_ranges[self.qhull_entries[idx]].append(sim)
 
         return chempot_ranges
 
