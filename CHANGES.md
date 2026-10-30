@@ -51,17 +51,7 @@
 - PR #192 All spglib calls go through a helper that opts in to spglib's exception-based error handling, removing the spglib 2.7 `DeprecationWarning`s and working across spglib 2.5–3.0. Failed irreducible-mesh and `standardize_cell` calls raise `ValueError`. (by @shyuep)
 - PR #189 Fix 56 mypy errors that appear with optional dependencies installed, and `Slab.symmetrically_remove_atoms` raising `AttributeError`. (by @shyuep)
 - PR #190 Fix an order-dependent `Structure.relax` test failure caused by `patch.dict(sys.modules)`; add explicit UTF-8 encodings and remove deprecated API use, halving test-suite warnings. (by @shyuep)
-- PR #196 Speed up CI: coverage only on the Codecov shard, `--dist worksteal`, and a much faster `CubicSupercellTransformation` orthorhombic search (15.4 s -> 0.7 s on Li3V2(PO4)3). (by @shyuep)
-- PR #172, #174, #176, #178, #182, #184, #185, #186, #187 Test coverage for `core.trajectory`, `core.graphs`, `core.local_env`, `io.abinit.abitimer`, `io.qchem.outputs`, `symmetry.kpath`, `electronic_structure.boltztrap`, `io.vasp.outputs` and `electronic_structure.plotter`, with fixes for the bugs the new tests exposed. (by @shyuep)
-- PR #180 Test coverage for `io.cp2k.inputs` and `io.cp2k.outputs`, fixing 16 bugs plus a Windows-only restart-file matching bug. (by @shyuep)
-- PR #183 Test coverage for `analysis.phase_diagram`, with fixes for the bugs it exposed. (by @shyuep)
-- PR #168, #169, #170, #171, #173, #175, #177, #179, #202, #205, #206, #209, #210, #211 Test-only coverage improvements for `core.ewald`, `core.periodic_table`, `core.adsorption`, `core.entries`, `core.interface`, `core.surface`, `core.structure`, `io.abinit.pseudos`, `alchemy`, `io.lammps.inputs`, `io.xcrysden`, `electronic_structure.boltztrap`, `io.cp2k.outputs` and `analysis.chempot_diagram`. (by @shyuep)
-- PR #203, #204 CI installs enumlib from the Enumlib.jl release binaries (adding macOS coverage); enumlib tests are adapted to Enumlib.jl 0.4.2. (by @shyuep)
-- PR #212 Tests updated for pytest 9.2 `approx()` strictness. (by @shyuep)
-- PR #261 The lint job fetches tags so uv can resolve `matgl>=3`. (by @shyuep)
-- PR #191 Add `.gitattributes` enforcing LF line endings. (by @shyuep)
 - PR #194 Cite the 2026 pymatgen preprint (arXiv:2610.23538) in the README and `CITATION.cff`. (by @Andrew-S-Rosen)
-- PR #197 Bump certifi from 2026.7.22 to 2026.10.19. (by @dependabot)
 
 ## v2026.10.16
 

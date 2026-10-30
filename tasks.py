@@ -205,7 +205,9 @@ def release(ctx: Context, version: str | None = None) -> None:
         raise ValueError("Version must use the YYYY.M.D calendar format")
 
     tag = f"v{version}"
-    if subprocess.run(["git", "status", "--porcelain"], check=True, capture_output=True, text=True).stdout:
+    # Untracked files (e.g. local tool dirs) cannot affect the tagged commit, so only tracked changes block a release.
+    git_status = ["git", "status", "--porcelain", "--untracked-files=no"]
+    if subprocess.run(git_status, check=True, capture_output=True, text=True).stdout:
         raise RuntimeError("Commit or stash all changes before creating a release tag")
     if (
         subprocess.run(
