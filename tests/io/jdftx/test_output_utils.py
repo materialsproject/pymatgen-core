@@ -5,13 +5,22 @@ from __future__ import annotations
 import os
 import re
 
+import numpy as np
 import pytest
+from numpy.testing import assert_array_equal
 
-from pymatgen.io.jdftx._output_utils import find_first_range_key, get_start_lines, read_outfile_slices
+from pymatgen.io.jdftx._output_utils import (
+    _get_nbands_from_bandfile_filepath,
+    _get_orb_label_list,
+    find_first_range_key,
+    get_proj_tju_from_file,
+    get_start_lines,
+    read_outfile_slices,
+)
 from pymatgen.io.jdftx.joutstructures import _get_joutstructures_start_idx
 from pymatgen.io.jdftx.outputs import _find_jdftx_out_file
 
-from .outputs_test_utils import noeigstats_outfile_path
+from .outputs_test_utils import n2_ex_calc_dir, noeigstats_outfile_path
 from .shared_test_utils import write_mt_file
 
 
@@ -96,3 +105,49 @@ def test_read_outfile_slices_keeps_last_line(tmp_path):
     outfile.write_text("".join(lines))
     texts = read_outfile_slices(str(outfile))
     assert texts == [lines[:2], lines[2:]]
+
+
+_NORMALIZED_BANDPROJECTIONS = """2 states, 2 bands, 2 orbital-projections, 1 species
+# Symbol nAtoms nOrbitalsPerAtom lMax nShells(l=0) ... nShells(l=lMax)
+H 2 1 0 1
+#     0  [ +0.0000000 +0.0000000 +0.0000000 ]  0.500000000  spin +1; lines per band, with |projection|^2 per orbital:
+0.1 0.2
+0.3 0.4
+#     1  [ +0.5000000 +0.0000000 +0.0000000 ]  0.500000000  spin +1; lines per band, with |projection|^2 per orbital:
+0.5 0.6
+0.7 0.8
+"""
+
+
+def test_get_proj_tju_from_file_normalized(tmp_path):
+    bandfile = tmp_path / "bandProjections"
+    bandfile.write_text(_NORMALIZED_BANDPROJECTIONS)
+    proj_tju = get_proj_tju_from_file(bandfile)
+    assert proj_tju.dtype == np.float32
+    assert_array_equal(proj_tju, np.arange(1, 9, dtype=np.float32).reshape(2, 2, 2) / np.float32(10))
+    assert _get_orb_label_list(bandfile) == ("H#1(s)", "H#2(s)")
+    assert _get_nbands_from_bandfile_filepath(bandfile) == 2
+
+    # The header is all that is needed for the metadata, so a truncated body does not matter there
+    bandfile.write_text("".join(_NORMALIZED_BANDPROJECTIONS.splitlines(keepends=True)[:5]))
+    assert _get_orb_label_list(bandfile) == ("H#1(s)", "H#2(s)")
+    with pytest.raises(RuntimeError, match="does not match expected length"):
+        get_proj_tju_from_file(bandfile)
+
+    bandfile.write_text("")
+    with pytest.raises(ValueError, match="Provided an empty file"):
+        _get_nbands_from_bandfile_filepath(bandfile)
+
+
+def test_get_proj_tju_from_file_complex():
+    bandfile = n2_ex_calc_dir / "bandProjections"
+    proj_tju = get_proj_tju_from_file(bandfile)
+    assert proj_tju.dtype == np.complex64
+
+    lines = bandfile.read_text().splitlines()
+    nstates, nbands, nproj = (int(lines[0].split()[i]) for i in (0, 2, 4))
+    assert proj_tju.shape == (nstates, nbands, nproj)
+    for istate, iband in [(0, 0), (3, 7), (nstates - 1, nbands - 1)]:
+        values = np.array(lines[3 + istate * (nbands + 1) + 1 + iband].split(), dtype=np.float32)
+        assert_array_equal(proj_tju[istate, iband].real, values[::2])
+        assert_array_equal(proj_tju[istate, iband].imag, values[1::2])

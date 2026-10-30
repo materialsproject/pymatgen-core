@@ -59,6 +59,28 @@ def read_file(file_name: str) -> list[str]:
     return text
 
 
+@check_file_exists
+def _read_bandfile_header(bandfile_filepath: str | Path) -> list[str]:
+    """Read the header lines of a bandProjections file.
+
+    Only the beginning of the file is read: the summary line, the column description line and one line per species,
+    stopping before the first k-point block.
+
+    Args:
+        bandfile_filepath (Path | str): Path to bandprojections file.
+
+    Returns:
+        list[str]: Header lines of the bandprojections file.
+    """
+    header = []
+    with open(bandfile_filepath, encoding="utf-8") as file:
+        for i, line in enumerate(file):
+            if i > 1 and "#" in line:
+                break
+            header.append(line)
+    return header
+
+
 def read_outfile_slices(file_name: str) -> list[list[str]]:
     """
     Read slice of out file into a list of str.
@@ -369,16 +391,10 @@ def _get__from_bandfile_filepath(bandfile_filepath: Path | str, tok_idx: int) ->
     Returns:
         int: Integer from header of bandprojections file.
     """
-    ret_data = None
-    bandfile = read_file(bandfile_filepath)
-    for iLine, line in enumerate(bandfile):
-        tokens = line.split()
-        if iLine == 0:
-            ret_data = int(tokens[tok_idx])
-            break
-    if ret_data is None:
+    header = _read_bandfile_header(bandfile_filepath)
+    if not header:
         raise ValueError("Provided an empty file")
-    return ret_data
+    return int(header[0].split()[tok_idx])
 
 
 def _get_nstates_from_bandfile_filepath(bandfile_filepath: Path | str) -> int:
@@ -439,24 +455,19 @@ def _get_nspecies_from_bandfile_filepath(bandfile_filepath: Path | str) -> int:
 
 
 def _parse_bandfile_reader(bandfile_filepath: str | Path, arr_dtype: TypeAlias, token_parser: Callable) -> NDArray:
-    nstates = _get_nstates_from_bandfile_filepath(bandfile_filepath)
-    nbands = _get_nbands_from_bandfile_filepath(bandfile_filepath)
-    nproj = _get_nproj_from_bandfile_filepath(bandfile_filepath)
-    nspecies = _get_nspecies_from_bandfile_filepath(bandfile_filepath)
-    # Header of length 3, and then each states occupies 1 (header) + nbands lineas
     bandfile = read_file(bandfile_filepath)
-    expected_length = 2 + nspecies + (nstates * (1 + nbands))
+    if not bandfile:
+        raise ValueError("Provided an empty file")
+    header_tokens = bandfile[0].split()
+    nstates, nbands, nproj, nspecies = (int(header_tokens[i]) for i in (0, 2, 4, 6))
+    # Header of length 2 + nspecies, and then each state occupies 1 (header) + nbands lines
+    header_length = 2 + nspecies
+    expected_length = header_length + (nstates * (1 + nbands))
     if not expected_length == len(bandfile):
         raise RuntimeError("Bandprojections file does not match expected length - ensure no edits have been made.")
-    proj_tju: NDArray[arr_dtype] = np.zeros((nstates, nbands, nproj), dtype=arr_dtype)
-    for line, text in enumerate(bandfile):
-        tokens = text.split()
-        if line >= nspecies + 2:
-            istate = (line - (nspecies + 2)) // (nbands + 1)
-            iband = (line - (nspecies + 2)) - istate * (nbands + 1) - 1
-            if iband >= 0 and istate < nstates:
-                proj_tju[istate, iband] = np.array(token_parser(tokens))
-    return proj_tju
+    band_lines = [line for i, line in enumerate(bandfile[header_length:]) if i % (nbands + 1)]
+    values = token_parser("".join(band_lines).split())
+    return np.asarray(values, dtype=arr_dtype).reshape(nstates, nbands, nproj)
 
 
 def _complex_token_parser(tokens: list[str]) -> NDArray[np.complex64]:
@@ -568,13 +579,44 @@ orb_ref_to_o_dict = {
 }
 
 
+def _get_atom_orb_labels_dict(bandfile_filepath: Path, label_shells: bool) -> dict[str, list[str]]:
+    """
+    Return a dictionary mapping each atom symbol to all atomic orbital projection string representations.
+
+    Args:
+        bandfile_filepath (str | Path): The path to the bandfile.
+        label_shells (bool): Whether to prefix the labels with a shell index for species with multiple valence shells
+            of the same angular momentum.
+
+    Returns:
+        dict[str, list[str]]: A dictionary mapping each atom symbol to all atomic orbital projection string
+        representations.
+    """
+    labels_dict: dict[str, list[str]] = {}
+
+    for line in _read_bandfile_header(bandfile_filepath)[2:]:
+        lsplit = line.strip().split()
+        sym = lsplit[0]
+        labels_dict[sym] = []
+        lmax = int(lsplit[3])
+        # Would prefer to use "l" rather than "L" here (as uppercase "L" means something else entirely) but
+        # pr*-c*mm*t thinks "l" is an ambiguous variable name.
+        for L in range(lmax + 1):
+            mls = orb_ref_list[L]
+            nshells = int(lsplit[4 + L])
+            for n in range(nshells):
+                if label_shells and nshells > 1:
+                    labels_dict[sym].extend(f"{n}{ml}" for ml in mls)
+                else:
+                    labels_dict[sym] += mls
+    return labels_dict
+
+
 def _get_atom_orb_labels_map_dict(bandfile_filepath: Path) -> dict[str, list[str]]:
     """
     Return a dictionary mapping each atom symbol to pymatgen-compatible orbital projection string representations.
 
     Identical to _get_atom_orb_labels_ref_dict, but doesn't include the numbers in the labels.
-
-
 
     Args:
         bandfile_filepath (str | Path): The path to the bandfile.
@@ -583,29 +625,7 @@ def _get_atom_orb_labels_map_dict(bandfile_filepath: Path) -> dict[str, list[str
         dict[str, list[str]]: A dictionary mapping each atom symbol to all atomic orbital projection string
         representations.
     """
-    bandfile = read_file(bandfile_filepath)
-    labels_dict: dict[str, list[str]] = {}
-
-    for i, line in enumerate(bandfile):
-        if i > 1:
-            if "#" in line:
-                break
-            lsplit = line.strip().split()
-            sym = lsplit[0]
-            labels_dict[sym] = []
-            lmax = int(lsplit[3])
-            # Would prefer to use "l" rather than "L" here (as uppercase "L" means something else entirely) but
-            # pr*-c*mm*t thinks "l" is an ambiguous variable name.
-            for L in range(lmax + 1):
-                mls = orb_ref_list[L]
-                nshells = int(lsplit[4 + L])
-                for _n in range(nshells):
-                    if nshells > 1:
-                        for ml in mls:
-                            labels_dict[sym].append(f"{ml}")
-                    else:
-                        labels_dict[sym] += mls
-    return labels_dict
+    return _get_atom_orb_labels_dict(bandfile_filepath, label_shells=False)
 
 
 def _get_atom_orb_labels_ref_dict(bandfile_filepath: Path) -> dict[str, list[str]]:
@@ -630,29 +650,7 @@ def _get_atom_orb_labels_ref_dict(bandfile_filepath: Path) -> dict[str, list[str
         dict[str, list[str]]: A dictionary mapping each atom symbol to all atomic orbital projection string
         representations.
     """
-    bandfile = read_file(bandfile_filepath)
-    labels_dict: dict[str, list[str]] = {}
-
-    for i, line in enumerate(bandfile):
-        if i > 1:
-            if "#" in line:
-                break
-            lsplit = line.strip().split()
-            sym = lsplit[0]
-            labels_dict[sym] = []
-            lmax = int(lsplit[3])
-            # Would prefer to use "l" rather than "L" here (as uppercase "L" means something else entirely) but
-            # pr*-c*mm*t thinks "l" is an ambiguous variable name.
-            for L in range(lmax + 1):
-                mls = orb_ref_list[L]
-                nshells = int(lsplit[4 + L])
-                for n in range(nshells):
-                    if nshells > 1:
-                        for ml in mls:
-                            labels_dict[sym].append(f"{n}{ml}")
-                    else:
-                        labels_dict[sym] += mls
-    return labels_dict
+    return _get_atom_orb_labels_dict(bandfile_filepath, label_shells=True)
 
 
 def _get_atom_count_list(bandfile_filepath: Path) -> list[tuple[str, int]]:
@@ -668,17 +666,12 @@ def _get_atom_count_list(bandfile_filepath: Path) -> list[tuple[str, int]]:
     Returns:
         list[tuple[str, int]]: A list of tuples of atom symbols and counts.
     """
-    bandfile = read_file(bandfile_filepath)
     atom_count_list = []
-
-    for i, line in enumerate(bandfile):
-        if i > 1:
-            if "#" in line:
-                break
-            lsplit = line.strip().split()
-            sym = lsplit[0].strip()
-            count = int(lsplit[1].strip())
-            atom_count_list.append((sym, count))
+    for line in _read_bandfile_header(bandfile_filepath)[2:]:
+        lsplit = line.strip().split()
+        sym = lsplit[0].strip()
+        count = int(lsplit[1].strip())
+        atom_count_list.append((sym, count))
     return atom_count_list
 
 
@@ -757,7 +750,6 @@ def _get_orb_label_list(bandfile_filepath: Path) -> tuple[str, ...]:
     """
     labels_dict = _get_atom_orb_labels_ref_dict(bandfile_filepath)
     atom_count_list = _get_atom_count_list(bandfile_filepath)
-    read_file(bandfile_filepath)
     labels_list: list[str] = []
     for ion_tuple in atom_count_list:
         ion = ion_tuple[0]
