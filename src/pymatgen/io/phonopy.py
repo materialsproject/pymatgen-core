@@ -145,16 +145,20 @@ def get_ph_bs_symm_line_from_dict(bands_dict, has_nac=False, labels_dict=None) -
         q_pts.append(q_pos)
         bands = []
         eig_q = []
+        phases = None
         for band in phonon["band"]:
             bands.append(band["frequency"])
             if "eigenvector" in band:
-                eig_b = []
-                for idx, eig_a in enumerate(band["eigenvector"]):
-                    eig_vec = np.zeros(3, complex)
-                    for x in range(3):
-                        eig_vec[x] = eig_a[x][0] + eig_a[x][1] * 1j
-                    eig_b.append(eigvec_to_eigdispl(eig_vec, q_pos, frac_coords[idx], masses[idx]))
-                eig_q.append(eig_b)
+                if phases is None:
+                    # Per-atom factor of eigvec_to_eigdispl, shared by all bands at this q-point
+                    phases = np.array(
+                        [
+                            eigvec_to_eigdispl(1, q_pos, fcoords, mass)
+                            for fcoords, mass in zip(frac_coords, masses, strict=True)
+                        ]
+                    )
+                eig_vec = np.array(band["eigenvector"], dtype=float)  # (n_atoms, 3, [re, im])
+                eig_q.append(phases[:, None] * (eig_vec[..., 0] + eig_vec[..., 1] * 1j))
         frequencies.append(bands)
         if "label" in phonon:
             phonopy_labels_dict[phonon["label"]] = phonon["q-position"]

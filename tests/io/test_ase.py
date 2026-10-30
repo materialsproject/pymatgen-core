@@ -485,3 +485,19 @@ def test_no_ase_err(monkeypatch):
     monkeypatch.setattr(pmg_ase, "NO_ASE_ERR", PackageNotFoundError("AseAtomsAdaptor requires the ASE package."))
     with pytest.raises(PackageNotFoundError, match="AseAtomsAdaptor requires the ASE package"):
         AseAtomsAdaptor.get_atoms(STRUCTURE)
+
+
+def test_get_structure_overlapping_constraints():
+    # An atom in several constraints takes the mask of the first matching constraint type,
+    # in the order [x, y, z] free flags enumerate from all-True to all-False.
+    atoms = ase.Atoms("H4", positions=[[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]], cell=[5, 5, 5], pbc=True)
+    atoms.set_constraint(
+        [ase.constraints.FixAtoms(indices=[0, 1]), ase.constraints.FixCartesian([1, 2], mask=[1, 0, 0])]
+    )
+    structure = AseAtomsAdaptor.get_structure(atoms)
+    assert structure.site_properties["selective_dynamics"] == [
+        [False, False, False],
+        [False, True, True],
+        [False, True, True],
+        [True, True, True],
+    ]

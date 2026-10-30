@@ -225,9 +225,9 @@ class AseAtomsAdaptor:
             del fix_atoms[str([False, False, False])]
             for site in structure:
                 selective_dynamics: ArrayLike = site.properties.get("selective_dynamics")  # type: ignore[assignment]
-                for cmask_str in fix_atoms:
-                    cmask_site = (~np.array(selective_dynamics)).tolist()
-                    fix_atoms[cmask_str][1].append(cmask_str == str(cmask_site))
+                cmask_site = str((~np.array(selective_dynamics)).tolist())
+                for cmask_str, (_, site_mask) in fix_atoms.items():
+                    site_mask.append(cmask_str == cmask_site)
         else:
             fix_atoms = None
 
@@ -358,16 +358,12 @@ class AseAtomsAdaptor:
                     "Only FixAtoms and FixCartesian is supported by Pymatgen. Other constraints will not be set.",
                     stacklevel=2,
                 )
-            sel_dyn = []
-            for atom in atoms:
-                constrained = False
-                for mask, indices in constraint_indices.values():
-                    if atom.index in indices:
-                        sel_dyn.append(mask)
-                        constrained = True
-                        break  # Assume no duplicates
-                if not constrained:
-                    sel_dyn.append([True] * 3)
+            # Each constrained atom takes the mask of the first constraint type containing it
+            index_to_mask: dict[int, list[bool]] = {}
+            for mask, indices in constraint_indices.values():
+                for idx in indices:
+                    index_to_mask.setdefault(idx, mask)
+            sel_dyn = [index_to_mask.get(idx, [True] * 3) for idx in range(len(atoms))]
         else:
             sel_dyn = None
 

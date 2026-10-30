@@ -1343,3 +1343,64 @@ def test_cif_writer_non_unique_labels(capsys):
     stdout, stderr = capsys.readouterr()
     assert stdout == ""
     assert stderr == ""
+
+
+def _p1bar_cif(atom_sites: str, symops: str = "'x, y, z'\n'-x, -y, -z'") -> str:
+    return f"""data_test
+_cell_length_a 5.0
+_cell_length_b 6.0
+_cell_length_c 7.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_symmetry_equiv_pos_as_xyz
+{symops}
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+{atom_sites}
+"""
+
+
+def test_cif_parser_merges_symmetry_equivalent_sites():
+    # Co1 is the inversion image of Fe1, so both must merge into one disordered orbit
+    cif_str = _p1bar_cif("Fe1 Fe 0.1 0.2 0.3 0.5\nCo1 Co 0.9 0.8 0.7 0.5")
+    struct = CifParser.from_str(cif_str).parse_structures(primitive=False)[0]
+    assert len(struct) == 2
+    assert all(site.species == Composition("Fe0.5Co0.5") for site in struct)
+    assert struct.labels == ["Co1", "Co1"]
+    np.testing.assert_allclose(struct.frac_coords, [[0.1, 0.2, 0.3], [0.9, 0.8, 0.7]])
+
+
+def test_cif_parser_unique_coords_within_site_tolerance():
+    # The inversion image of a site 2e-5 off the inversion center coincides with it within
+    # site_tolerance; the first image (identity op) is kept.
+    cif_str = _p1bar_cif("Li1 Li 0.5 0.5 0.50002 1")
+    struct = CifParser.from_str(cif_str).parse_structures(primitive=False)[0]
+    assert len(struct) == 1
+    assert struct.frac_coords.tolist() == [[0.5, 0.5, 0.50002]]
+
+    parser = CifParser.from_str(cif_str, site_tolerance=1e-6)
+    struct = parser.parse_structures(primitive=False)[0]
+    assert len(struct) == 2
+    np.testing.assert_allclose(struct.frac_coords, [[0.5, 0.5, 0.50002], [0.5, 0.5, 0.49998]])
+
+
+def test_cif_parser_symops_from_space_group_symbol():
+    cif_str = _p1bar_cif("Cu1 Cu 0 0 0 1").replace(
+        "loop_\n_symmetry_equiv_pos_as_xyz\n'x, y, z'\n'-x, -y, -z'\n", "_symmetry_space_group_name_H-M 'Fm-3m'\n"
+    )
+    cif_str = re.sub(r"_cell_length_[bc] [67]\.0", lambda m: m.group()[:-3] + "5.0", cif_str)
+    parsers = [CifParser.from_str(cif_str) for _ in range(2)]
+    structs = [parser.parse_structures(primitive=False)[0] for parser in parsers]
+    for parser, struct in zip(parsers, structs, strict=True):
+        assert len(parser.symmetry_operations) == 192
+        assert len(struct) == 4
+    # Each parser gets its own list of operations, even when they come from a cache
+    assert parsers[0].symmetry_operations == parsers[1].symmetry_operations
+    assert parsers[0].symmetry_operations is not parsers[1].symmetry_operations
