@@ -373,10 +373,10 @@ class Poscar(MSONable):
         if scale < 0:
             # In VASP, a negative scale factor is treated as a volume. We need
             # to translate this to a proper lattice vector scaling.
+            # The same length factor applies to Cartesian coordinates below.
             vol: float = abs(np.linalg.det(lattice))
-            lattice *= (-scale / vol) ** (1 / 3)
-        else:
-            lattice *= scale
+            scale = (-scale / vol) ** (1 / 3)
+        lattice *= scale
 
         # "atomic_symbols" is the "fully expanded" list of symbols,
         # while "symbols" is the list as shown in POSCAR.

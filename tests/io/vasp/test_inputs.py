@@ -219,6 +219,26 @@ direct
         poscar = Poscar.from_file(tmp_poscar_path)
         assert poscar.structure.composition == Composition("H2")
 
+    def test_from_str_negative_scale_cartesian(self):
+        """A negative scale is the cell volume; Cartesian coordinates must be
+        scaled by the same length factor as the lattice (#263).
+        """
+        poscar_str = """test
+-150.0
+1.0 0.0 0.0
+0.0 1.2 0.0
+0.3 0.0 1.1
+Si
+2
+Cartesian
+0 0 0
+1 1 1
+"""
+        poscar = Poscar.from_str(poscar_str)
+        factor = (150.0 / 1.32) ** (1 / 3)
+        assert poscar.structure.volume == approx(150.0)
+        assert_allclose(poscar.structure.cart_coords[1], [factor] * 3)
+
     def test_from_str_default_names(self):
         """Similar to test_from_file_bad_potcar, ensure "default_names"
         (likely read from POTCAR) triggers correct warning/error.
