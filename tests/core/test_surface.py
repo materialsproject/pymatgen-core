@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 
 import pymatgen.core
-from pymatgen.core import Composition, Lattice, Structure
+from pymatgen.core import Composition, Element, Lattice, Structure
 from pymatgen.core.local_env import VoronoiNN
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.core.surface import (
@@ -895,6 +895,14 @@ class TestSlabGenerator(MatSciTest):
         repaired_rev = slab_gen.repair_broken_bonds(slab.copy(), {("O", "P"): 3})
         assert not np.allclose(repaired.frac_coords, slab.frac_coords)
         assert_allclose(repaired_rev.frac_coords, repaired.frac_coords)
+
+    def test_repair_broken_bonds_element_keys(self):
+        # Element keys (as accepted by get_slabs) must repair the same bonds as string keys
+        slab_gen = SlabGenerator(self.get_structure("LiFePO4"), (0, 0, 1), 10, 10, center_slab=True)
+        slab = slab_gen.get_slab()
+        repaired = slab_gen.repair_broken_bonds(slab.copy(), {("P", "O"): 3})
+        repaired_el = slab_gen.repair_broken_bonds(slab.copy(), {(Element("P"), Element("O")): 3})
+        assert_allclose(repaired_el.frac_coords, repaired.frac_coords)
 
 
 class TestReconstructionGenerator(MatSciTest):

@@ -918,7 +918,10 @@ class TestInterface(MatSciTest):
             [[0, 0, 0.1], [0.5, 0.5, 0.2]],
             site_properties={"magmom": [1, 1], "film_only": [1, 1]},
         )
+        substrate_matrix = substrate.lattice.matrix.copy()
         iface = Interface.from_slabs(substrate_slab=substrate, film_slab=film, gap=2.0, vacuum_over_film=5.0)
+        # The input substrate is not modified
+        assert_allclose(substrate.lattice.matrix, substrate_matrix)
         # The substrate c vector is flipped so the lattice is right-handed
         assert np.linalg.det(iface.lattice.matrix) > 0
         assert iface.gap == approx(2.0)

@@ -14,12 +14,11 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import squareform
 
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.sites import PeriodicSite, Site
 from pymatgen.core.structure import Structure
-from pymatgen.core.surface import Slab
+from pymatgen.core.surface import Slab, _get_condensed_pbc_z_distances
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 from .adsorption import AdsorbateSiteFinder
@@ -708,18 +707,9 @@ class GrainBoundaryGenerator:
         )
         index_incident = np.nonzero(t_and_b_dis < np.min(t_and_b_dis) + tol_coi)
 
-        top_labels = []
-        for idx in range(n_sites):
-            if idx in index_incident[0]:
-                top_labels.append("top_incident")
-            else:
-                top_labels.append("top")
-        bottom_labels = []
-        for idx in range(n_sites):
-            if idx in index_incident[1]:
-                bottom_labels.append("bottom_incident")
-            else:
-                bottom_labels.append("bottom")
+        top_incident, bottom_incident = set(index_incident[0].tolist()), set(index_incident[1].tolist())
+        top_labels = ["top_incident" if idx in top_incident else "top" for idx in range(n_sites)]
+        bottom_labels = ["bottom_incident" if idx in bottom_incident else "bottom" for idx in range(n_sites)]
         top_grain = Structure(
             Lattice(top_grain.lattice.matrix),
             top_grain.species,
@@ -2180,24 +2170,10 @@ class GrainBoundaryGenerator:
         else:
             normal_init = False
 
-        jj = np.arange(0, max_j + 1)
-        combination = []
-        for ii in product(jj, repeat=3):
-            if sum(abs(np.array(ii))) != 0:
-                combination.append(list(ii))
-            if len(np.nonzero(ii)[0]) == 3:
-                for i1 in range(3):
-                    new_i = list(ii).copy()
-                    new_i[i1] = -1 * new_i[i1]
-                    combination.append(new_i)
-            elif len(np.nonzero(ii)[0]) == 2:
-                new_i = list(ii).copy()
-                new_i[np.nonzero(ii)[0][0]] = -1 * new_i[np.nonzero(ii)[0][0]]
-                combination.append(new_i)
-
-        for ii in combination:  # type: ignore[assignment]
-            if reduce(math.gcd, ii) == 1:
-                temp = np.dot(np.array(ii), csl)
+        combination = _get_signed_index_combinations(max_j)
+        for indices in combination:
+            if reduce(math.gcd, indices) == 1:
+                temp = np.dot(np.array(indices), csl)
                 if abs(np.dot(temp, surface)) < 1e-8:
                     ab_vector.append(temp)
                 else:
@@ -2231,24 +2207,10 @@ class GrainBoundaryGenerator:
                     break
                 max_j *= 3
                 max_j = min(max_j, max_search)
-                jj = np.arange(0, max_j + 1)
-                combination = []
-                for ii in product(jj, repeat=3):
-                    if sum(abs(np.array(ii))) != 0:
-                        combination.append(list(ii))
-                    if len(np.nonzero(ii)[0]) == 3:
-                        for i1 in range(3):
-                            new_i = list(ii).copy()
-                            new_i[i1] = -1 * new_i[i1]
-                            combination.append(new_i)
-                    elif len(np.nonzero(ii)[0]) == 2:
-                        new_i = list(ii).copy()
-                        new_i[np.nonzero(ii)[0][0]] = -1 * new_i[np.nonzero(ii)[0][0]]
-                        combination.append(new_i)
-
-                for ii in combination:  # type: ignore[assignment]
-                    if reduce(math.gcd, ii) == 1:
-                        temp = np.dot(np.array(ii), csl)
+                combination = _get_signed_index_combinations(max_j)
+                for indices in combination:
+                    if reduce(math.gcd, indices) == 1:
+                        temp = np.dot(np.array(indices), csl)
                         if abs(np.dot(temp, surface)) > 1e-8:
                             c_cross = np.cross(np.matmul(temp, trans), np.matmul(surface, ctrans))
                             if np.linalg.norm(c_cross) < 1e-8:
@@ -2371,6 +2333,36 @@ class GrainBoundaryGenerator:
                 miller[index[0]] = frac[0].numerator * round(com_lcm / frac[0].denominator)
                 miller[index[1]] = frac[1].numerator * round(com_lcm / frac[1].denominator)
         return cast("tuple[int, int, int]", tuple(miller))
+
+
+def _get_signed_index_combinations(max_j: int) -> list[list[int]]:
+    """Get the index combinations searched for GB lattice vectors in slab_from_csl.
+
+    These are all non-zero (i, j, k) with 0 <= i, j, k <= max_j, each followed by its
+    variants with one index negated: each of the three for three non-zero indices,
+    or the first non-zero one for two non-zero indices.
+
+    Args:
+        max_j (int): Maximum absolute index.
+
+    Returns:
+        list[list[int]]: The index combinations.
+    """
+    combination: list[list[int]] = []
+    for ii in product(range(max_j + 1), repeat=3):
+        nonzero = [idx for idx, val in enumerate(ii) if val != 0]
+        if nonzero:
+            combination.append(list(ii))
+        if len(nonzero) == 3:
+            for i1 in range(3):
+                new_i = list(ii)
+                new_i[i1] = -new_i[i1]
+                combination.append(new_i)
+        elif len(nonzero) == 2:
+            new_i = list(ii)
+            new_i[nonzero[0]] = -new_i[nonzero[0]]
+            combination.append(new_i)
+    return combination
 
 
 def _hkil_to_hkl(plane: Sequence[int], lat_type: str) -> tuple[int, int, int]:
@@ -2817,6 +2809,8 @@ class Interface(Structure):
         sub_vecs = substrate_slab.lattice.matrix.copy()
         if np.dot(np.cross(*sub_vecs[:2]), sub_vecs[2]) < 0:
             sub_vecs[2] *= -1.0
+            # Copy first, so a substrate passed as a plain Structure is not modified
+            substrate_slab = substrate_slab.copy()
             substrate_slab.lattice = Lattice(sub_vecs)
 
         # Find the limits of C-coords
@@ -2903,19 +2897,7 @@ def label_termination(slab: Structure, ftol: float = 0.25, t_idx: int | None = N
         sp_symbol = SpacegroupAnalyzer(slab, symprec=0.1).get_space_group_symbol()
         return f"{form}_{sp_symbol}_{len(slab)}"
 
-    dist_matrix = np.zeros((n, n))
-    h = slab.lattice.c
-    # Projection of c lattice vector in
-    # direction of surface normal.
-    for ii, jj in combinations(list(range(n)), 2):
-        if ii != jj:
-            cdist = frac_coords[ii][2] - frac_coords[jj][2]
-            cdist = abs(cdist - round(cdist)) * h
-            dist_matrix[ii, jj] = cdist
-            dist_matrix[jj, ii] = cdist
-
-    condensed_m = squareform(dist_matrix)
-    z = linkage(condensed_m)
+    z = linkage(_get_condensed_pbc_z_distances(frac_coords[:, 2], slab.lattice.c))
     clusters = fcluster(z, ftol, criterion="distance")
 
     clustered_sites: dict[int, list[PeriodicSite]] = {c: [] for c in clusters}
@@ -2941,25 +2923,11 @@ def count_layers(struct: Structure, el: Element | Species | None = None) -> int:
     el = el or struct.elements[0]
     # Match either the exact species string (e.g. "Ti4+") or, for an element, any of its species
     el_sites = [site for site in struct if str(el) in {site.species_string, *(sp.symbol for sp in site.species)}]
-    frac_coords = [site.frac_coords for site in el_sites]
-    n_el_sites = len(frac_coords)
-
-    if n_el_sites == 1:
+    if len(el_sites) == 1:
         return 1
 
-    dist_matrix = np.zeros((n_el_sites, n_el_sites))
-    h = struct.lattice.c
-    # Projection of c lattice vector in
-    # direction of surface normal.
-    for ii, jj in combinations(list(range(n_el_sites)), 2):
-        if ii != jj:
-            cdist = frac_coords[ii][2] - frac_coords[jj][2]
-            cdist = abs(cdist - round(cdist)) * h
-            dist_matrix[ii, jj] = cdist
-            dist_matrix[jj, ii] = cdist
-
-    condensed_m = squareform(dist_matrix)
-    z = linkage(condensed_m)
+    frac_z = [site.frac_coords[2] for site in el_sites]
+    z = linkage(_get_condensed_pbc_z_distances(frac_z, struct.lattice.c))
     clusters = fcluster(z, 0.25, criterion="distance")
 
     clustered_sites: dict[int, list[Site]] = {c: [] for c in clusters}
