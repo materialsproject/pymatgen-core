@@ -60,7 +60,10 @@ class Kpoint(MSONable):
             label (str): The label of the Kpoint if any (None by default).
         """
         self._lattice = lattice
-        self._frac_coords = lattice.get_fractional_coords(coords) if coords_are_cartesian else np.asarray(coords)
+        # Copy so that to_unit_cell (and later caller-side mutation) never touches the input array
+        self._frac_coords = (
+            lattice.get_fractional_coords(coords) if coords_are_cartesian else np.array(coords, dtype=float)
+        )
         self._label = label
 
         if to_unit_cell:
@@ -555,7 +558,7 @@ class BandStructure:
         # Identify and remove duplicates from equivalent k-points
         for i in range(len(points) - 1):
             for j in range(i + 1, len(points)):
-                if np.allclose(pbc_diff(points[i], points[j]), [0, 0, 0], tol):
+                if np.allclose(pbc_diff(points[i], points[j]), [0, 0, 0], atol=tol):
                     rm_list.append(i)
                     break
         return np.delete(points, rm_list, axis=0)

@@ -86,87 +86,89 @@ def run_mcsqs(
     original_directory = os.getcwd()
     directory = directory or tempfile.mkdtemp()
     os.chdir(directory)
+    try:
+        if isinstance(scaling, int | float):
+            if scaling % 1 != 0:
+                raise ValueError(f"{scaling=} should be an integer")
+            mcsqs_find_sqs_cmd = ["mcsqs", f"-n {scaling * n_atoms}"]
 
-    if isinstance(scaling, int | float):
-        if scaling % 1 != 0:
-            raise ValueError(f"{scaling=} should be an integer")
-        mcsqs_find_sqs_cmd = ["mcsqs", f"-n {scaling * n_atoms}"]
+        else:
+            # Set supercell to identity (will make supercell with pymatgen)
+            with open("sqscell.out", mode="w", encoding="utf-8") as file:
+                file.write("1\n1 0 0\n0 1 0\n0 0 1\n")
+            structure *= scaling
+            mcsqs_find_sqs_cmd = ["mcsqs", "-rc", f"-n {n_atoms}"]
 
-    else:
-        # Set supercell to identity (will make supercell with pymatgen)
-        with open("sqscell.out", mode="w", encoding="utf-8") as file:
-            file.write("1\n1 0 0\n0 1 0\n0 0 1\n")
-        structure *= scaling
-        mcsqs_find_sqs_cmd = ["mcsqs", "-rc", f"-n {n_atoms}"]
+        structure.to(filename="rndstr.in")
 
-    structure.to(filename="rndstr.in")
+        # Generate clusters
+        mcsqs_generate_clusters_cmd = ["mcsqs"]
+        for num, cutoff in clusters.items():
+            mcsqs_generate_clusters_cmd.append(f"-{num}={cutoff}")
 
-    # Generate clusters
-    mcsqs_generate_clusters_cmd = ["mcsqs"]
-    for num, cutoff in clusters.items():
-        mcsqs_generate_clusters_cmd.append(f"-{num}={cutoff}")
+        # Run mcsqs to find clusters
+        with Popen(mcsqs_generate_clusters_cmd) as process:
+            process.communicate()
 
-    # Run mcsqs to find clusters
-    with Popen(mcsqs_generate_clusters_cmd) as process:
-        process.communicate()
+        # Generate SQS structures
+        add_ons = [
+            f"-T {temperature}",
+            f"-wr {wr}",
+            f"-wn {wn}",
+            f"-wd {wd}",
+            f"-tol {tol}",
+        ]
 
-    # Generate SQS structures
-    add_ons = [
-        f"-T {temperature}",
-        f"-wr {wr}",
-        f"-wn {wn}",
-        f"-wd {wd}",
-        f"-tol {tol}",
-    ]
-
-    mcsqs_find_sqs_processes = []
-    if instances and instances > 1:
-        # if multiple instances, run a range of commands using "-ip"
-        for i in range(instances):
-            instance_cmd = [f"-ip {i + 1}"]
-            cmd = mcsqs_find_sqs_cmd + add_ons + instance_cmd
+        mcsqs_find_sqs_processes = []
+        if instances and instances > 1:
+            # if multiple instances, run a range of commands using "-ip"
+            for i in range(instances):
+                instance_cmd = [f"-ip {i + 1}"]
+                cmd = mcsqs_find_sqs_cmd + add_ons + instance_cmd
+                process = Popen(cmd)
+                mcsqs_find_sqs_processes.append(process)
+        else:
+            # run normal mcsqs command
+            cmd = mcsqs_find_sqs_cmd + add_ons
             process = Popen(cmd)
             mcsqs_find_sqs_processes.append(process)
-    else:
-        # run normal mcsqs command
-        cmd = mcsqs_find_sqs_cmd + add_ons
-        process = Popen(cmd)
-        mcsqs_find_sqs_processes.append(process)
 
-    try:
-        for process in mcsqs_find_sqs_processes:
-            process.communicate(timeout=search_time * 60)
+        try:
+            for process in mcsqs_find_sqs_processes:
+                process.communicate(timeout=search_time * 60)
 
-        if instances and instances > 1:
-            process = Popen(["mcsqs", "-best"])
-            process.communicate()
+            if instances and instances > 1:
+                process = Popen(["mcsqs", "-best"])
+                process.communicate()
 
-        if os.path.isfile("bestsqs.out") and os.path.isfile("bestcorr.out"):
-            return _parse_sqs_path(".")
+            if os.path.isfile("bestsqs.out") and os.path.isfile("bestcorr.out"):
+                return _parse_sqs_path(".")
 
-        raise RuntimeError("mcsqs exited before timeout reached")
+            raise RuntimeError("mcsqs exited before timeout reached")
 
-    except TimeoutExpired as exc:
-        for process in mcsqs_find_sqs_processes:
-            process.kill()
-            process.communicate()
+        except TimeoutExpired as exc:
+            for process in mcsqs_find_sqs_processes:
+                process.kill()
+                process.communicate()
 
-        # Find the best sqs structures
-        if instances and instances > 1:
-            if not os.path.isfile("bestcorr1.out"):
-                raise RuntimeError(
-                    "mcsqs did not generate output files, "
-                    "is search_time sufficient or are number of instances too high?"
-                ) from exc
+            # Find the best sqs structures
+            if instances and instances > 1:
+                if not os.path.isfile("bestcorr1.out"):
+                    raise RuntimeError(
+                        "mcsqs did not generate output files, "
+                        "is search_time sufficient or are number of instances too high?"
+                    ) from exc
 
-            process = Popen(["mcsqs", "-best"])
-            process.communicate()
+                process = Popen(["mcsqs", "-best"])
+                process.communicate()
 
-        if os.path.isfile("bestsqs.out") and os.path.isfile("bestcorr.out"):
-            return _parse_sqs_path(".")
+            if os.path.isfile("bestsqs.out") and os.path.isfile("bestcorr.out"):
+                return _parse_sqs_path(".")
 
+            raise TimeoutError("Cluster expansion took too long.") from exc
+    finally:
+        # always restore the caller's working directory
         os.chdir(original_directory)
-        raise TimeoutError("Cluster expansion took too long.") from exc
 
 
 def _parse_sqs_path(path) -> Sqs:

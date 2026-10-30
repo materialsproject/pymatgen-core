@@ -67,6 +67,18 @@ class TestKpoint:
         assert_allclose(kpoint.cart_coords, [1.0, 4.0, -5.0])
         assert kpoint.label == "X"
 
+    def test_does_not_alias_input_coords(self):
+        coords = np.array([1.25, -0.5, 0.0])
+        kpoint = Kpoint(coords, self.lattice, to_unit_cell=True)
+        assert_allclose(coords, [1.25, -0.5, 0.0])  # caller's array must not be modified
+        assert_allclose(kpoint.frac_coords, [0.25, 0.5, 0.0])
+
+        coords = np.array([0.1, 0.2, 0.3])
+        kpoint = Kpoint(coords, self.lattice)
+        coords[0] = 0.4
+        assert_allclose(kpoint.frac_coords, [0.1, 0.2, 0.3])
+        assert_allclose(kpoint.cart_coords, [1.0, 2.0, 3.0])
+
 
 class TestBandStructureSymmLine(MatSciTest):
     def setup_method(self):
@@ -224,6 +236,11 @@ class TestBandStructureSymmLine(MatSciTest):
         assert [0.5, 0.5, 0.0] in cbm_eqs
         vbm_eqs = bs.get_sym_eq_kpoints(vbm_k)
         assert [0.0, 0.0, 0.0] in vbm_eqs
+
+        # images closer than tol must be merged (tol used to be passed as rtol and ignored)
+        near_gamma = [1e-4, 0.0, 0.0]
+        assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-2) == 1
+        assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-6) == 8
 
     def test_as_dict(self):
         expected_keys = {

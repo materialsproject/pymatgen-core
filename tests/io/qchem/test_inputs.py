@@ -1291,3 +1291,32 @@ $end"""
                 assert l_test == l_ref
 
         os.remove(f"{TEST_DIR}/test_custom_smd.qin")
+
+    @pytest.mark.parametrize("charge_spin_line", ["0 3", " 0 3", "   0 3", "\t0\t3"])
+    def test_read_molecule_spin_multiplicity_indentation(self, charge_spin_line):
+        str_molecule = f"""$molecule
+{charge_spin_line}
+ O      0.0000000000      0.0000000000      0.0000000000
+ O      0.0000000000      0.0000000000      1.2100000000
+$end"""
+        mol = QCInput.read_molecule(str_molecule)
+        assert mol.charge == 0
+        assert mol.spin_multiplicity == 3
+
+    def test_vdw_sequential_round_trip(self):
+        mol = Molecule(["C", "O"], [[0, 0, 0], [0, 0, 1.13]])
+        rem = {"job_type": "sp", "basis": "def2-svpd", "method": "wb97mv"}
+        qc_input = QCInput(mol, rem, van_der_waals={"1": 1.7, "2": 1.6}, vdw_mode="sequential")
+        round_tripped = QCInput.from_str(str(qc_input))
+        assert round_tripped.vdw_mode == "sequential"
+        assert round_tripped.van_der_waals == {"1": "1.7", "2": "1.6"}
+
+    def test_cdft_template_single_constraint_states(self):
+        cdft = [
+            [{"value": 1.0, "coefficients": [1.0], "first_atoms": [1], "last_atoms": [2], "types": [None]}],
+            [{"value": 0.0, "coefficients": [1.0], "first_atoms": [1], "last_atoms": [2], "types": [None]}],
+            [{"value": -1.0, "coefficients": [1.0], "first_atoms": [1], "last_atoms": [2], "types": [None]}],
+        ]
+        cdft_str = QCInput.cdft_template(cdft)
+        assert cdft_str.count("--------------") == 2
+        assert QCInput.read_cdft(cdft_str) == cdft

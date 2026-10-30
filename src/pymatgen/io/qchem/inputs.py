@@ -712,7 +712,7 @@ class QCInput(InputFile):
                         cdft_list.append(f"   {coef} {first} {last} {type_string}")
                     else:
                         cdft_list.append(f"   {coef} {first} {last}")
-            if len(cdft) != 1 and ii < len(state):
+            if len(cdft) != 1 and ii < len(cdft):
                 cdft_list.append("--------------")
 
         # Ensure that you don't have a line indicating a state that doesn't exist
@@ -823,7 +823,7 @@ class QCInput(InputFile):
         patterns = {
             "read": r"^\s*\$molecule\n\s*(read)",
             "charge": r"^\s*\$molecule\n\s*((?:\-)*\d+)\s+\d+",
-            "spin_mult": r"^\s*\$molecule\n\s(?:\-)*\d+\s*((?:\-)*\d+)",
+            "spin_mult": r"^\s*\$molecule\n\s*(?:\-)*\d+\s+((?:\-)*\d+)",
             "fragment": r"^\s*\$molecule\n\s*(?:\-)*\d+\s+\d+\s*\n\s*(\-\-)",
         }
         matches = read_pattern(string, patterns)
@@ -995,7 +995,7 @@ class QCInput(InputFile):
             logger.info("No valid vdW inputs found. Note that there should be no '=' characters in vdW input lines.")
             return "", {}
 
-        mode = "sequential" if vdw_table[0][0][0] == 2 else "atomic"
+        mode = "sequential" if vdw_table[0][0][0] == "2" else "atomic"
 
         return mode, dict(vdw_table[0][1:])
 

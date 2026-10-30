@@ -95,6 +95,13 @@ class TestKPathLatimerMunroMagnetic:
             KPathLatimerMunro(struct)
         assert struct.site_properties["magmom"] == [2.0]
 
+    def test_symprec_used_without_magmoms(self):
+        # tetragonal at symprec=0.01, cubic at symprec=0.1
+        struct = Structure(Lattice.orthorhombic(3.0, 3.0, 3.02), ["Po"], [[0, 0, 0]])
+        assert SpacegroupAnalyzer(struct, symprec=0.1).get_space_group_symbol() == "Pm-3m"
+        assert len(KPathLatimerMunro(struct, symprec=0.01)._rpg) == 16
+        assert len(KPathLatimerMunro(struct, symprec=0.1)._rpg) == 48
+
 
 class TestKPathLatimerMunroHelpers:
     @pytest.fixture

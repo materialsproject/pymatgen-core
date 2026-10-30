@@ -11,6 +11,13 @@ TEST_DIR = f"{TEST_FILES_DIR}/command_line/chargemol"
 
 
 class TestChargemolAnalysis:
+    def test_get_charge_without_potcar(self):
+        # without a POTCAR, self.nelect was never set so get_charge raised AttributeError,
+        # and an explicit nelect=0 was ignored
+        ca = ChargemolAnalysis(path=f"{TEST_DIR}/spin_unpolarized", run_chargemol=False)
+        assert ca.get_charge(0) is None
+        assert ca.get_charge(0, nelect=0) == approx(-0.8432)
+
     def test_parse_chargemol(self):
         test_dir = f"{TEST_DIR}/spin_unpolarized"
         ca = ChargemolAnalysis(path=test_dir, run_chargemol=False)

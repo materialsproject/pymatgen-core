@@ -187,10 +187,10 @@ class TestEnumerateStructureTransformation:
         for struct_trafo in all_structs:
             assert "energy" not in struct_trafo
 
-    @pytest.mark.xfail(reason="dgl don't support torch 2.4.1+, #4073")
-    def test_m3gnet(self):
+    @pytest.mark.parametrize("sort_criteria", ["m3gnet_relax", "m3gnet"])
+    def test_m3gnet(self, sort_criteria):
         pytest.importorskip("matgl")
-        enum_trans = EnumerateStructureTransformation(refine_structure=True, sort_criteria="m3gnet_relax")
+        enum_trans = EnumerateStructureTransformation(refine_structure=True, sort_criteria=sort_criteria)
         struct = Structure.from_file(f"{VASP_IN_DIR}/POSCAR_LiFePO4")
         trans = SubstitutionTransformation({"Fe": {"Fe": 0.5, "Mn": 0.5}})
         struct_trafo = trans.apply_transformation(struct)
@@ -206,12 +206,11 @@ class TestEnumerateStructureTransformation:
             <= all_structs[-1]["energy"] / all_structs[-1]["num_sites"]
         )
 
-    @pytest.mark.xfail(reason="dgl don't support torch 2.4.1+, #4073")
     def test_callable_sort_criteria(self):
         matgl = pytest.importorskip("matgl")
         from matgl.ext.ase import Relaxer
 
-        pot = matgl.load_model("M3GNet-MP-2021.2.8-PES")
+        pot = matgl.load_model("M3GNet-PES-MatPES-r2SCAN-2025.2")
 
         m3gnet_model = Relaxer(potential=pot)
 

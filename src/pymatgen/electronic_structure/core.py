@@ -272,7 +272,8 @@ class Magmom(MSONable):
             saxis: tuple[float, float, float],
         ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
             """Get the matrix to transform spin axis to z-axis."""
-            saxis /= np.linalg.norm(saxis)
+            saxis = np.asarray(saxis, dtype=float)  # no in-place division: may be the caller's array
+            saxis = saxis / np.linalg.norm(saxis)
 
             alpha = np.arctan2(saxis[1], saxis[0])
             beta = np.arctan2(np.sqrt(saxis[0] ** 2 + saxis[1] ** 2), saxis[2])
@@ -292,7 +293,8 @@ class Magmom(MSONable):
             saxis: tuple[float, float, float],
         ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
             """Get the inverse of matrix to transform spin axis to z-axis."""
-            saxis /= np.linalg.norm(saxis)
+            saxis = np.asarray(saxis, dtype=float)  # no in-place division: may be the caller's array
+            saxis = saxis / np.linalg.norm(saxis)
 
             alpha = np.arctan2(saxis[1], saxis[0])
             beta = np.arctan2(np.sqrt(saxis[0] ** 2 + saxis[1] ** 2), saxis[2])

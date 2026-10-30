@@ -31,7 +31,7 @@ from monty.os.path import zpath
 from monty.serialization import dumpfn, loadfn
 from tabulate import tabulate
 
-from pymatgen.core import SETTINGS, Element, Lattice, Structure, get_el_sp
+from pymatgen.core import SETTINGS, Element, Lattice, Structure
 from pymatgen.core import constants as const
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.util.io_utils import clean_lines
@@ -145,12 +145,13 @@ class Poscar(MSONable):
             if not selective_dynamics.all():
                 site_properties["selective_dynamics"] = selective_dynamics
 
-        if velocities:
+        # Use explicit None/size checks: the truth value of a multi-element ndarray is ambiguous
+        if velocities is not None and len(velocities) > 0:
             velocities = np.asarray(velocities)
             if velocities.any():
                 site_properties["velocities"] = velocities
 
-        if predictor_corrector:
+        if predictor_corrector is not None and len(predictor_corrector) > 0:
             predictor_corrector = np.asarray(predictor_corrector)
             if predictor_corrector.any():
                 site_properties["predictor_corrector"] = predictor_corrector
@@ -163,7 +164,7 @@ class Poscar(MSONable):
         if predictor_corrector_preamble:
             self.structure.properties["predictor_corrector_preamble"] = predictor_corrector_preamble
 
-        if lattice_velocities and np.any(lattice_velocities):
+        if lattice_velocities is not None and len(lattice_velocities) > 0 and np.any(lattice_velocities):
             self.structure.properties["lattice_velocities"] = np.asarray(lattice_velocities)
 
         self.true_names: bool = true_names
@@ -220,7 +221,7 @@ class Poscar(MSONable):
 
     @predictor_corrector_preamble.setter
     def predictor_corrector_preamble(self, predictor_corrector_preamble: str | None) -> None:
-        self.structure.properties["predictor_corrector"] = predictor_corrector_preamble
+        self.structure.properties["predictor_corrector_preamble"] = predictor_corrector_preamble
 
     @property
     def lattice_velocities(self) -> ArrayLike | None:
@@ -304,8 +305,10 @@ class Poscar(MSONable):
                 potcar_path = next((f for f in potcars if f == f"{dirname}/POTCAR"), min(potcars))
 
                 potcar = Potcar.from_file(potcar_path)
-                names = [sym.split("_")[0] for sym in potcar.symbols]
-                map(get_el_sp, names)  # ensure valid names
+                # Strip POTCAR suffixes, e.g. "Fe_pv" -> "Fe" and pseudo-hydrogen "H.75"/"H1.25" -> "H"
+                names = [re.split(r"[_.\d]", sym, maxsplit=1)[0] for sym in potcar.symbols]
+                for name in names:  # ensure valid element names
+                    Element(name)
             except Exception:
                 names = None
 
@@ -809,7 +812,8 @@ class Incar(UserDict, MSONable):
         Warnings:
             BadIncarWarning: If there are duplicate in keys (case insensitive).
         """
-        params = params or {}
+        # Shallow-copy so the caller's mapping is never mutated (e.g. by the MAGMOM reshaping below)
+        params = dict(params or {})
 
         # Check for case-insensitive duplicate keys
         key_counter = Counter(key.strip().upper() for key in params)
@@ -1044,7 +1048,8 @@ class Incar(UserDict, MSONable):
                 output = []
                 # a single token is a number (incl. scientific notation, e.g. 1e-3) or an uppercase/dot
                 # string (e.g. .TRUE.); up to 3 tokens may be joined by "*" multipliers (e.g. 9*0.6)
-                num_or_str = r"-?\d+\.?\d*(?:[eE][-+]?\d+)?|[\.A-Z]+"
+                # Fortran also accepts a leading "+" and floats without a leading digit (e.g. .5, -.5)
+                num_or_str = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|[\.A-Z]+"
                 tokens = re.findall(rf"({num_or_str})\*?({num_or_str})?\*?({num_or_str})?", val)
                 for tok in tokens:
                     if tok[2]:  # nested multiplier "count1*count2*value" (e.g. 3*3*-1)
@@ -1287,10 +1292,13 @@ class Kpoints(MSONable):
                 if idx % 2 == 1:
                     lines[-1] += "\n"
             elif self.num_kpts > 0 and self.kpts_weights is not None:
+                # Weights may be fractional (e.g. normalized weights); only drop the decimals when integral
+                weight = self.kpts_weights[idx]
+                weight_str = str(int(weight)) if float(weight).is_integer() else str(weight)
                 if self.labels is not None:
-                    lines[-1] += f" {int(self.kpts_weights[idx])} {self.labels[idx]}"
+                    lines[-1] += f" {weight_str} {self.labels[idx]}"
                 else:
-                    lines[-1] += f" {int(self.kpts_weights[idx])}"
+                    lines[-1] += f" {weight_str}"
 
         # Tetrahedron parameters if the number of tetrahedrons > 0
         if style not in "lagm" and self.tet_number > 0:
@@ -1736,7 +1744,8 @@ class Kpoints(MSONable):
         # Automatic kpoints with basis
         if num_kpts <= 0:
             _style = cls.supported_modes.Cartesian if style in "ck" else cls.supported_modes.Reciprocal
-            _kpts_shift = [float(i) for i in lines[6].split()]
+            # The shift line is optional (it is not written when the shift is zero)
+            _kpts_shift = [float(i) for i in lines[6].split()] if len(lines) > 6 else []
             kpts_shift = cast("tuple[float, float, float]", tuple(_kpts_shift)) if len(_kpts_shift) == 3 else (0, 0, 0)
 
             kpts: list[Kpoint] = [
@@ -3040,7 +3049,15 @@ class VaspInput(dict, MSONable):
         """Deep copy of VaspInput."""
         if deep:
             return self.from_dict(self.as_dict())
-        return type(self)(**{key.lower(): val for key, val in self.items()})
+        standard_keys = ("INCAR", "KPOINTS", "POSCAR", self._potcar_filename)
+        return type(self)(
+            incar=self["INCAR"],
+            kpoints=self["KPOINTS"],
+            poscar=self["POSCAR"],
+            potcar=self[self._potcar_filename],
+            potcar_spec=self._potcar_filename == "POTCAR.spec",
+            optional_files={key: val for key, val in self.items() if key not in standard_keys},
+        )
 
     def run_vasp(
         self,
