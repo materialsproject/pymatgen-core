@@ -1365,13 +1365,10 @@ class Lattice(MSONable):
             if np.iscomplexobj(coord):
                 raise TypeError(f"Complex array are not supported, got {coord=}")
 
-        if not frac_coords:
-            cart_a, cart_b = coords_a, coords_b
-        else:
-            cart_a = np.reshape([self.get_cartesian_coords(vec) for vec in coords_a], (-1, 3))
-            cart_b = np.reshape([self.get_cartesian_coords(vec) for vec in coords_b], (-1, 3))
+        if frac_coords:
+            coords_a, coords_b = self.get_cartesian_coords(coords_a), self.get_cartesian_coords(coords_b)
 
-        return np.array(list(itertools.starmap(np.dot, zip(cart_a, cart_b, strict=True))))
+        return np.einsum("ij,ij->i", coords_a, coords_b)
 
     def norm(self, coords: ArrayLike, frac_coords: bool = True) -> NDArray[np.float64]:
         """Compute the norm of vector(s).

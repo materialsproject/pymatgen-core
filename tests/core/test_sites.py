@@ -317,6 +317,47 @@ class TestPeriodicSite(MatSciTest):
         with pytest.raises(ValueError, match="coordinates"):
             okay.coords = np.zeros((2,))
 
+    @pytest.mark.parametrize(
+        ("pbc", "expected"),
+        [((True, True, True), [0.25, 0.65, 0.46]), ((True, False, True), [0.25, -2.35, 0.46])],
+    )
+    @pytest.mark.parametrize("skip_checks", [False, True])
+    def test_init_to_unit_cell(self, pbc, expected, skip_checks):
+        lattice = Lattice(self.lattice.matrix, pbc=pbc)
+        coords = np.array([1.25, -2.35, 4.46])
+        site = PeriodicSite("Fe", coords, lattice, to_unit_cell=True, skip_checks=skip_checks)
+        assert_allclose(site.frac_coords, expected)
+        assert site.frac_coords.dtype == np.float64
+        # Wrapping must not alias or mutate the caller's array
+        assert not np.shares_memory(site.frac_coords, coords)
+        assert_allclose(coords, [1.25, -2.35, 4.46])
+        # Integer input coords are wrapped into a float array too
+        int_site = PeriodicSite("Fe", [1, -2, 4], lattice, to_unit_cell=True)
+        assert_allclose(int_site.frac_coords, [0, 0 if pbc[1] else -2, 0])
+        assert int_site.frac_coords.dtype == np.float64
+
+    @pytest.mark.parametrize(
+        "offset",
+        [0, 1e-6, 9.9e-6, 1e-5, 1.1e-5, 1e-4, -1e-4, 1.2, np.nan, np.inf, -np.inf],
+    )
+    def test_equality_matches_allclose(self, offset):
+        """Site equality must keep the np.allclose(atol=Site.position_atol) coordinate semantics."""
+        for coords in ([0.0, 3.5, 4.5], [np.inf, 3.5, 4.5], [np.nan, 3.5, 4.5]):
+            ref = PeriodicSite("Fe", coords, Lattice.cubic(1))
+            other = PeriodicSite("Fe", np.add(coords, [offset, 0, 0]), Lattice.cubic(1))
+            expected = bool(np.allclose(ref.coords, other.coords, atol=Site.position_atol))
+            assert (ref == other) is expected
+            assert (other == ref) is bool(np.allclose(other.coords, ref.coords, atol=Site.position_atol))
+
+            site_ref = Site("Fe", coords)
+            site_other = Site("Fe", np.add(coords, [offset, 0, 0]))
+            assert (site_ref == site_other) is bool(np.allclose(site_ref.coords, site_other.coords, atol=1e-5))
+
+        # Coordinates match but species or lattice differ
+        assert PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(1)) != PeriodicSite("Co", [0, 0, 0], Lattice.cubic(1))
+        assert PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(1)) != PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(2))
+        assert Site("Fe", [0, 0, 0]) != Site("Co", [0, 0, 0])
+
 
 def get_distance_and_image_old(site1, site2, jimage=None):
     """

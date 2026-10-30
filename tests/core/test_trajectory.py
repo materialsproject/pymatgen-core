@@ -718,6 +718,19 @@ class TestTrajectoryMethods(MatSciTest):
         assert isinstance(sliced, Trajectory)
         assert_allclose(sliced.coords, np.array(SI_COORDS)[[2, 0]])
 
+    def test_boolean_mask_index(self, struct_traj):
+        """Boolean masks used to raise TypeError when indexing frame/site properties."""
+        struct_traj.frame_properties = [{"energy": float(idx)} for idx in range(3)]
+        struct_traj.site_properties = [{"magmom": [idx, idx]} for idx in range(3)]
+        sliced = struct_traj[np.array([True, False, True])]
+        assert isinstance(sliced, Trajectory)
+        assert_allclose(sliced.coords, np.array(SI_COORDS)[[0, 2]])
+        assert sliced.frame_properties == [{"energy": 0.0}, {"energy": 2.0}]
+        assert sliced.site_properties == [{"magmom": [0, 0]}, {"magmom": [2, 2]}]
+
+        with pytest.raises(IndexError, match="boolean index of shape"):
+            struct_traj[np.array([True, False])]
+
     def test_get_structure(self, struct_traj, mol_traj):
         struct = struct_traj.get_structure(1)
         assert isinstance(struct, Structure)
@@ -925,6 +938,25 @@ class TestTrajectoryAse(MatSciTest):
         _write_ase_traj(filename, pbc=True)
         traj = Trajectory.from_ase(filename)
         assert traj.constant_lattice is False
+
+    @pytest.mark.parametrize(
+        ("scales", "expected"),
+        [
+            ((3.0,), True),
+            ((3.0, 3.0, 3.0), True),
+            # Every pair of frames within lattice_match_tol=1e-6
+            ((3.0, 3.0 + 5e-7, 3.0 - 4e-7), True),
+            # Each frame within tol of the first, but frames 2 and 3 are 1.2e-6 apart
+            ((3.0, 3.0 + 6e-7, 3.0 - 6e-7), False),
+            ((3.0, 3.0, 3.1), False),
+        ],
+    )
+    def test_from_ase_infer_constant_lattice(self, scales, expected):
+        filename = f"{self.tmp_path}/si.traj"
+        _write_ase_traj(filename, pbc=True, scales=scales)
+        traj = Trajectory.from_ase(filename, additional_fields=None)
+        assert traj.constant_lattice is expected
+        assert len(traj) == len(scales)
 
     def test_from_ase_molecule_infer_lattice(self):
         filename = f"{self.tmp_path}/co.traj"

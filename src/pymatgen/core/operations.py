@@ -564,6 +564,13 @@ class MagSymmOp(SymmOp):
             self.time_reversal == other.time_reversal
         )
 
+    def __mul__(self, other: SymmOp) -> Self:
+        """Get a new MagSymmOp which is equivalent to apply the "other" operation
+        followed by this one. Time reversals multiply; a plain SymmOp counts as +1.
+        """
+        time_reversal = cast("Literal[-1, 1]", self.time_reversal * getattr(other, "time_reversal", 1))
+        return type(self)(np.dot(self.affine_matrix, other.affine_matrix), time_reversal)
+
     def __str__(self) -> str:
         return self.as_xyzt_str()
 
