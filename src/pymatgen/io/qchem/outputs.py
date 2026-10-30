@@ -6,8 +6,8 @@ import copy
 import math
 import os
 import re
-import struct
 import warnings
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import networkx as nx
@@ -158,17 +158,14 @@ class QCOutput(MSONable):
             self.data["scf_final_print"] = 0
 
         # Check if calculation uses GEN_SCFMAN, multiple potential output formats
-        self.data["using_GEN_SCFMAN"] = read_pattern(
-            self.text,
-            {"key": r"\s+GEN_SCFMAN: A general SCF calculation manager"},
-            terminate_on_match=True,
-        ).get("key")
-        if not self.data["using_GEN_SCFMAN"]:
-            self.data["using_GEN_SCFMAN"] = read_pattern(
-                self.text,
-                {"key": r"\s+General SCF calculation program by"},
-                terminate_on_match=True,
-            ).get("key")
+        self.data["using_GEN_SCFMAN"] = None
+        for phrase in ("GEN_SCFMAN: A general SCF calculation manager", "General SCF calculation program by"):
+            # The substring test is much cheaper than a whitespace-anchored regex scan of a large output
+            if phrase in self.text and (
+                found := read_pattern(self.text, {"key": rf"\s{phrase}"}, terminate_on_match=True).get("key")
+            ):
+                self.data["using_GEN_SCFMAN"] = found
+                break
 
         # Check if the SCF failed to converge
         if read_pattern(self.text, {"key": r"SCF failed to converge"}, terminate_on_match=True).get("key") == [[]]:
@@ -359,10 +356,10 @@ class QCOutput(MSONable):
         if self.data["final_energy"] is None:
             temp_dict = read_pattern(
                 self.text,
-                {"final_energy": r"\s*Total\s+energy in the final basis set\s+=\s*([\d\-\.]+)"},
+                {"final_energy": r"Total\s+energy in the final basis set\s+=\s*([\d\-\.]+)"},
             ) or read_pattern(  # support Q-Chem 6.1.1+ (gh-3580)
                 self.text,
-                {"final_energy": r"\s+Total energy\s+=\s+([\d\-\.]+)"},
+                {"final_energy": r"\sTotal energy\s+=\s+([\d\-\.]+)"},
             )
 
             if e_final_match := temp_dict.get("final_energy"):
@@ -421,13 +418,13 @@ class QCOutput(MSONable):
             temp_dict = read_pattern(
                 self.text,
                 {
-                    "Hif": r"\s*DC Matrix Element\s+Hif =\s+([\-\.0-9]+)",
-                    "Sif": r"\s*DC Matrix Element\s+Sif =\s+([\-\.0-9]+)",
-                    "Hii": r"\s*DC Matrix Element\s+Hii =\s+([\-\.0-9]+)",
-                    "Sii": r"\s*DC Matrix Element\s+Sii =\s+([\-\.0-9]+)",
-                    "Hff": r"\s*DC Matrix Element\s+Hff =\s+([\-\.0-9]+)",
-                    "Sff": r"\s*DC Matrix Element\s+Sff =\s+([\-\.0-9]+)",
-                    "coupling": r"\s*Effective Coupling \(in eV\) =\s+([\-\.0-9]+)",
+                    "Hif": r"DC Matrix Element\s+Hif =\s+([\-\.0-9]+)",
+                    "Sif": r"DC Matrix Element\s+Sif =\s+([\-\.0-9]+)",
+                    "Hii": r"DC Matrix Element\s+Hii =\s+([\-\.0-9]+)",
+                    "Sii": r"DC Matrix Element\s+Sii =\s+([\-\.0-9]+)",
+                    "Hff": r"DC Matrix Element\s+Hff =\s+([\-\.0-9]+)",
+                    "Sff": r"DC Matrix Element\s+Sff =\s+([\-\.0-9]+)",
+                    "coupling": r"Effective Coupling \(in eV\) =\s+([\-\.0-9]+)",
                 },
             )
 
@@ -516,12 +513,12 @@ class QCOutput(MSONable):
             temp_dict = read_pattern(
                 self.text,
                 {
-                    "SCF": r"\s+SCF energy\s+=\s+([\d\-\.]+)",
-                    "MP2": r"\s+MP2 energy\s+=\s+([\d\-\.]+)",
-                    "CCSD_correlation": r"\s+CCSD correlation energy\s+=\s+([\d\-\.]+)",
-                    "CCSD": r"\s+CCSD total energy\s+=\s+([\d\-\.]+)",
-                    "CCSD(T)_correlation": r"\s+CCSD\(T\) correlation energy\s+=\s+([\d\-\.]+)",
-                    "CCSD(T)": r"\s+CCSD\(T\) total energy\s+=\s+([\d\-\.]+)",
+                    "SCF": r"\sSCF energy\s+=\s+([\d\-\.]+)",
+                    "MP2": r"\sMP2 energy\s+=\s+([\d\-\.]+)",
+                    "CCSD_correlation": r"\sCCSD correlation energy\s+=\s+([\d\-\.]+)",
+                    "CCSD": r"\sCCSD total energy\s+=\s+([\d\-\.]+)",
+                    "CCSD(T)_correlation": r"\sCCSD\(T\) correlation energy\s+=\s+([\d\-\.]+)",
+                    "CCSD(T)": r"\sCCSD\(T\) total energy\s+=\s+([\d\-\.]+)",
                 },
             )
 
@@ -555,13 +552,19 @@ class QCOutput(MSONable):
             else:
                 self.data["ccsd(t)_total_energy"] = float(temp_dict["CCSD(T)"][0][0])
 
+        # Find every job_type declaration in a single pass over the text. Each entry holds one empty
+        # list per match, mirroring the read_pattern output that the job-type flags below are stored as.
+        job_types: dict[str, list[list]] = defaultdict(list)
+        for match in re.finditer(r"(?i)job(?:_)*type\s*(?:=)*\s*(opt|ts|freq|sp|force|pes_scan)", self.text):
+            job_types[match[1].lower()].append([])
+
         # Check if the calculation is a geometry optimization. If so, parse the relevant output
-        self.data["optimization"] = read_pattern(self.text, {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*opt"}).get("key")
+        self.data["optimization"] = job_types.get("opt")
         if self.data.get("optimization", []):
             # Determine if the calculation is using the new geometry optimizer
-            self.data["new_optimizer"] = read_pattern(self.text, {"key": r"(?i)\s*geom_opt2\s*(?:=)*\s*3"}).get("key")
+            self.data["new_optimizer"] = read_pattern(self.text, {"key": r"(?i)geom_opt2\s*(?:=)*\s*3"}).get("key")
             if self.data["version"] == "6":
-                temp_driver = read_pattern(self.text, {"key": r"(?i)\s*geom_opt_driver\s*(?:=)*\s*optimize"}).get("key")
+                temp_driver = read_pattern(self.text, {"key": r"(?i)geom_opt_driver\s*(?:=)*\s*optimize"}).get("key")
                 if temp_driver is None:
                     self.data["new_optimizer"] = [[]]
             # Check if we have an unexpected transition state
@@ -572,9 +575,7 @@ class QCOutput(MSONable):
 
         # Check if the calculation is a transition state optimization. If so, parse the relevant output
         # Note: for now, TS calculations are treated the same as optimization calculations
-        self.data["transition_state"] = read_pattern(self.text, {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*ts"}).get(
-            "key"
-        )
+        self.data["transition_state"] = job_types.get("ts")
         if self.data.get("transition_state", []):
             self._read_optimization_data()
 
@@ -604,27 +605,15 @@ class QCOutput(MSONable):
                         )
 
         # Check if the calculation is a frequency analysis. If so, parse the relevant output
-        self.data["frequency_job"] = read_pattern(
-            self.text,
-            {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*freq"},
-            terminate_on_match=True,
-        ).get("key")
+        self.data["frequency_job"] = [[]] if "freq" in job_types else None
         if self.data.get("frequency_job", []):
             self._read_frequency_data()
 
         # Check if the calculation is a single point. If so, parse the relevant output
-        self.data["single_point_job"] = read_pattern(
-            self.text,
-            {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*sp"},
-            terminate_on_match=True,
-        ).get("key")
+        self.data["single_point_job"] = [[]] if "sp" in job_types else None
 
         # Check if the calculation is a force calculation. If so, parse the relevant output
-        self.data["force_job"] = read_pattern(
-            self.text,
-            {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*force"},
-            terminate_on_match=True,
-        ).get("key")
+        self.data["force_job"] = [[]] if "force" in job_types else None
         if self.data.get("force_job", []):
             self._read_force_data()
 
@@ -638,11 +627,7 @@ class QCOutput(MSONable):
             self._read_coefficient_matrix()
 
         # Check if the calculation is a PES scan. If so, parse the relevant output
-        self.data["scan_job"] = read_pattern(
-            self.text,
-            {"key": r"(?i)\s*job(?:_)*type\s*(?:=)*\s*pes_scan"},
-            terminate_on_match=True,
-        ).get("key")
+        self.data["scan_job"] = [[]] if "pes_scan" in job_types else None
         if self.data.get("scan_job", []):
             self._read_scan_data()
 
@@ -1046,7 +1031,7 @@ class QCOutput(MSONable):
         self.data["multipoles"] = {}
 
         quad_mom_pat = (
-            r"\s*Quadrupole Moments \(Debye\-Ang\)\s+XX\s+([\-\.0-9]+)\s+XY\s+([\-\.0-9]+)\s+YY"
+            r"Quadrupole Moments \(Debye\-Ang\)\s+XX\s+([\-\.0-9]+)\s+XY\s+([\-\.0-9]+)\s+YY"
             r"\s+([\-\.0-9]+)\s+XZ\s+([\-\.0-9]+)\s+YZ\s+([\-\.0-9]+)\s+ZZ\s+([\-\.0-9]+)"
         )
         temp_quadrupole_moment = read_pattern(self.text, {"key": quad_mom_pat}).get("key")
@@ -1064,7 +1049,7 @@ class QCOutput(MSONable):
                     )
 
         octo_mom_pat = (
-            r"\s*Octopole Moments \(Debye\-Ang\^2\)\s+XXX\s+([\-\.0-9]+)\s+XXY\s+([\-\.0-9]+)"
+            r"Octopole Moments \(Debye\-Ang\^2\)\s+XXX\s+([\-\.0-9]+)\s+XXY\s+([\-\.0-9]+)"
             r"\s+XYY\s+([\-\.0-9]+)\s+YYY\s+([\-\.0-9]+)\s+XXZ\s+([\-\.0-9]+)\s+XYZ\s+([\-\.0-9]+)"
             r"\s+YYZ\s+([\-\.0-9]+)\s+XZZ\s+([\-\.0-9]+)\s+YZZ\s+([\-\.0-9]+)\s+ZZZ\s+([\-\.0-9]+)"
         )
@@ -1092,7 +1077,7 @@ class QCOutput(MSONable):
                     self.data["multipoles"]["octopole"].append({key: float(opole[idx]) for idx, key in enumerate(keys)})
 
         hexadeca_mom_pat = (
-            r"\s*Hexadecapole Moments \(Debye\-Ang\^3\)\s+XXXX\s+([\-\.0-9]+)\s+XXXY\s+([\-\.0-9]+)"
+            r"Hexadecapole Moments \(Debye\-Ang\^3\)\s+XXXX\s+([\-\.0-9]+)\s+XXXY\s+([\-\.0-9]+)"
             r"\s+XXYY\s+([\-\.0-9]+)\s+XYYY\s+([\-\.0-9]+)\s+YYYY\s+([\-\.0-9]+)\s+XXXZ\s+([\-\.0-9]+)"
             r"\s+XXYZ\s+([\-\.0-9]+)\s+XYYZ\s+([\-\.0-9]+)\s+YYYZ\s+([\-\.0-9]+)\s+XXZZ\s+([\-\.0-9]+)"
             r"\s+XYZZ\s+([\-\.0-9]+)\s+YYZZ\s+([\-\.0-9]+)\s+XZZZ\s+([\-\.0-9]+)\s+YZZZ\s+([\-\.0-9]+)"
@@ -1115,13 +1100,13 @@ class QCOutput(MSONable):
 
         if self.data.get("unrestricted", []):
             header_pattern = (
-                r"\-+\s+Ground-State Mulliken Net Atomic Charges\s+Atom\s+Charge \(a\.u\.\)\s+"
+                r"\-\s+Ground-State Mulliken Net Atomic Charges\s+Atom\s+Charge \(a\.u\.\)\s+"
                 r"Spin\s\(a\.u\.\)\s+\-+"
             )
             table_pattern = r"\s+\d+\s\w+\s+([\d\-\.]+)\s+([\d\-\.]+)"
             footer_pattern = r"\s\s\-+\s+Sum of atomic charges"
         else:
-            header_pattern = r"\-+\s+Ground-State Mulliken Net Atomic Charges\s+Atom\s+Charge \(a\.u\.\)\s+\-+"
+            header_pattern = r"\-\s+Ground-State Mulliken Net Atomic Charges\s+Atom\s+Charge \(a\.u\.\)\s+\-+"
             table_pattern = r"\s+\d+\s\w+\s+([\d\-\.]+)"
             footer_pattern = r"\s\s\-+\s+Sum of atomic charges"
 
@@ -1308,7 +1293,7 @@ class QCOutput(MSONable):
         """Parse all geometries from an optimization trajectory."""
         geoms = []
         if self.data.get("new_optimizer") is None:
-            header_pattern = r"\s+Optimization\sCycle:\s+\d+\s+Coordinates \(Angstroms\)\s+ATOM\s+X\s+Y\s+Z"
+            header_pattern = r"\sOptimization\sCycle:\s+\d+\s+Coordinates \(Angstroms\)\s+ATOM\s+X\s+Y\s+Z"
             table_pattern = r"\s+\d+\s+\w+\s+([\d\-\.]+)\s+([\d\-\.]+)\s+([\d\-\.]+)"
             footer_pattern = r"\s+Point Group\:\s+[\d\w\*]+\s+Number of degrees of freedom\:\s+\d+"
         elif read_pattern(
@@ -1349,7 +1334,7 @@ class QCOutput(MSONable):
             # Parses optimized XYZ coordinates. If not present, parses optimized Z-matrix.
             if self.data.get("new_optimizer") is None:
                 header_pattern = (
-                    r"\*+\s+(OPTIMIZATION|TRANSITION STATE)\s+CONVERGED\s+\*+\s+\*+\s+Coordinates "
+                    r"\*\s+(OPTIMIZATION|TRANSITION STATE)\s+CONVERGED\s+\*+\s+\*+\s+Coordinates "
                     r"\(Angstroms\)\s+ATOM\s+X\s+Y\s+Z"
                 )
                 table_pattern = r"\s+\d+\s+\w+\s+([\d\-\.]+)\s+([\d\-\.]+)\s+([\d\-\.]+)"
@@ -1575,26 +1560,26 @@ class QCOutput(MSONable):
         temp_dict = read_pattern(
             self.text,
             {
-                "frequencies": r"\s*Frequency:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
+                "frequencies": r"Frequency:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
                 "trans_dip": r"TransDip\s+(\-?[\d\.]{5,7}|\*{5,7})\s*(\-?[\d\.]{5,7}|\*{5,7})"
                 r"\s*(\-?[\d\.]{5,7}|\*{5,7})\s*"
                 r"(?:(\-?[\d\.]{5,7}|\*{5,7})\s*(\-?[\d\.]{5,7}|\*{5,7})\s*(\-?[\d\.]{5,7}|\*{5,7})\s*"
                 r"(?:(\-?[\d\.]{5,7}|\*{5,7})\s*(\-?[\d\.]{5,7}|\*{5,7})\s*(\-?[\d\.]{5,7}|\*{5,7}))*)*",
-                "IR_intens": r"\s*IR Intens:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
-                "IR_active": r"\s*IR Active:\s+([YESNO]+)(?:\s+([YESNO]+)(?:\s+([YESNO]+))*)*",
-                "raman_intens": r"\s*Raman Intens:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
-                "depolar": r"\s*Depolar:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
-                "raman_active": r"\s*Raman Active:\s+([YESNO]+)(?:\s+([YESNO]+)(?:\s+([YESNO]+))*)*",
-                "ZPE": r"\s*Zero point vibrational energy:\s+([\d\-\.]+)\s+kcal/mol",
-                "trans_enthalpy": r"\s*Translational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
-                "rot_enthalpy": r"\s*Rotational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
-                "vib_enthalpy": r"\s*Vibrational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
-                "gas_constant": r"\s*gas constant \(RT\):\s+([\d\-\.]+)\s+kcal/mol",
-                "trans_entropy": r"\s*Translational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
-                "rot_entropy": r"\s*Rotational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
-                "vib_entropy": r"\s*Vibrational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
-                "total_enthalpy": r"\s*Total Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
-                "total_entropy": r"\s*Total Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
+                "IR_intens": r"IR Intens:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
+                "IR_active": r"IR Active:\s+([YESNO]+)(?:\s+([YESNO]+)(?:\s+([YESNO]+))*)*",
+                "raman_intens": r"Raman Intens:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
+                "depolar": r"Depolar:\s*(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+)(?:\s+(\-?[\d\.\*]+))*)*",
+                "raman_active": r"Raman Active:\s+([YESNO]+)(?:\s+([YESNO]+)(?:\s+([YESNO]+))*)*",
+                "ZPE": r"Zero point vibrational energy:\s+([\d\-\.]+)\s+kcal/mol",
+                "trans_enthalpy": r"Translational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
+                "rot_enthalpy": r"Rotational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
+                "vib_enthalpy": r"Vibrational Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
+                "gas_constant": r"gas constant \(RT\):\s+([\d\-\.]+)\s+kcal/mol",
+                "trans_entropy": r"Translational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
+                "rot_entropy": r"Rotational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
+                "vib_entropy": r"Vibrational Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
+                "total_enthalpy": r"Total Enthalpy:\s+([\d\-\.]+)\s+kcal/mol",
+                "total_entropy": r"Total Entropy:\s+([\d\-\.]+)\s+cal/mol\.K",
             },
         )
 
@@ -1696,9 +1681,9 @@ class QCOutput(MSONable):
             self.data["IR_intens"] = IR_intens
 
             if not raman:
-                header_pattern = r"\s*Raman Active:\s+[YESNO]+\s+(?:[YESNO]+\s+)*X\s+Y\s+Z\s+(?:X\s+Y\s+Z\s+)*"
+                header_pattern = r"Raman Active:\s+[YESNO]+\s+(?:[YESNO]+\s+)*X\s+Y\s+Z\s+(?:X\s+Y\s+Z\s+)*"
             else:
-                header_pattern = r"\s*Depolar:\s*\-?[\d\.\*]+\s+(?:\-?[\d\.\*]+\s+)*X\s+Y\s+Z\s+(?:X\s+Y\s+Z\s+)*"
+                header_pattern = r"Depolar:\s*\-?[\d\.\*]+\s+(?:\-?[\d\.\*]+\s+)*X\s+Y\s+Z\s+(?:X\s+Y\s+Z\s+)*"
             table_pattern = (
                 r"\s*[a-zA-Z][a-zA-Z\s]\s*([\d\-\.]+)\s*([\d\-\.]+)\s*([\d\-\.]+)\s*(?:([\d\-\.]+)\s*"
                 r"([\d\-\.]+)\s*([\d\-\.]+)\s*(?:([\d\-\.]+)\s*([\d\-\.]+)\s*([\d\-\.]+))*)*"
@@ -1760,7 +1745,7 @@ class QCOutput(MSONable):
             ).get("key") == [[]]:
                 self.data["errors"] += ["unable_to_determine_lamda"]
 
-        header_pattern = r"\s*\-+ Summary of potential scan\: \-+\s*"
+        header_pattern = r"\- Summary of potential scan\: \-+\s*"
         row_pattern_single = r"\s*([\-\.0-9]+)\s+([\-\.0-9]+)\s*\n"
         row_pattern_double = r"\s*([\-\.0-9]+)\s+([\-\.0-9]+)\s+([\-\.0-9]+)\s*\n"
         footer_pattern = r"\s*\-+"
@@ -1793,7 +1778,7 @@ class QCOutput(MSONable):
                 energy = float(line[1])
                 self.data["scan_energies"].append({"params": param, "energy": energy})
 
-        scan_inputs_head = r"\s*\$[Ss][Cc][Aa][Nn]"
+        scan_inputs_head = r"\$[Ss][Cc][Aa][Nn]"
         scan_inputs_row = r"\s*([Ss][Tt][Rr][Ee]|[Tt][Oo][Rr][Ss]|[Bb][Ee][Nn][Dd]) "
         scan_inputs_row += r"((?:[0-9]+\s+)+)([\-\.0-9]+)\s+([\-\.0-9]+)\s+([\-\.0-9]+)\s*"
         scan_inputs_foot = r"\s*\$[Ee][Nn][Dd]"
@@ -1819,7 +1804,7 @@ class QCOutput(MSONable):
 
         temp_constraint = read_pattern(
             self.text,
-            {"key": r"\s*(Distance\(Angs\)|Angle|Dihedral)\:\s*((?:[0-9]+\s+)+)+([\.0-9]+)\s+([\.0-9]+)"},
+            {"key": r"(Distance\(Angs\)|Angle|Dihedral)\:\s*((?:[0-9]+\s+)+)+([\.0-9]+)\s+([\.0-9]+)"},
         ).get("key")
         self.data["scan_constraint_sets"] = {"stre": [], "bend": [], "tors": []}
         if temp_constraint is not None:
@@ -1847,11 +1832,11 @@ class QCOutput(MSONable):
         temp_dict = read_pattern(
             self.text,
             {
-                "g_electrostatic": r"\s*G_electrostatic\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
-                "g_cavitation": r"\s*G_cavitation\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
-                "g_dispersion": r"\s*G_dispersion\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
-                "g_repulsion": r"\s*G_repulsion\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
-                "total_contribution_pcm": r"\s*Total\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
+                "g_electrostatic": r"G_electrostatic\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
+                "g_cavitation": r"G_cavitation\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
+                "g_dispersion": r"G_dispersion\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
+                "g_repulsion": r"G_repulsion\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
+                "total_contribution_pcm": r"Total\s+=\s+([\d\-\.]+)\s+hartree\s+=\s+([\d\-\.]+)\s+kcal/mol\s*",
                 "solute_internal_energy": r"Solute Internal Energy \(H0\)\s*=\s*([\d\-\.]+)",
             },
         )
@@ -1915,14 +1900,14 @@ class QCOutput(MSONable):
         temp_dict = read_pattern(
             self.text,
             {
-                "final_soln_phase_e": r"\s*The Final Solution-Phase Energy\s+=\s+([\d\-\.]+)\s*",
-                "solute_internal_e": r"\s*The Solute Internal Energy\s+=\s+([\d\-\.]+)\s*",
-                "total_solvation_free_e": r"\s*The Total Solvation Free Energy\s+=\s+([\d\-\.]+)\s*",
-                "change_solute_internal_e": r"\s*The Change in Solute Internal Energy\s+=\s+(\s+[\d\-\.]+)"
+                "final_soln_phase_e": r"The Final Solution-Phase Energy\s+=\s+([\d\-\.]+)\s*",
+                "solute_internal_e": r"The Solute Internal Energy\s+=\s+([\d\-\.]+)\s*",
+                "total_solvation_free_e": r"The Total Solvation Free Energy\s+=\s+([\d\-\.]+)\s*",
+                "change_solute_internal_e": r"The Change in Solute Internal Energy\s+=\s+(\s+[\d\-\.]+)"
                 r"\s+\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
-                "reaction_field_free_e": r"\s*The Reaction Field Free Energy\s+=\s+(\s+[\d\-\.]+)\s+"
+                "reaction_field_free_e": r"The Reaction Field Free Energy\s+=\s+(\s+[\d\-\.]+)\s+"
                 r"\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
-                "isosvp_dielectric": r"\s*DIELST=\s+(\s+[\d\-\.]+)\s*",
+                "isosvp_dielectric": r"DIELST=\s+(\s+[\d\-\.]+)\s*",
             },
         )
 
@@ -1964,11 +1949,11 @@ class QCOutput(MSONable):
         temp_dict = read_pattern(
             self.text,
             {
-                "dispersion_e": r"\s*The Dispersion Energy\s+=\s+(\s+[\d\-\.]+)\s+\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
-                "exchange_e": r"\s*The Exchange Energy\s+=\s+(\s+[\d\-\.]+)\s+\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
-                "min_neg_field_e": r"\s*Min. Negative Field Energy\s+=\s+(\s+[\d\-\.]+)\s+"
+                "dispersion_e": r"The Dispersion Energy\s+=\s+(\s+[\d\-\.]+)\s+\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
+                "exchange_e": r"The Exchange Energy\s+=\s+(\s+[\d\-\.]+)\s+\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
+                "min_neg_field_e": r"Min. Negative Field Energy\s+=\s+(\s+[\d\-\.]+)\s+"
                 r"\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
-                "max_pos_field_e": r"\s*Max. Positive Field Energy\s+=\s+(\s+[\d\-\.]+)\s+"
+                "max_pos_field_e": r"Max. Positive Field Energy\s+=\s+(\s+[\d\-\.]+)\s+"
                 r"\(\s+([\d\-\.]+)\s+KCAL/MOL\)\s*",
             },
         )
@@ -1999,7 +1984,7 @@ class QCOutput(MSONable):
             self.text,
             {
                 "constraint": r"Constraint\s+(\d+)\s+:\s+([\-\.0-9]+)",
-                "multiplier": r"\s*Lam\s+([\.\-0-9]+)",
+                "multiplier": r"Lam\s+([\.\-0-9]+)",
             },
         )
 
@@ -2018,7 +2003,7 @@ class QCOutput(MSONable):
 
         # Parse Becke populations
         header_pattern = (
-            r"\s*CDFT Becke Populations\s*\n\-+\s*\n\s*Atom\s+Excess Electrons\s+Population \(a\.u\.\)\s+Net Spin"
+            r"CDFT Becke Populations\s*\n\-+\s*\n\s*Atom\s+Excess Electrons\s+Population \(a\.u\.\)\s+Net Spin"
         )
         table_pattern = r"\s*(?:[0-9]+)\s+(?:[A-Za-z0-9]+)\s+([\-\.0-9]+)\s+([\.0-9]+)\s+([\-\.0-9]+)"
         footer_pattern = r"\s*\-+"
@@ -2364,9 +2349,10 @@ def jump_to_header(lines: list[str], header: str) -> list[str]:
     Raises:
         RuntimeError: If the header is not found.
     """
-    # Search for the header
+    # Search for the header. The plain containment test is a cheap prefilter (only lines
+    # containing the header can contain it once stripped), avoiding a strip() of every line.
     for idx, line in enumerate(lines):
-        if header in line.strip():
+        if header in line and header in line.strip():
             return lines[idx:]
 
     # Search failed
@@ -2972,6 +2958,14 @@ def nbo_parser(filename: str | Path) -> dict[str, list[pd.DataFrame]]:
     return dfs
 
 
+def _read_doubles(filename: str | Path) -> NDArray:
+    """Read a Q-Chem binary scratch file as native-endian float64 values, ignoring any trailing partial value."""
+    with zopen(filename, mode="rb") as file:
+        binary = file.read()
+    # Copy so that the result is writable, like the arrays built previously from the unpacked values
+    return np.frombuffer(binary, dtype=np.float64, count=len(binary) // 8).copy()
+
+
 def gradient_parser(filename: str | Path = "131.0") -> NDArray:
     """
     Parse the gradient data from a gradient scratch file.
@@ -2982,20 +2976,9 @@ def gradient_parser(filename: str | Path = "131.0") -> NDArray:
     Returns:
         NDArray: The gradient, in units of Hartree/Bohr.
     """
-    # Read the gradient scratch file in 8 byte chunks
-    tmp_grad_data: list[float] = []
-    with zopen(filename, mode="rb") as file:
-        binary = file.read()
-    tmp_grad_data.extend(struct.unpack("d", binary[ii * 8 : (ii + 1) * 8])[0] for ii in range(len(binary) // 8))
-    grad = [
-        [
-            float(tmp_grad_data[ii * 3]),
-            float(tmp_grad_data[ii * 3 + 1]),
-            float(tmp_grad_data[ii * 3 + 2]),
-        ]
-        for ii in range(len(tmp_grad_data) // 3)
-    ]
-    return np.array(grad)
+    values = _read_doubles(filename)
+    n_rows = len(values) // 3
+    return values[: 3 * n_rows].reshape(n_rows, 3)
 
 
 def hessian_parser(filename: str | Path = "132.0", n_atoms: int | None = None) -> NDArray:
@@ -3009,13 +2992,10 @@ def hessian_parser(filename: str | Path = "132.0", n_atoms: int | None = None) -
     Returns:
         NDArray: Hessian, formatted as 3n_atoms x 3n_atoms. Units are Hartree/Bohr^2/amu.
     """
-    hessian: list[float] = []
-    with zopen(filename, mode="rb") as file:
-        binary = file.read()
-    hessian.extend(struct.unpack("d", binary[ii * 8 : (ii + 1) * 8])[0] for ii in range(len(binary) // 8))
+    hessian = _read_doubles(filename)
     if n_atoms:
         return np.reshape(hessian, (n_atoms * 3, n_atoms * 3))
-    return np.array(hessian)
+    return hessian
 
 
 def orbital_coeffs_parser(filename: str | Path = "53.0") -> NDArray:
@@ -3028,8 +3008,4 @@ def orbital_coeffs_parser(filename: str | Path = "53.0") -> NDArray:
     Returns:
         NDArray: The orbital coefficients
     """
-    orbital_coeffs: list[float] = []
-    with zopen(filename, mode="rb") as file:
-        binary = file.read()
-    orbital_coeffs.extend(struct.unpack("d", binary[ii * 8 : (ii + 1) * 8])[0] for ii in range(len(binary) // 8))
-    return np.array(orbital_coeffs)
+    return _read_doubles(filename)

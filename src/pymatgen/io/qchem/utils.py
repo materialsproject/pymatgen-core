@@ -29,6 +29,11 @@ def read_pattern(text_str, patterns, terminate_on_match=False, postprocess=str):
         value of matches["energy"] = [[-1234], [-3453], ...], to the
         results from regex and postprocess. Note that the returned values
         are lists of lists, because you can grep multiple items on one line.
+
+    Note:
+        Start patterns with a literal where possible. A leading ``\s*`` never changes the captured
+        groups, but it stops the regex engine from skipping ahead to the literal, which makes
+        scanning a large output file roughly an order of magnitude slower.
     """
     compiled = {key: re.compile(pattern, re.MULTILINE | re.DOTALL) for key, pattern in patterns.items()}
     matches = defaultdict(list)

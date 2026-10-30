@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import shutil
+import struct
 
 import numpy as np
 import pytest
@@ -261,10 +262,6 @@ MULTI_JOB_OUT_NAMES = {
 }
 
 
-# NBO-heavy outputs that take >20 s each to parse and already have dedicated tests below
-SLOW_OUT_NAMES = {"new_qchem_files/3C.qout", "new_qchem_files/hyper.qout"}
-
-
 def _assert_matches_reference(parsed, ref, path="data"):
     """Recursively compare parsed QCOutput data against the JSON reference.
 
@@ -292,7 +289,7 @@ def _assert_matches_reference(parsed, ref, path="data"):
         assert parsed == ref, path
 
 
-@pytest.mark.parametrize("filename", sorted(SINGLE_JOB_OUT_NAMES - SLOW_OUT_NAMES))
+@pytest.mark.parametrize("filename", sorted(SINGLE_JOB_OUT_NAMES))
 def test_single_job_matches_reference(filename):
     data = QCOutput(f"{TEST_DIR}/{filename}").data
     ref = SINGLE_JOB_DICT[filename]
@@ -646,6 +643,26 @@ def test_prev_orbital_coeffs(tmp_path):
     orbital_coeffs = orbital_coeffs_parser(tmp_path / "53.0")
     assert len(orbital_coeffs) == 360400
     assert orbital_coeffs.all()
+
+
+@pytest.mark.parametrize("filename", ["131.0.gz", "132.0.gz", "53.0.gz"])
+def test_binary_parsers_match_struct_unpack(filename, tmp_path):
+    """The scratch-file parsers return writable float64 arrays of native-endian doubles, ignoring trailing bytes."""
+    with gzip.open(f"{TEST_DIR}/{filename}", "rb") as file:
+        binary = file.read()
+    expected = np.array([val for (val,) in struct.iter_unpack("d", binary)])
+    path = tmp_path / filename.removesuffix(".gz")
+    path.write_bytes(binary + b"\x01\x02\x03")  # a partial trailing value must be ignored
+
+    gradient = gradient_parser(path)
+    np.testing.assert_array_equal(gradient, expected[: len(expected) // 3 * 3].reshape(-1, 3))
+    hessian = hessian_parser(path)
+    np.testing.assert_array_equal(hessian, expected)
+    coeffs = orbital_coeffs_parser(path)
+    np.testing.assert_array_equal(coeffs, expected)
+    for arr in (gradient, hessian, coeffs):
+        assert arr.dtype == np.float64
+        assert arr.flags.writeable
 
 
 def test_multiple_outputs_raises_on_single_init():
