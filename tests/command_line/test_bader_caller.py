@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 import warnings
 
 import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.command_line import bader_caller
 from pymatgen.command_line.bader_caller import BaderAnalysis, bader_analysis_from_path
+from pymatgen.io.vasp.outputs import Chgcar
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/command_line/bader"
@@ -21,6 +24,80 @@ def test_parse_atomic_densities_deprecation(parse_atomic_densities):
         pytest.raises(ValueError, match="You must provide either a Cube file or a CHGCAR"),
     ):
         BaderAnalysis(bader_path="bader", parse_atomic_densities=parse_atomic_densities)
+
+
+FAKE_ACF = """\
+    #         X           Y           Z       CHARGE      MIN DIST    ATOMIC VOL
+ --------------------------------------------------------------------------------
+    1      0.0000      0.0000      0.0000      1.0000      1.0000      10.0000
+ --------------------------------------------------------------------------------
+    VACUUM CHARGE:               0.0000
+    VACUUM VOLUME:               0.0000
+    NUMBER OF ELECTRONS:         1.0000
+"""
+
+
+def _write_fake_bader(path, banner: str) -> str:
+    """Write a fake bader executable that prints banner and writes ACF.dat."""
+    exe = path / "fake_bader"
+    exe.write_text(f"#!/bin/sh\necho '{banner}'\ncat > ACF.dat <<'EOF'\n{FAKE_ACF}EOF\n")
+    exe.chmod(0o755)
+    return str(exe)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fake bader is a POSIX shell script")
+@pytest.mark.parametrize(
+    ("banner", "version"),
+    [("  GRID BASED BADER ANALYSIS  (Version 1.05 08/19/23)", 1.05), ("unexpected output", -1)],
+)
+def test_relative_path_and_version(tmp_path, monkeypatch, banner, version):
+    # relative paths used to be resolved inside ScratchDir (FileNotFoundError) and a
+    # short/unexpected version banner raised IndexError
+    bader_exe = _write_fake_bader(tmp_path, banner)
+    shutil.copy(f"{TEST_DIR}/CHGCAR.gz", tmp_path / "CHGCAR.gz")
+    monkeypatch.chdir(tmp_path)
+    ctx = pytest.warns(UserWarning, match="outdated") if version < 1 else warnings.catch_warnings()
+    with ctx:
+        analysis = BaderAnalysis(chgcar_filename="CHGCAR.gz", bader_path=bader_exe)
+    assert analysis.version == approx(version)
+    assert analysis.data[0]["charge"] == approx(1)
+    assert analysis.nelectrons == approx(1)
+
+
+def test_from_path_missing_chgcar(tmp_path):
+    # the "not found" check compared against None, but the helper returns "", so the
+    # missing CHGCAR surfaced later as an unrelated error (e.g. bader not installed)
+    with (
+        pytest.warns(UserWarning, match="Could not find 'CHGCAR'"),
+        pytest.raises(FileNotFoundError, match="Could not find CHGCAR"),
+    ):
+        BaderAnalysis.from_path(str(tmp_path))
+
+
+def test_bader_analysis_from_objects_does_not_mutate_chgcar(monkeypatch):
+    # the spin-polarized branch used to overwrite chgcar.data["total"] with the
+    # magnetization density and set chgcar.is_spin_polarized = False on the input
+    chgcar = Chgcar.from_file(f"{TEST_DIR}/CHGCAR.gz")
+    chgcar.data["diff"] = 0.1 * chgcar.data["total"]
+    chgcar.is_spin_polarized = True
+    total_before = chgcar.data["total"].copy()
+    written_mag = {}
+
+    class FakeBaderAnalysis:
+        def __init__(self, chgcar_filename, **kwargs):
+            if chgcar_filename.endswith("CHGCAR_mag"):
+                written_mag["total"] = Chgcar.from_file(chgcar_filename).data["total"]
+            self.data = [{"min_dist": 1.0, "charge": 1.0, "atomic_vol": 10.0}]
+            self.vacuum_charge = self.vacuum_volume = 0.0
+            self.version = 1.05
+
+    monkeypatch.setattr(bader_caller, "BaderAnalysis", FakeBaderAnalysis)
+    summary = bader_caller.bader_analysis_from_objects(chgcar)
+
+    assert summary["magmom"] == [1.0]
+    assert chgcar.is_spin_polarized
+    assert_allclose(chgcar.data["total"], total_before)
+    assert_allclose(written_mag["total"], chgcar.data["diff"], rtol=1e-4)
 
 
 @pytest.mark.skipif(not shutil.which("bader"), reason="bader executable not present")

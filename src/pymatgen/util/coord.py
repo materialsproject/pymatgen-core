@@ -132,6 +132,10 @@ def get_linear_interpolated_value(x_values: ArrayLike, y_values: ArrayLike, x: f
     """
     arr = np.array(sorted(zip(x_values, y_values, strict=True), key=lambda d: d[0]))  # type:ignore[arg-type,return-value]
 
+    # x equal to the last x value is in range but has no larger x value to interpolate to
+    if x == arr[-1, 0]:
+        return arr[-1, 1]
+
     indices = np.where(arr[:, 0] > x)[0]
 
     if len(indices) == 0 or indices[0] == 0:

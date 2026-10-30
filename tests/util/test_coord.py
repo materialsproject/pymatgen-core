@@ -19,6 +19,9 @@ class TestCoordUtils:
 
         # test when x is equal to first value in x_vals (previously broke, fixed in #4299):
         assert coord.get_linear_interpolated_value(x_vals, y_vals, 0) == approx(3)
+        # x equal to the last value used to raise "out of range"
+        assert coord.get_linear_interpolated_value(x_vals, y_vals, 5) == approx(12)
+        assert coord.get_linear_interpolated_value(x_vals[::-1], y_vals[::-1], 5) == approx(12)
         with pytest.raises(ValueError, match=r"-0.5 is out of range of provided x_values \(0, 5\)"):
             coord.get_linear_interpolated_value(x_vals, y_vals, -0.5)
 

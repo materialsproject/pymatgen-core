@@ -24,9 +24,10 @@ from monty.json import MontyDecoder, MontyEncoder
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
-from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Species
+from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Site, Species
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import (
+    FunctionalGroups,
     IMolecule,
     IStructure,
     Molecule,
@@ -769,6 +770,26 @@ Direct
         assert len(neigh_sites) == 1
         neigh_sites = struct.get_neighbors(site1, 2.0)
         assert len(neigh_sites) == 1
+
+    def test_copy_does_not_share_or_mutate_properties(self):
+        struct = self.propertied_structure
+        new_struct = struct.copy(properties={"another_prop": "test"})
+        assert struct.properties == {"test_property": "test"}
+        new_struct.properties["yet_another"] = 1
+        assert struct.properties == {"test_property": "test"}
+
+    def test_get_all_neighbors_empty_lists_not_aliased(self):
+        all_nbrs = self.struct.get_all_neighbors(0.1)
+        assert all_nbrs == [[], []]
+        all_nbrs[0].append("x")
+        assert all_nbrs[1] == []
+
+    def test_get_neighbor_list_py_fallback_numerical_tol(self, monkeypatch):
+        struct = IStructure(Lattice.cubic(10), ["H", "H"], [[0, 0, 0], [0.2000005, 0, 0]])
+        # Force the pure-Python fallback by making the Cython extension unimportable
+        monkeypatch.setitem(sys.modules, "pymatgen.optimization.neighbors", None)
+        _, _, _, dists = struct.get_neighbor_list(2.0, numerical_tol=1e-5)
+        assert_allclose(dists, [2.000005, 2.000005])
 
     def test_get_neighbor_list(self):
         # test mutable structure after applying strain (which makes lattice.matrix array no longer contiguous)
@@ -1858,6 +1879,10 @@ class TestStructure(MatSciTest):
         slab.apply_operation(op, fractional=True)  # fractional branch
         assert slab.pbc == (True, True, False)
 
+    def test_apply_strain_keeps_pbc(self):
+        for inplace in (True, False):
+            assert self.slab.copy().apply_strain(0.01, inplace=inplace).pbc == (True, True, False)
+
     def test_apply_strain(self):
         struct = self.struct
         initial_coord = struct[1].coords
@@ -1956,6 +1981,18 @@ class TestStructure(MatSciTest):
         # pbc must be preserved for every scaling form
         for scaling in [(2, 2, 1), 2, [[2, 0, 0], [0, 2, 0], [0, 0, 1]]]:
             assert (self.slab * scaling).pbc == (True, True, False)
+
+    def test_mul_charge(self):
+        struct = self.struct.copy().set_charge(1)
+        assert (struct * 2).charge == 8
+        # A left-handed scaling matrix (negative determinant) must not flip the sign of the charge
+        left_handed = struct * [[-1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        assert left_handed.charge == 1
+
+    def test_make_supercell_charge(self):
+        struct = self.struct.copy().set_charge(1)
+        assert struct.make_supercell([2, 1, 1]).charge == 2
+        assert struct.make_supercell(2, in_place=False).charge == 16
 
     def test_make_supercell(self):
         supercell = self.struct.make_supercell([2, 1, 1])
@@ -2704,6 +2741,21 @@ Sites (8)
         assert boxed_methane.formula == "H3 C1 F1"
         assert boxed_methane.get_distance(0, len(boxed_methane) - 1) == approx(1.11)
 
+    def test_substitute_does_not_mutate_func_group(self, boxed_methane):
+        # No C-F- bond length is known (TypeError path), so the group is translated/rotated as given.
+        # User-supplied (immutable) molecules must be accepted and left untouched.
+        group = IMolecule(["X", Species("F", -1)], [[0, 0, 0], [0, 0, 1.11]])
+        boxed_methane.substitute(2, group)
+        assert boxed_methane.formula == "H3 C1 F1"
+        assert_allclose(group.cart_coords, [[0, 0, 0], [0, 0, 1.11]])
+
+        # Same for the shared FunctionalGroups templates
+        template_coords = FunctionalGroups["fluoro"].cart_coords.copy()
+        boxed_methane.replace_species({"C": Species("C", -4), "H": Species("H", 1)})
+        boxed_methane.substitute(1, "fluoro")
+        assert boxed_methane.formula == "H2 C1 F2"
+        assert_allclose(FunctionalGroups["fluoro"].cart_coords, template_coords)
+
     def test_substitute_no_non_terminal_neighbor(self):
         h2 = Structure(Lattice.cubic(10), ["H", "H"], [[0, 0, 0], [0, 0, 0.074]])
         with pytest.raises(RuntimeError, match="Can't find a non-terminal neighbor"):
@@ -3140,6 +3192,35 @@ Site: H (-0.5134, 0.8892, -0.3630)"""
             pytest.raises(ValueError, match="Molecule crosses boundary of box"),
         ):
             rod.get_boxed_structure(1, 1, 1.6, random_rotation=True, no_cross=True)
+
+    def test_get_boxed_structure_no_cross_multiple_images(self):
+        boxed = self.mol.get_boxed_structure(10, 10, 10, images=(2, 2, 1), no_cross=True)
+        assert boxed.formula == "H16 C4"
+        assert boxed.lattice.abc == approx((20, 20, 10))
+
+    def test_copy_keeps_charge_and_spin(self):
+        mol = IMolecule(["O", "H"], [[0, 0, 0], [0, 0, 0.97]], charge=-1, properties={"name": "OH-"})
+        mol_copy = mol.copy()
+        assert mol_copy.charge == -1
+        assert mol_copy.spin_multiplicity == 1
+        assert mol_copy == mol
+        mol_copy.properties["name"] = "changed"
+        assert mol.properties["name"] == "OH-"
+
+        radical = IMolecule(["O", "H"], [[0, 0, 0], [0, 0, 0.97]], spin_multiplicity=4)
+        assert radical.copy().spin_multiplicity == 4
+
+    def test_from_sites_heterogeneous_properties(self):
+        sites = [Site("H", [0, 0, 0]), Site("H", [0, 0, 0.74], properties={"magmom": 1})]
+        mol = IMolecule.from_sites(sites)
+        assert mol[0].properties == {"magmom": None}
+        assert mol[1].properties == {"magmom": 1}
+
+    def test_from_str_keeps_charge_and_spin(self):
+        gjf = "#P HF/6-31G(d)\n\nOH anion\n\n-1 1\nO 0.0 0.0 0.0\nH 0.0 0.0 0.97\n\n"
+        mol = IMolecule.from_str(gjf, fmt="gjf")
+        assert mol.charge == -1
+        assert mol.spin_multiplicity == 1
 
     def test_to_default_json(self):
         json_str = self.mol.to()
