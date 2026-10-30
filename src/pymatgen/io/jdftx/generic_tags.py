@@ -150,10 +150,10 @@ class AbstractTag(ClassPrintFormatter, ABC):
             except (TypeError, ValueError):
                 warning = f"Could not fix the typing for tag '{tag}'"
                 try:
-                    warning += f"{value}!"
+                    warning += f" {value}!"
                 except (ValueError, TypeError):
-                    warning += "(unstringable value)!"
-                warnings.warn("warning", stacklevel=2)
+                    warning += " (unstringable value)!"
+                warnings.warn(warning, stacklevel=2)
         return tag, is_valid, value
 
     def _validate_repeat(self, tag: str, value: Any) -> None:

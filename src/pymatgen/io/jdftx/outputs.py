@@ -9,6 +9,7 @@ class is written.
 from __future__ import annotations
 
 import pprint
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -163,9 +164,10 @@ class JDFTXOutputs:
     def _check_store_vars(store_vars: list[str] | None) -> list[str]:
         if store_vars is None:
             return []
+        # Build a new list to avoid mutating the caller's list
+        store_vars = list(store_vars)
         if "bandstructure" in store_vars:
-            store_vars += ["kpts", "eigenvals"]
-            store_vars.pop(store_vars.index("bandstructure"))
+            store_vars = [var for var in store_vars if var != "bandstructure"] + ["kpts", "eigenvals"]
         return list(set(store_vars))
 
     def _init_paths(self):
@@ -274,7 +276,9 @@ class JDFTXOutputs:
         """
         if self.orb_label_list is None:
             return None, None
-        orbs = [label.split("(")[1].split(")")[0] for label in self.orb_label_list]
+        # Labels look like "<ion>#<n>(<orb>)", where <orb> may itself contain parentheses (f orbitals) and may be
+        # prefixed by a shell index when multiple shells of the same l are present.
+        orbs = [label.split("(", 1)[1][:-1].lstrip("0123456789") for label in self.orb_label_list]
         if orb_ref_list[-1][0] in orbs:
             return "f", 16
         if orb_ref_list[-2][0] in orbs:
@@ -310,7 +314,7 @@ class JDFTXOutputs:
         if self.orb_label_list is None:
             return None
         _proj_tju = self.bandProjections.copy()
-        if _proj_tju.dtype is np.complex64:
+        if np.iscomplexobj(_proj_tju):
             # Convert <orb|band(state)> to |<orb|band(state)>|^2
             _proj_tju = np.abs(_proj_tju) ** 2
         # Convert to standard datatype - using np.real to suppress warnings
@@ -747,7 +751,8 @@ class JDFTXOutfile:
         for outfile_slice in self.slices:
             if outfile_slice is not None:
                 if traj is None:
-                    traj = outfile_slice.trajectory
+                    # Copy so that extending the combined trajectory does not mutate the slice's trajectory
+                    traj = deepcopy(outfile_slice.trajectory)
                 elif outfile_slice.trajectory is not None:
                     traj.extend(outfile_slice.trajectory)
         return traj
@@ -762,7 +767,7 @@ class JDFTXOutfile:
         dct = {}
         for fld in self.__dataclass_fields__:
             if fld == "slices":
-                dct[fld] = [slc.as_dict() for slc in self.slices]
+                dct[fld] = [None if slc is None else slc.as_dict() for slc in self.slices]
                 continue
             value = getattr(self, fld)
             dct[fld] = value
@@ -855,11 +860,11 @@ def _disambiguate_paths(paths: list[Path], dump_fname: str, prefix: str | None) 
     """
     if len(paths) == 1:
         return paths[0]
-    _fprefix = ""
-    if prefix is not None:
-        _fprefix = f".{prefix}"
+    # Dump files are named by replacing "$VAR" in the dump-name with the dump variable name, so a dump-name of
+    # "jdft.$VAR" gives a prefix of "jdft" and file names like "jdft.eigenvals", and "$VAR" gives "eigenvals".
+    expected_name = dump_fname if (prefix is None or "$VAR" in prefix) else f"{Path(prefix).name}.{dump_fname}"
     for path in paths:
-        if path.name == f"{dump_fname}{_fprefix}":
+        if path.name == expected_name:
             return path
     raise FileNotFoundError(
         f"Multiple JDFTx {dump_fname} files found in directory, but none match the prefix: {prefix}."

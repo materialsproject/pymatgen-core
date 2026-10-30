@@ -744,7 +744,10 @@ class JOutStructure(Structure):
                 _forces.append(force)
             forces = np.array(_forces)
             if coords_type.lower() != "cartesian":
-                forces = np.dot(forces, np.linalg.inv(self.lattice.matrix))
+                # JDFTx lattice-coordinate forces are covariant (F_lat = R^T F_cart with lattice vectors as the
+                # columns of R), so F_cart = inv(R^T) F_lat. With row vectors and lattice.matrix = R^T, this is
+                # F_lat @ inv(lattice.matrix).T.
+                forces = np.dot(forces, np.linalg.inv(self.lattice.matrix).T)
             else:
                 forces *= 1 / bohr_to_ang
             forces *= Ha_to_eV

@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from pymatgen.io.jdftx._output_utils import find_first_range_key, get_start_lines
+from pymatgen.io.jdftx._output_utils import find_first_range_key, get_start_lines, read_outfile_slices
 from pymatgen.io.jdftx.joutstructures import _get_joutstructures_start_idx
 from pymatgen.io.jdftx.outputs import _find_jdftx_out_file
 
@@ -87,3 +87,12 @@ def test_find_jdftx_out_file(tmp_path):
     write_mt_file(tmp_path, "tinyout.out")
     with pytest.raises(FileNotFoundError, match=re.escape("Multiple JDFTx out files found in directory.")):
         _find_jdftx_out_file(tmp_path)
+
+
+def test_read_outfile_slices_keeps_last_line(tmp_path):
+    """The final line of the out file must be kept in the last slice."""
+    lines = ["*************** JDFTx 1\n", "a\n", "*************** JDFTx 2\n", "b\n", "Done!\n"]
+    outfile = tmp_path / "jdftx.out"
+    outfile.write_text("".join(lines))
+    texts = read_outfile_slices(str(outfile))
+    assert texts == [lines[:2], lines[2:]]

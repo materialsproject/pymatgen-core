@@ -76,7 +76,8 @@ def read_outfile_slices(file_name: str) -> list[list[str]]:
         list of out file slices (individual calls of JDFTx)
     """
     _text = read_file(file_name)
-    start_lines = get_start_lines(_text, add_end=True)
+    # Append len(_text) (not the index of the last line) as the end bound so the final line is kept
+    start_lines = [*get_start_lines(_text), len(_text)]
     texts = []
     for i in range(len(start_lines) - 1):
         text = _text[start_lines[i] : start_lines[i + 1]]
@@ -563,6 +564,7 @@ orb_ref_to_o_dict = {
     orb_ref_list[-1][3]: int(Orbital.f0),
     orb_ref_list[-1][4]: int(Orbital.f1),
     orb_ref_list[-1][5]: int(Orbital.f2),
+    orb_ref_list[-1][6]: int(Orbital.f3),
 }
 
 

@@ -559,3 +559,44 @@ def test_jdftxinfile_comparison():
     assert not len(
         jif1.get_filtered_differing_tags(jif1copy, exclude_tag_categories=["electronic"])
     )  # Tag categories can be filtered out
+
+
+def test_jdftxstructure_lattice_coords_not_scaled():
+    """Fractional (lattice) ion coordinates must not be scaled by the Bohr-to-Angstrom factor."""
+    struct = Structure(np.eye(3) * 5.0, ["Si", "Si"], [[0, 0, 0], [0.25, 0.25, 0.25]])
+    jif = JDFTXInfile.from_structure(struct)
+    assert jif["coords-type"] == "Lattice"
+    assert jif.structure.frac_coords == pytest.approx(struct.frac_coords)
+    jif_cart = JDFTXInfile.from_structure(struct, write_cart_coords=True)
+    assert jif_cart["coords-type"] == "Cartesian"
+    assert jif_cart.structure.cart_coords == pytest.approx(struct.cart_coords)
+
+
+def test_jdftxstructure_hyperplane_round_trip():
+    """HyperPlane constraints read from an infile can be written back out."""
+    text = (
+        "lattice \\\n 10 0 0 \\\n 0 10 0 \\\n 0 0 10\ncoords-type Cartesian\n"
+        "ion H 1.0 1.0 1.0 1 HyperPlane 1.0 0.0 0.0 g1 HyperPlane 0.0 1.0 0.0 g2\n"
+        "ion H 3.0 1.0 1.0 1 HyperPlane 0.0 0.0 1.0 g3\n"
+    )
+    jif = JDFTXInfile.from_str(text)
+    jstruct = jif.to_jdftxstructure(jif)
+    assert jstruct.constraint_types == ["HyperPlane", "HyperPlane"]
+    assert jstruct.constraint_vectors == [[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]]]
+    assert jstruct.hyperplane_group_names == [["g1", "g2"], ["g3"]]
+    jif2 = JDFTXInfile.from_str(jstruct.get_str(in_cart_coords=True))
+    for ion1, ion2 in zip(jif["ion"], jif2["ion"], strict=True):
+        assert ion2["HyperPlane"] == ion1["HyperPlane"]
+
+
+def test_get_filtered_differing_tags_does_not_mutate_args():
+    jif1 = JDFTXInfile.from_file(ex_infile1_fname)
+    jif2 = jif1.copy()
+    jif2["elec-n-bands"] = 20001
+    exclude_tags = ["elec-n-bands"]
+    ensure_include_tags = ["elec-n-bands"]
+    jif1.get_filtered_differing_tags(jif2, exclude_tags=exclude_tags, exclude_tag_categories=["electronic"])
+    assert exclude_tags == ["elec-n-bands"]
+    exclude_tags = ["elec-n-bands"]
+    jif1.get_filtered_differing_tags(jif2, exclude_tags=exclude_tags, ensure_include_tags=ensure_include_tags)
+    assert exclude_tags == ["elec-n-bands"]
