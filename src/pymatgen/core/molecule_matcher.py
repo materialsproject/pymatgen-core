@@ -1065,54 +1065,27 @@ class HungarianOrderMatcher(KabschMatcher):
         q_axis = HungarianOrderMatcher.get_principal_axis(q_centroid, q_weights)
 
         # rotate Q onto P considering that the axis are parallel and antiparallel
-        U = HungarianOrderMatcher.rotation_matrix_vectors(q_axis, p_axis)
-        p_centroid_test = np.dot(p_centroid, U)
+        for target_axis in (p_axis, -p_axis):
+            U = HungarianOrderMatcher.rotation_matrix_vectors(q_axis, target_axis)
+            p_centroid_test = np.dot(p_centroid, U)
 
-        # generate full view from q shape to fill in atom view on the fly
-        perm_inds = np.zeros(len(p_atoms), dtype=np.int64)
+            # generate full view from q shape to fill in atom view on the fly
+            perm_inds = np.zeros(len(p_atoms), dtype=np.int64)
 
-        # Find unique atoms
-        species = np.unique(p_atoms)
+            for specie in np.unique(p_atoms):
+                p_atom_inds = np.where(p_atoms == specie)[0]
+                q_atom_inds = np.where(q_atoms == specie)[0]
+                A = q_centroid[q_atom_inds]
+                B = p_centroid_test[p_atom_inds]
 
-        for specie in species:
-            p_atom_inds = np.where(p_atoms == specie)[0]
-            q_atom_inds = np.where(q_atoms == specie)[0]
-            A = q_centroid[q_atom_inds]
-            B = p_centroid_test[p_atom_inds]
+                # Perform Hungarian analysis on distance matrix between atoms of 1st
+                # structure and trial structure
+                distances = cdist(A, B, "euclidean")
+                _a_inds, b_inds = linear_sum_assignment(distances)
 
-            # Perform Hungarian analysis on distance matrix between atoms of 1st
-            # structure and trial structure
-            distances = cdist(A, B, "euclidean")
-            _a_inds, b_inds = linear_sum_assignment(distances)
+                perm_inds[q_atom_inds] = p_atom_inds[b_inds]
 
-            perm_inds[q_atom_inds] = p_atom_inds[b_inds]
-
-        yield perm_inds
-
-        # rotate Q onto P considering that the axis are parallel and antiparallel
-        U = HungarianOrderMatcher.rotation_matrix_vectors(q_axis, -p_axis)
-        p_centroid_test = np.dot(p_centroid, U)
-
-        # generate full view from q shape to fill in atom view on the fly
-        perm_inds = np.zeros(len(p_atoms), dtype=np.int64)
-
-        # Find unique atoms
-        species = np.unique(p_atoms)
-
-        for specie in species:
-            p_atom_inds = np.where(p_atoms == specie)[0]
-            q_atom_inds = np.where(q_atoms == specie)[0]
-            A = q_centroid[q_atom_inds]
-            B = p_centroid_test[p_atom_inds]
-
-            # Perform Hungarian analysis on distance matrix between atoms of 1st
-            # structure and trial structure
-            distances = cdist(A, B, "euclidean")
-            _a_inds, b_inds = linear_sum_assignment(distances)
-
-            perm_inds[q_atom_inds] = p_atom_inds[b_inds]
-
-        yield perm_inds
+            yield perm_inds
 
     @staticmethod
     def get_principal_axis(coords, weights):
