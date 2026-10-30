@@ -460,7 +460,9 @@ class EnumerateStructureTransformation(AbstractTransformation):
 
             return {"num_sites": len(struct), "structure": struct}
 
-        all_structures = Parallel(n_jobs=self.n_jobs)(delayed(_get_stats)(struct) for struct in structures)
+        # A worker pool for a single structure (e.g. ordered input) is pure overhead
+        n_jobs = self.n_jobs if len(structures) > 1 else 1
+        all_structures = Parallel(n_jobs=n_jobs)(delayed(_get_stats)(struct) for struct in structures)
 
         def sort_func(struct):
             return (
