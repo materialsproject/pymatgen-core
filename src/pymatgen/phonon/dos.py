@@ -80,6 +80,14 @@ def _thermo_integrand(
     return weights * dens
 
 
+def _per_formula_unit(value: float, structure: Structure | None) -> float:
+    """Convert a per-cell quantity to per formula unit if a structure is given, else return it unchanged."""
+    if not structure:
+        return value
+    composition = structure.composition
+    return value / (composition.num_atoms / composition.reduced_composition.num_atoms)
+
+
 class PhononDos(MSONable):
     """Basic DOS object. All other DOS objects are extended versions of this object."""
 
@@ -105,8 +113,7 @@ class PhononDos(MSONable):
         """
         if sigma == 0:
             return self.densities
-        diff = [self.frequencies[idx + 1] - self.frequencies[idx] for idx in range(len(self.frequencies) - 1)]
-        avg_diff = sum(diff) / len(diff)
+        avg_diff = np.diff(self.frequencies).mean()
 
         return gaussian_filter1d(self.densities, sigma / avg_diff)
 
@@ -258,11 +265,7 @@ class PhononDos(MSONable):
         cv = float(np.trapezoid(_thermo_integrand(freqs, dens, cv_weight, 1.0), x=freqs))
         cv *= const.Boltzmann * const.Avogadro
 
-        if structure:
-            formula_units = structure.composition.num_atoms / structure.composition.reduced_composition.num_atoms
-            cv /= formula_units
-
-        return cv
+        return _per_formula_unit(cv, structure)
 
     def entropy(self, temp: float | None = None, structure: Structure | None = None, **kwargs) -> float:
         """Vibrational entropy at temperature T obtained from the integration of the DOS.
@@ -297,11 +300,7 @@ class PhononDos(MSONable):
 
         entropy *= const.Boltzmann * const.Avogadro
 
-        if structure:
-            formula_units = structure.composition.num_atoms / structure.composition.reduced_composition.num_atoms
-            entropy /= formula_units
-
-        return entropy
+        return _per_formula_unit(entropy, structure)
 
     def internal_energy(self, temp: float | None = None, structure: Structure | None = None, **kwargs) -> float:
         """Phonon contribution to the internal energy at temperature T obtained from the integration of the DOS.
@@ -337,11 +336,7 @@ class PhononDos(MSONable):
 
         e_phonon *= THZ_TO_J * const.Avogadro
 
-        if structure:
-            formula_units = structure.composition.num_atoms / structure.composition.reduced_composition.num_atoms
-            e_phonon /= formula_units
-
-        return e_phonon
+        return _per_formula_unit(e_phonon, structure)
 
     def helmholtz_free_energy(self, temp: float | None = None, structure: Structure | None = None, **kwargs) -> float:
         """Phonon contribution to the Helmholtz free energy at temperature T obtained from the integration of the DOS.
@@ -376,11 +371,7 @@ class PhononDos(MSONable):
 
         e_free *= const.Boltzmann * const.Avogadro * temp
 
-        if structure:
-            formula_units = structure.composition.num_atoms / structure.composition.reduced_composition.num_atoms
-            e_free /= formula_units
-
-        return e_free
+        return _per_formula_unit(e_free, structure)
 
     def zero_point_energy(self, structure: Structure | None = None) -> float:
         """Zero point energy of the system. Only positive frequencies will be used.
@@ -402,11 +393,7 @@ class PhononDos(MSONable):
         zpe = 0.5 * np.trapezoid(freqs * dens, x=freqs)
         zpe *= THZ_TO_J * const.Avogadro
 
-        if structure:
-            formula_units = structure.composition.num_atoms / structure.composition.reduced_composition.num_atoms
-            zpe /= formula_units
-
-        return zpe
+        return _per_formula_unit(zpe, structure)
 
     def mae(self, other: PhononDos, two_sided: bool = True) -> float:
         """Mean absolute error between two DOSs.
