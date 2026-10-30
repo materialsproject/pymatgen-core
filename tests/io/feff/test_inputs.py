@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Molecule, Structure
+from pymatgen.core import Lattice, Molecule, Structure
 from pymatgen.io.feff.inputs import Atoms, Header, Paths, Potential, Tags
 from pymatgen.util.testing import TEST_FILES_DIR
 
@@ -127,6 +129,19 @@ class TestFeffAtoms:
         atoms2 = Atoms.from_dict(dct)
         assert str(atoms) == str(atoms2), "Atoms failed to and from dict test"
 
+    def test_as_dict_and_from_dict_inequivalent_absorber(self):
+        # the two Fe sites are inequivalent; the absorbing site index must survive serialization
+        struct = Structure(
+            Lattice.cubic(5),
+            ["Fe", "Fe", "O", "O"],
+            [[0, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0], [0.1, 0.3, 0.4]],
+        )
+        for cls, kwargs in ((Atoms, {"radius": 4}), (Potential, {})):
+            obj = cls(struct, 1, **kwargs)
+            obj2 = cls.from_dict(obj.as_dict())
+            assert obj2.center_index == 1
+            assert str(obj2) == str(obj)
+
     def test_cluster_from_file(self):
         self.atoms.write_file("ATOMS_test")
         mol_1 = Atoms.cluster_from_file("ATOMS_test")
@@ -141,8 +156,37 @@ class TestFeffAtoms:
         assert len(atoms) == 37
         assert atoms.formula == "Pt37"
 
+    def test_absorbing_atom_numpy_index(self):
+        # numpy integer indices (e.g. from np.where) are valid site indices
+        atoms = Atoms(self.structure, np.int64(2), 10.0)
+        assert atoms.absorbing_atom == "O"
+        assert atoms.center_index == 2
+
+    def test_absorbing_atom_index_oxidation_states(self):
+        # oxidation-state decorated structures must give the bare element symbol
+        oxi_struct = self.structure.copy()
+        oxi_struct.add_oxidation_state_by_element({"Co": 2, "O": -2})
+        atoms_oxi = Atoms(oxi_struct, 0, 10.0)
+        assert atoms_oxi.absorbing_atom == "Co"
+        assert str(atoms_oxi) == str(Atoms(self.structure, 0, 10.0))
+        assert str(Potential(oxi_struct, 0)) == str(Potential(self.structure, 0))
+
+    def test_cluster_from_file_ignores_text_after_end(self, tmp_path):
+        with open(f"{FEFF_TEST_DIR}/feff.inp", encoding="utf-8") as file:
+            content = file.read()
+        feff_inp = tmp_path / "feff.inp"
+        feff_inp.write_text(f"{content.rstrip()}\n* trailing comment\nEXAFS 20\n", encoding="utf-8")
+        cluster = Atoms.cluster_from_file(str(feff_inp))
+        assert len(cluster) == len(Atoms.cluster_from_file(f"{FEFF_TEST_DIR}/feff.inp"))
+
 
 class TestFeffTags:
+    @pytest.mark.parametrize("cif_name", ["Li-Mn-O_mp-123.cif", "structures/CoO.cif", "CoO19128.cif"])
+    def test_cif_tag(self, cif_name):
+        tags = Tags()
+        tags["CIF"] = cif_name
+        assert tags["CIF"] == cif_name
+
     def test_init(self):
         filepath = f"{FEFF_TEST_DIR}/PARAMETERS"
         parameters = Tags.from_file(filepath)
