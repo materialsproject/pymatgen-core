@@ -326,6 +326,11 @@ class TestMITMPRelaxSet(MatSciTest):
             match="Disordered structure with partial occupancies cannot be converted into POSCAR",
         ):
             _ = self.set(disordered).nelect
+        with pytest.raises(
+            ValueError,
+            match="Disordered structure with partial occupancies cannot be converted into POSCAR",
+        ):
+            _ = self.set(disordered).incar
 
     @skip_if_no_psp_dir
     def test_estimate_nbands(self):
