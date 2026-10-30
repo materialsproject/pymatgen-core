@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import math
 import warnings
 from collections import defaultdict
@@ -230,12 +229,10 @@ class RelaxationAnalyzer:
                 reason to duplicate the information or computation.
         """
         data: dict[int, dict[int, float]] = defaultdict(dict)
-        for indices in itertools.combinations(list(range(len(self.initial))), 2):
-            ii, jj = sorted(indices)
-            initial_dist = self.initial[ii].distance(self.initial[jj])
-            if initial_dist < max_radius:
-                final_dist = self.final[ii].distance(self.final[jj])
-                data[ii][jj] = final_dist / initial_dist - 1
+        initial_dists = self.initial.distance_matrix
+        final_dists = self.final.distance_matrix
+        for ii, jj in zip(*np.nonzero(np.triu(initial_dists < max_radius, k=1)), strict=True):
+            data[int(ii)][int(jj)] = final_dists[ii, jj] / initial_dists[ii, jj] - 1
         return data
 
 
