@@ -61,3 +61,15 @@ class TestNeighbors(MatSciTest):
             lattice=np.array(lattice.matrix),
         )
         assert len(nns[0]) == 4
+
+    def test_points_in_spheres_empty(self):
+        # empty center or point lists used to raise "Cannot create cython.array from NULL pointer"
+        points = np.array([[0.0, 0.0, 0.0], [2.0, 2.0, 2.0]])
+        lattice = np.array(Lattice.cubic(3).matrix)
+        pbc = np.array([1, 1, 1], dtype=np.int64)
+        for all_coords, center_coords in ((points, np.zeros((0, 3))), (np.zeros((0, 3)), points)):
+            for r in (0.5, 3.0):  # also cover the r < min_r recursion
+                idx1, idx2, offsets, dists = find_points_in_spheres(all_coords, center_coords, r, pbc, lattice)
+                assert idx1.shape == idx2.shape == dists.shape == (0,)
+                assert offsets.shape == (0, 3)
+                assert idx1.dtype == idx2.dtype == np.int64

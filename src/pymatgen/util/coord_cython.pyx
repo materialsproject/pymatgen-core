@@ -125,12 +125,23 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
     cdef np.float_t[:, ::1] frac_im
     cdef int i, j, k, l, I, J, bestk = 0
 
+    I = len(fcoords1)
+    J = len(fcoords2)
+    if I == 0 or J == 0:
+        vectors = np.empty((I, J, 3))
+        return (vectors, np.empty((I, J))) if return_d2 else vectors
+
     if n_pbc == 3:
-        fcoords1 = lattice.get_lll_frac_coords(fcoords1)
-        fcoords2 = lattice.get_lll_frac_coords(fcoords2)
+        # Lattice.lll_inverse inverts a 3x3 matrix on every access, so fetch it once
+        lll_inverse = lattice.lll_inverse
+        fcoords1 = np.dot(fcoords1, lll_inverse)
+        fcoords2 = np.dot(fcoords2, lll_inverse)
         matrix = lattice.lll_matrix
         frac_im = images_view
     else:
+        # the memoryviews below require C-contiguous float64 input
+        fcoords1 = np.ascontiguousarray(fcoords1, dtype=np.float64)
+        fcoords2 = np.ascontiguousarray(fcoords2, dtype=np.float64)
         frac_im = <np.float_t[:n_pbc_im, :3]> malloc(3 * n_pbc_im * sizeof(np.float_t))
         matrix = lattice.matrix.copy()
         k = 0
@@ -143,9 +154,6 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
                 k += 1
 
     cdef np.float_t[:, ::1] lat = np.asarray(matrix, dtype=np.float64, order="C")
-
-    I = len(fcoords1)
-    J = len(fcoords2)
 
     cdef np.float_t[:, ::1] fc1 = fcoords1
     cdef np.float_t[:, ::1] fc2 = fcoords2
@@ -252,7 +260,8 @@ def is_coord_subset_pbc(subset, superset, atol, mask, pbc=(True, True, True)):
 
     cdef int i, j, k, len_fc1, len_fc2
     cdef np.float_t d
-    cdef bint ok
+    # an empty subset is trivially contained in any superset
+    cdef bint ok = True
     cdef bint pbc_int[3]
 
     pbc_int = pbc
@@ -293,16 +302,17 @@ def coord_list_mapping_pbc(subset, superset, atol=1e-8, pbc=(True, True, True)):
     Returns:
         list of indices such that superset[indices] = subset
     """
+    subset = np.atleast_2d(np.asarray(subset, dtype=np.float64))
+    superset = np.atleast_2d(np.asarray(superset, dtype=np.float64))
     inds = -np.ones(len(subset), dtype=np.int64)
-    subset = np.atleast_2d(subset)
-    superset = np.atleast_2d(superset)
 
     cdef np.float_t[:, :] fc1 = subset
     cdef np.float_t[:, :] fc2 = superset
     cdef np.float_t[:] t = atol
     cdef np.int64_t[:] c_inds = inds
     cdef np.float_t d
-    cdef bint ok_inner, ok_outer
+    cdef bint ok_inner
+    cdef bint ok_outer = True  # an empty subset maps trivially
     cdef bint pbc_int[3]
 
     pbc_int = pbc
