@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 
 import numpy as np
@@ -8,7 +9,7 @@ from monty.json import MontyDecoder
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Element, Lattice, Structure, SymmOp
+from pymatgen.core import Composition, Element, IStructure, Lattice, Structure, SymmOp
 from pymatgen.core.structure_matcher import (
     ElementComparator,
     FrameworkComparator,
@@ -16,6 +17,7 @@ from pymatgen.core.structure_matcher import (
     OrderDisorderElementComparator,
     SiteOrderedIStructure,
     StructureMatcher,
+    _get_species_runs,
     get_linear_assignment_solution,
 )
 from pymatgen.util.coord import find_in_coord_list_pbc
@@ -1099,3 +1101,43 @@ def test_site_ordered_istructure_hash_uses_coords() -> None:
 
     assert s1.composition == s2.composition
     assert hash(s1) != hash(s2)
+
+
+def test_site_ordered_istructure_eq() -> None:
+    base = Structure.from_file(f"{TEST_DIR}/Na2Fe2PNO4Se4.json")
+    s1 = SiteOrderedIStructure.from_sites(base)
+
+    assert s1 == SiteOrderedIStructure.from_sites(base.copy())
+    assert s1 == IStructure.from_sites(base)
+    # same sites in a different order
+    assert s1 != SiteOrderedIStructure.from_sites(list(base)[::-1])
+    assert IStructure.from_sites(base) == IStructure.from_sites(list(base)[::-1])
+    # different lattice, site or structure properties, or number of sites
+    assert s1 != SiteOrderedIStructure.from_sites(base.copy().scale_lattice(base.volume * 1.1))
+    shifted = base.copy()
+    shifted.translate_sites([0], [0.05, 0, 0])
+    assert s1 != SiteOrderedIStructure.from_sites(shifted)
+    assert s1 != SiteOrderedIStructure.from_sites(base, properties={"foo": 1})
+    assert s1 != SiteOrderedIStructure.from_sites(list(base)[:-1])
+    assert s1 != "not a structure"
+
+
+def test_get_species_runs() -> None:
+    fe_mn = Composition({"Fe": 0.5, "Mn": 0.5})
+    species = [
+        Composition("O"),
+        Composition("O"),
+        fe_mn,
+        # equal within Composition.amount_tolerance, but not exactly equal
+        Composition({"Fe": 0.5 + 1e-10, "Mn": 0.5 - 1e-10}),
+        Composition("O"),
+    ]
+    # must group exactly like itertools.groupby, which _get_mask used before
+    expected = []
+    for sp, group in itertools.groupby(enumerate(species), key=lambda x: x[1]):
+        indices = [idx for idx, _ in group]
+        expected.append((sp, slice(indices[0], indices[-1] + 1)))
+    runs = _get_species_runs(species)
+    assert runs == expected == [(species[0], slice(0, 2)), (fe_mn, slice(2, 4)), (species[4], slice(4, 5))]
+    assert runs[1][0] is fe_mn
+    assert _get_species_runs([]) == []
