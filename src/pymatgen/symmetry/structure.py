@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-from monty.json import MontyEncoder
+from monty.json import MontyDecoder, MontyEncoder
 from tabulate import tabulate
 
 from pymatgen.core.structure import FileFormats, PeriodicSite, Structure
@@ -97,7 +97,8 @@ class SymmetrizedStructure(Structure):
             row = [str(idx), site.species_string]
             row.extend([f"{j:>10.6f}" for j in site.frac_coords])
             row.append(self.wyckoff_symbols[idx])
-            row += [props[key][idx] for key in keys]
+            site_idx = self.equivalent_indices[idx][0]
+            row += [props[key][site_idx] for key in keys]
             data.append(row)
         outs.append(tabulate(data, headers=["#", "SP", "a", "b", "c", "Wyckoff", *keys]))
         return "\n".join(outs)
@@ -136,7 +137,8 @@ class SymmetrizedStructure(Structure):
             "@module": type(self).__module__,
             "@class": type(self).__name__,
             "structure": structure.as_dict(),
-            "spacegroup": self.spacegroup,
+            # as_dict keeps the space group symbol and number, which a JSON list encoding would drop
+            "spacegroup": self.spacegroup.as_dict() if hasattr(self.spacegroup, "as_dict") else self.spacegroup,
             "equivalent_positions": self.site_labels,
             "wyckoff_letters": self.wyckoff_letters,
         }
@@ -151,10 +153,19 @@ class SymmetrizedStructure(Structure):
         Returns:
             SymmetrizedStructure
         """
+        from pymatgen.symmetry.analyzer import SpacegroupOperations
+
+        # MontyDecoder hands nested values over still JSON-encoded
+        spacegroup = dct["spacegroup"]
+        if isinstance(spacegroup, dict):
+            spacegroup = SpacegroupOperations.from_dict(spacegroup)
+        equivalent_positions = dct["equivalent_positions"]
+        if isinstance(equivalent_positions, dict):
+            equivalent_positions = MontyDecoder().process_decoded(equivalent_positions)
         return cls(
             Structure.from_dict(dct["structure"]),
-            spacegroup=dct["spacegroup"],
-            equivalent_positions=dct["equivalent_positions"],
+            spacegroup=spacegroup,
+            equivalent_positions=equivalent_positions,
             wyckoff_letters=dct["wyckoff_letters"],
         )
 

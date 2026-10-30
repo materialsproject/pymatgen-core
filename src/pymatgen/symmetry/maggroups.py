@@ -122,7 +122,11 @@ class MagneticSpaceGroup(SymmetryGroup):
         elif isinstance(label, int):
             # OG3 index is a 'master' index, going from 1 to 1651
             c.execute("SELECT * FROM space_groups WHERE OG3=?;", (label,))
-        raw_data = list(c.fetchone())
+        row = c.fetchone()
+        if row is None:
+            db.close()
+            raise ValueError(f"Magnetic space group {label!r} not found")
+        raw_data = list(row)
 
         # Jones Faithful transformation
         self.jf = JonesFaithfulTransformation.from_transformation_str("a,b,c;0,0,0")
@@ -299,15 +303,23 @@ class MagneticSpaceGroup(SymmetryGroup):
                 "SELECT BNS_label FROM space_groups WHERE OG1=? and OG2=? and OG3=?",
                 (label[0], label[1], label[2]),
             )
-        bns_label = c.fetchone()[0]
+        row = c.fetchone()
         db.close()
+        if row is None:
+            raise ValueError(f"Magnetic space group with OG label {label!r} not found")
 
-        return cls(bns_label)
+        return cls(row[0])
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
             return NotImplemented
-        return self._data == other._data
+        # the setting transformation changes the symmetry operations
+        return self._data == other._data and self.jf == other.jf
+
+    def __hash__(self) -> int:
+        # Defining __eq__ removes the inherited __hash__. jf compares with a tolerance, so only
+        # the BNS number is hashed; groups that compare equal therefore hash equal.
+        return hash(tuple(self._data["bns_number"]))
 
     @property
     def crystal_system(self):
@@ -412,12 +424,10 @@ class MagneticSpaceGroup(SymmetryGroup):
         if crys_system == "cubic":
             a = abc[0]
             return check(abc, [a, a, a], tol) and check(angles, [90, 90, 90], angle_tol)
-        if crys_system == "hexagonal" or (crys_system == "trigonal" and self.sg_symbol.endswith("H")):
+        # ISO-MAG uses hexagonal axes for all trigonal groups, including the R-centered ones
+        if crys_system in ("hexagonal", "trigonal"):
             a = abc[0]
             return check(abc, [a, a, None], tol) and check(angles, [90, 90, 120], angle_tol)
-        if crys_system == "trigonal":
-            a = abc[0]
-            return check(abc, [a, a, a], tol)
         if crys_system == "tetragonal":
             a = abc[0]
             return check(abc, [a, a, None], tol) and check(angles, [90, 90, 90], angle_tol)
