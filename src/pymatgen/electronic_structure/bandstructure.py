@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 import re
@@ -226,18 +227,21 @@ class BandStructure:
         if self.projections and self.structure is None:
             raise RuntimeError("if projections are provided a structure object is also required")
 
-        for kpt in kpoints:
-            # Check if this Kpoint has a label
+        # Match every kpoint against every label at once: is_labeled[kpt_idx, label_idx]
+        kpts = np.asarray(kpoints, dtype=float)
+        label_names = list(labels_dict)
+        if label_names and len(kpts) > 0:
+            label_coords = np.array([labels_dict[c] for c in label_names], dtype=float)
+            is_labeled = np.linalg.norm(kpts[:, None, :] - label_coords[None, :, :], axis=-1) < 0.0001
+        else:
+            is_labeled = np.zeros((len(kpts), 0), dtype=bool)
+
+        for kpt, matches in zip(kpts, is_labeled, strict=True):
+            # If several labels match, the last one is used for the kpoint
             label = None
-            for c in labels_dict:
-                if np.linalg.norm(kpt - np.array(labels_dict[c])) < 0.0001:
-                    label = c
-                    self.labels_dict[label] = Kpoint(
-                        kpt,
-                        lattice,
-                        label=label,
-                        coords_are_cartesian=coords_are_cartesian,
-                    )
+            for c in itertools.compress(label_names, matches):
+                label = c
+                self.labels_dict[label] = Kpoint(kpt, lattice, label=label, coords_are_cartesian=coords_are_cartesian)
             self.kpoints.append(Kpoint(kpt, lattice, label=label, coords_are_cartesian=coords_are_cartesian))
         self.bands = {spin: np.array(v) for spin, v in eigenvals.items()}
         self.nb_bands = len(self.bands[Spin.up])
@@ -253,15 +257,21 @@ class BandStructure:
         """
         if self.structure is None:
             raise ValueError("structure is None.")
+        site_indices: dict[str, list[int]] = defaultdict(list)
+        for idx, site in enumerate(self.structure):
+            site_indices[str(site.specie)].append(idx)
+
+        n_bands, n_kpts = self.nb_bands, len(self.kpoints)
         result: dict[Spin, list[list[dict[str, float]]]] = {}
         for spin, val in self.projections.items():
-            result[spin] = [[defaultdict(float) for _ in range(len(self.kpoints))] for _ in range(self.nb_bands)]
-            for i, j, k in itertools.product(
-                range(self.nb_bands),
-                range(len(self.kpoints)),
-                range(len(self.structure)),
-            ):
-                result[spin][i][j][str(self.structure[k].specie)] += np.sum(val[i, j, :, k])
+            result[spin] = [[defaultdict(float) for _ in range(n_kpts)] for _ in range(n_bands)]
+            # Sum over orbitals, then over the sites of each species
+            orb_summed = val[:n_bands, :n_kpts].sum(axis=2)
+            for el, sites in site_indices.items():
+                proj = orb_summed[:, :, sites].sum(axis=2)
+                for band_res, band_proj in zip(result[spin], proj, strict=True):
+                    for kpt_res, value in zip(band_res, band_proj, strict=True):
+                        kpt_res[el] = value
         return result
 
     def get_projections_on_elements_and_orbitals(self, el_orb_spec: dict[str, list[str]]):
@@ -281,22 +291,31 @@ class BandStructure:
             raise ValueError("Structure is required for this method")
         result: dict[Spin, list] = {}
         species_orb_spec = {get_el_sp(el): orbs for el, orbs in el_orb_spec.items()}
-        for spin, v in self.projections.items():
-            result[spin] = [
-                [{str(e): defaultdict(float) for e in species_orb_spec} for _ in range(len(self.kpoints))]
-                for _ in range(self.nb_bands)
-            ]
+        # Indices of the sites of each requested species in the structure
+        site_indices: dict[SpeciesLike, list[int]] = defaultdict(list)
+        for idx, site in enumerate(self.structure):
+            if site.specie in species_orb_spec:
+                site_indices[site.specie].append(idx)
 
-            for i, j, k in itertools.product(
-                range(self.nb_bands),
-                range(len(self.kpoints)),
-                range(len(self.structure)),
-            ):
-                sp = self.structure[k].specie
-                for orb_i in range(len(v[i][j])):
-                    o = Orbital(orb_i).name[0]
-                    if sp in species_orb_spec and o in species_orb_spec[sp]:
-                        result[spin][i][j][str(sp)][o] += v[i][j][orb_i][k]
+        for spin, v in self.projections.items():
+            n_bands, n_kpts = self.nb_bands, len(self.kpoints)
+            result[spin] = [
+                [{str(e): defaultdict(float) for e in species_orb_spec} for _ in range(n_kpts)] for _ in range(n_bands)
+            ]
+            # Indices of the orbitals sharing each orbital-type letter (s, p, d, f)
+            orb_indices: dict[str, list[int]] = defaultdict(list)
+            for orb_i in range(v.shape[2]):
+                orb_indices[Orbital(orb_i).name[0]].append(orb_i)
+
+            for sp, sites in site_indices.items():
+                key = str(sp)
+                for orb, orbs in orb_indices.items():
+                    if orb not in species_orb_spec[sp]:
+                        continue
+                    proj = v[:n_bands, :n_kpts][:, :, orbs][:, :, :, sites].sum(axis=(2, 3))
+                    for band_res, band_proj in zip(result[spin], proj, strict=True):
+                        for kpt_res, val in zip(band_res, band_proj, strict=True):
+                            kpt_res[key][orb] = val
         return result
 
     def is_metal(self, efermi_tol: float = 1e-4) -> bool:
@@ -307,10 +326,69 @@ class BandStructure:
             bool: True if is metal.
         """
         for vals in self.bands.values():
-            for idx in range(self.nb_bands):
-                if np.any(vals[idx, :] - self.efermi < -efermi_tol) and np.any(vals[idx, :] - self.efermi > efermi_tol):
-                    return True
+            diff = vals[: self.nb_bands] - self.efermi
+            if np.any(np.any(diff < -efermi_tol, axis=1) & np.any(diff > efermi_tol, axis=1)):
+                return True
         return False
+
+    def _get_band_edge(self, valence: bool) -> dict[str, Any]:
+        """Get data about the VBM (valence=True) or CBM (valence=False).
+
+        See get_vbm and get_cbm for the format of the returned dict.
+        """
+        if self.is_metal():
+            return {
+                "band_index": [],
+                "kpoint_index": [],
+                "kpoint": [],
+                "energy": None,
+                "projections": {},
+            }
+
+        # Highest eigenvalue below (VBM) or lowest at/above (CBM) the Fermi level.
+        # Ties are resolved in favour of the first spin channel, then the lowest (band, kpoint) index.
+        energy = -float("inf") if valence else float("inf")
+        kpt_idx = kpoint = None
+        for value in self.bands.values():
+            if value.size == 0:
+                continue
+            if valence:
+                candidates = np.where(value < self.efermi, value, -np.inf)
+                flat_idx = np.argmax(candidates)
+            else:
+                candidates = np.where(value >= self.efermi, value, np.inf)
+                flat_idx = np.argmin(candidates)
+            extremum = candidates.flat[flat_idx]
+            if (extremum > energy) if valence else (extremum < energy):
+                energy = float(extremum)
+                kpt_idx = np.unravel_index(flat_idx, value.shape)[1]
+                kpoint = self.kpoints[kpt_idx]
+
+        list_ind_kpts = []
+        if kpoint is not None and kpoint.label is not None:
+            list_ind_kpts = [idx for idx, kpt in enumerate(self.kpoints) if kpt.label == kpoint.label]
+        else:
+            list_ind_kpts.append(kpt_idx)  # type:ignore[arg-type]
+
+        # Get all other bands sharing the band edge
+        list_ind_band = defaultdict(list)
+        for spin, bands in self.bands.items():
+            for idx in range(self.nb_bands):
+                if math.isclose(bands[idx][kpt_idx], energy, abs_tol=1e-3, rel_tol=0):
+                    list_ind_band[spin].append(idx)
+        proj = {}
+        for spin, value in self.projections.items():
+            if len(list_ind_band[spin]) == 0:
+                continue
+            proj[spin] = value[list_ind_band[spin][0]][list_ind_kpts[0]]
+
+        return {
+            "band_index": list_ind_band,
+            "kpoint_index": list_ind_kpts,
+            "kpoint": kpoint,
+            "energy": energy,
+            "projections": proj,
+        }
 
     def get_vbm(self) -> dict[str, Any]:
         """Get data about the valence band maximum (VBM).
@@ -333,51 +411,7 @@ class BandStructure:
                 BandStructure: {spin:{'Orbital': [proj]}} where the array
                 [proj] is ordered according to the sites in structure.
         """
-        if self.is_metal():
-            return {
-                "band_index": [],
-                "kpoint_index": [],
-                "kpoint": [],
-                "energy": None,
-                "projections": {},
-            }
-
-        max_tmp = -float("inf")
-        index = kpoint_vbm = None
-        for value in self.bands.values():
-            for idx, j in zip(*np.where(value < self.efermi), strict=True):
-                if value[idx, j] > max_tmp:
-                    max_tmp = float(value[idx, j])
-                    index = j
-                    kpoint_vbm = self.kpoints[j]
-
-        list_ind_kpts = []
-        if kpoint_vbm is not None and kpoint_vbm.label is not None:
-            for idx, kpt in enumerate(self.kpoints):
-                if kpt.label == kpoint_vbm.label:
-                    list_ind_kpts.append(idx)
-        else:
-            list_ind_kpts.append(index)  # type:ignore[arg-type]
-
-        # Get all other bands sharing the VBM
-        list_ind_band = defaultdict(list)
-        for spin in self.bands:
-            for idx in range(self.nb_bands):
-                if math.isclose(self.bands[spin][idx][index], max_tmp, abs_tol=1e-3, rel_tol=0):
-                    list_ind_band[spin].append(idx)
-        proj = {}
-        for spin, value in self.projections.items():
-            if len(list_ind_band[spin]) == 0:
-                continue
-            proj[spin] = value[list_ind_band[spin][0]][list_ind_kpts[0]]
-
-        return {
-            "band_index": list_ind_band,
-            "kpoint_index": list_ind_kpts,
-            "kpoint": kpoint_vbm,
-            "energy": max_tmp,
-            "projections": proj,
-        }
+        return self._get_band_edge(valence=True)
 
     def get_cbm(self) -> dict[str, Any]:
         """Get data about the conduction band minimum (CBM).
@@ -399,51 +433,7 @@ class BandStructure:
                 BandStructure: {spin:{'Orbital': [proj]}} where the array
                 [proj] is ordered according to the sites in structure.
         """
-        if self.is_metal():
-            return {
-                "band_index": [],
-                "kpoint_index": [],
-                "kpoint": [],
-                "energy": None,
-                "projections": {},
-            }
-
-        max_tmp = float("inf")
-        index = kpoint_cbm = None
-        for value in self.bands.values():
-            for idx, j in zip(*np.where(value >= self.efermi), strict=True):
-                if value[idx, j] < max_tmp:
-                    max_tmp = float(value[idx, j])
-                    index = j
-                    kpoint_cbm = self.kpoints[j]
-
-        list_index_kpoints = []
-        if kpoint_cbm is not None and kpoint_cbm.label is not None:
-            for idx, kpt in enumerate(self.kpoints):
-                if kpt.label == kpoint_cbm.label:
-                    list_index_kpoints.append(idx)
-        else:
-            list_index_kpoints.append(index)  # type:ignore[arg-type]
-
-        # Get all other bands sharing the CBM
-        list_index_band = defaultdict(list)
-        for spin in self.bands:
-            for idx in range(self.nb_bands):
-                if math.isclose(self.bands[spin][idx][index], max_tmp, abs_tol=1e-3, rel_tol=0):
-                    list_index_band[spin].append(idx)
-        proj = {}
-        for spin, value in self.projections.items():
-            if len(list_index_band[spin]) == 0:
-                continue
-            proj[spin] = value[list_index_band[spin][0]][list_index_kpoints[0]]
-
-        return {
-            "band_index": list_index_band,
-            "kpoint_index": list_index_kpoints,
-            "kpoint": kpoint_cbm,
-            "energy": max_tmp,
-            "projections": proj,
-        }
+        return self._get_band_edge(valence=False)
 
     def get_band_gap(self) -> dict[str, Any]:
         r"""Get band gap.
@@ -1069,8 +1059,8 @@ class LobsterBandStructureSymmLine(BandStructureSymmLine):
             result[spin] = [[defaultdict(float) for _ in range(len(self.kpoints))] for _ in range(self.nb_bands)]
             for i, j in itertools.product(range(self.nb_bands), range(len(self.kpoints))):
                 for key, item in v[i][j].items():
+                    specie = _lobster_site_label_to_element(key)
                     for item2 in item.values():
-                        specie = str(Element(re.split(r"[0-9]+", key)[0]))
                         result[spin][i][j][specie] += item2
         return result
 
@@ -1103,11 +1093,20 @@ class LobsterBandStructureSymmLine(BandStructureSymmLine):
 
             for i, j in itertools.product(range(self.nb_bands), range(len(self.kpoints))):
                 for key, item in v[i][j].items():
+                    specie = _lobster_site_label_to_element(key)
+                    orbs = el_orb_spec.get(get_el_sp(specie))
+                    if orbs is None:
+                        continue
                     for key2, item2 in item.items():
-                        specie = str(Element(re.split(r"[0-9]+", key)[0]))
-                        if get_el_sp(str(specie)) in el_orb_spec and key2 in el_orb_spec[get_el_sp(str(specie))]:
+                        if key2 in orbs:
                             result[spin][i][j][specie][key2] += item2
         return result
+
+
+@functools.cache
+def _lobster_site_label_to_element(label: str) -> str:
+    """Get the element symbol of a LOBSTER site label, e.g. "Si" for "Si1"."""
+    return str(Element(re.split(r"[0-9]+", label)[0]))
 
 
 @overload
