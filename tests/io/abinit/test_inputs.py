@@ -250,6 +250,31 @@ class TestMultiDataset(MatSciTest):
         # Compatible with Pickle and MSONable?
         self.serialize_with_pickle(multi, test_eq=False)
 
+    def test_add_radd(self):
+        structure = Structure.from_file(abiref_file("si.cif"))
+        inp = BasicAbinitInput(structure, pseudos=abiref_file("14si.pspnc"), abi_kwargs={"ecut": 1})
+        multi = BasicMultiDataset.replicate_input(inp, ndtset=2)
+
+        new = multi + inp
+        assert isinstance(new, BasicMultiDataset)
+        assert new.ndtset == 3
+
+        # BasicAbinitInput does not define __add__ so this goes through BasicMultiDataset.__radd__
+        new = inp + multi
+        assert isinstance(new, BasicMultiDataset)
+        assert new.ndtset == 3
+        assert new.get("ecut") == [1, 1, 1]
+
+    def test_append_inconsistent_pseudos(self):
+        structure = Structure.from_file(abiref_file("si.cif"))
+        multi = BasicMultiDataset(structure=structure, pseudos=abiref_file("14si.pspnc"))
+        other = BasicAbinitInput(structure, pseudos=abiref_file("14si.4.hgh"))
+        with pytest.raises(ValueError, match="Pseudos must be consistent"):
+            multi.append(other)
+        assert multi.ndtset == 1
+        with pytest.raises(ValueError, match="Pseudos must be consistent"):
+            multi.extend([other])
+
 
 class TestShiftMode(MatSciTest):
     def test_shiftmode(self):
