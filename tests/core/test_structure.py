@@ -25,6 +25,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
 from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Site, Species
+from pymatgen.core.bonds import CovalentBond
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.structure import (
     FunctionalGroups,
@@ -210,6 +211,31 @@ class TestIStructure(MatSciTest):
         assert struct, struct_2
         struct_2.apply_strain(0.5)
         assert struct != struct_2
+
+    def test_equal_site_order_and_tolerance(self):
+        struct = Structure.from_file(f"{TEST_FILES_DIR}/cif/LiFePO4.cif")
+        struct.add_site_property("magmom", list(range(len(struct))))
+        permuted = Structure.from_sites([struct[idx] for idx in np.random.default_rng(0).permutation(len(struct))])
+        assert struct == permuted
+        assert permuted == struct
+
+        # Coordinates are compared with np.allclose(atol=Site.position_atol)
+        shifted = struct.copy()
+        shifted.translate_sites(3, [5e-6, 0, 0], frac_coords=False, to_unit_cell=False)
+        assert struct == shifted
+        shifted.translate_sites(3, [1e-3, 0, 0], frac_coords=False, to_unit_cell=False)
+        assert struct != shifted
+
+        # Site properties must match too
+        changed = struct.copy()
+        changed[5].properties["magmom"] = -1
+        assert struct != changed
+
+        # np.allclose also has a relative tolerance (rtol=1e-5), relevant for large coordinates
+        big_cell = Structure(Lattice.cubic(2000), ["Si", "Si"], [[0.5, 0.5, 0.5], [0, 0, 0]])
+        big_cell_shifted = big_cell.copy()
+        big_cell_shifted.translate_sites(0, [5e-3, 0, 0], frac_coords=False, to_unit_cell=False)
+        assert big_cell == big_cell_shifted
 
     def test_matches(self):
         supercell = self.struct * 2
@@ -920,6 +946,20 @@ Direct
         assert all(np.sort(np.array([c_indices3, p_indices3]).flatten()) == np.sort(c_indices2))
         assert all(np.sort(np.array([c_indices3, p_indices3]).flatten()) == np.sort(p_indices2))
         assert len(offsets3) == len(distances3) == len(s_indices3) == 24
+        # Exactly one of each pair of reversed bonds (j, i, -R) is kept
+        bond_keys = {(i, j, tuple(img)) for i, j, img in zip(c_indices3, p_indices3, offsets3.tolist(), strict=True)}
+        for i, j, img in bond_keys:
+            assert (j, i, tuple(-x for x in img)) not in bond_keys
+
+    def test_get_symmetric_neighbor_list_exclude_self(self):
+        struct = Structure(Lattice.cubic(3), ["Cs", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        n_bonds = len(struct.get_symmetric_neighbor_list(3.0, sg=221)[0])
+        c_indices, p_indices, _offsets, distances, _s_indices, _sym_ops = struct.get_symmetric_neighbor_list(
+            3.0, sg=221, exclude_self=False
+        )
+        # exclude_self=False adds the zero-distance self pair of each site
+        assert len(c_indices) == n_bonds + len(struct)
+        assert np.sum((c_indices == p_indices) & (distances < 1e-8)) == len(struct)
 
     def test_get_all_neighbors_outside_cell(self):
         struct = Structure(
@@ -2679,6 +2719,14 @@ Sites (8)
         struct = Structure.from_file(f"{self.tmp_path}/POSCAR_deuter")
         assert "Deuterium" not in [el.long_name for el in struct.composition.elements]
 
+    def test_setitem_slice_coincident_sites(self):
+        # Only the sites selected by the slice are modified, not other sites equal to them
+        struct = Structure(Lattice.cubic(3), ["Fe", "Fe", "Fe"], [[0, 0, 0], [0.5, 0.5, 0.5], [0, 0, 0]])
+        struct[:1] = "Mn"
+        assert [site.species_string for site in struct] == ["Mn", "Fe", "Fe"]
+        struct[::-2] = "Co"
+        assert [site.species_string for site in struct] == ["Co", "Fe", "Co"]
+
     def test_setitem_periodic_site_errors(self):
         struct = self.struct
         with pytest.raises(ValueError, match="PeriodicSite added must have same lattice as Structure"):
@@ -2889,6 +2937,30 @@ class TestIMolecule(MatSciTest):
     def test_get_covalent_bonds(self):
         assert len(self.mol.get_covalent_bonds()) == 4
 
+    @pytest.mark.parametrize("tol", [0.2, 0.5, -2])
+    def test_get_covalent_bonds_matches_is_bonded(self, tol):
+        rng = np.random.default_rng(42)
+        mol = Molecule(rng.choice(["C", "H", "O", "N"], size=120).tolist(), rng.uniform(0, 8, size=(120, 3)))
+        expected = [
+            (idx, jdx)
+            for idx, jdx in itertools.combinations(range(len(mol)), 2)
+            if CovalentBond.is_bonded(mol[idx], mol[jdx], tol=tol)
+        ]
+        site_indices = {id(site): idx for idx, site in enumerate(mol)}
+        bonds = mol.get_covalent_bonds(tol=tol)
+        assert [(site_indices[id(bond.site1)], site_indices[id(bond.site2)]) for bond in bonds] == expected
+        assert (len(expected) > 0) is (tol > 0)
+
+    def test_get_covalent_bonds_missing_bond_data(self):
+        # There is no Cl-Cl bond data, which is only needed with two or more Cl
+        assert len(Molecule(["C", "Cl", "H"], [[0, 0, 0], [0, 0, 1.77], [0, 1.09, -0.3]]).get_covalent_bonds()) == 2
+        with pytest.raises(ValueError, match="No bond data for elements Cl - Cl"):
+            Molecule(["C", "Cl", "Cl"], [[0, 0, 0], [0, 0, 1.77], [0, 1.7, -0.6]]).get_covalent_bonds()
+        # The first pair of sites without bond data is reported
+        with pytest.raises(ValueError, match="No bond data for elements C - Xe"):
+            Molecule(["C", "Cl", "Cl", "Xe"], [[0, 0, 0], [0, 0, 2], [0, 2, 0], [2, 0, 0]]).get_covalent_bonds()
+        assert Molecule(["Xe"], [[0, 0, 0]]).get_covalent_bonds() == []
+
     def test_properties(self):
         assert len(self.mol) == 5
         assert self.mol.is_ordered
@@ -3065,6 +3137,18 @@ Site: H (-0.5134, 0.8892, -0.3630)"""
     def test_equal(self):
         mol = IMolecule(["C", "H", "H", "H", "H"], self.coords, charge=1)
         assert mol != self.mol
+
+        permuted = IMolecule.from_sites([self.mol[idx] for idx in (3, 0, 4, 1, 2)])
+        assert permuted == self.mol
+        shifted = Molecule.from_sites(permuted)
+        shifted.translate_sites([0], [1e-3, 0, 0])
+        assert shifted != self.mol
+
+    def test_set_item_slice_coincident_sites(self):
+        # Only the sites selected by the slice are modified, not other sites equal to them
+        mol = Molecule(["H", "H", "H"], [[0, 0, 0], [0, 0, 1], [0, 0, 0]])
+        mol[:1] = "He"
+        assert [site.species_string for site in mol] == ["He", "H", "H"]
 
     def test_get_centered_molecule(self):
         mol = IMolecule(["O"] * 2, [[0, 0, 0], [0, 0, 1.2]], spin_multiplicity=3)
