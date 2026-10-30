@@ -138,3 +138,69 @@ class TestThermoPlotter:
 
 
 # Gruneisen plotter is already tested in test_gruneisen
+
+
+def _drop_qpoints_of_first_branch(bs: PhononBandStructureSymmLine) -> PhononBandStructureSymmLine:
+    """Copy of bs with every other interior q-point of the first branch removed, so branches differ in length."""
+    first = bs.branches[0]
+    drop = set(range(first["start_index"] + 1, first["end_index"], 2))
+    keep = [idx for idx in range(len(bs.qpoints)) if idx not in drop]
+    return PhononBandStructureSymmLine(
+        qpoints=[bs.qpoints[idx].frac_coords for idx in keep],
+        frequencies=bs.bands[:, keep],
+        lattice=bs.lattice_rec,
+        eigendisplacements=bs.eigendisplacements[:, keep],
+        labels_dict={label: kpt.frac_coords for label, kpt in bs.labels_dict.items()},
+        structure=bs.structure,
+    )
+
+
+class TestPlotterRegressions:
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        with open(f"{TEST_DIR}/NaCl_complete_ph_dos.json", "rb") as file:
+            self.dos = CompletePhononDos.from_dict(orjson.loads(file.read()))
+        with open(f"{TEST_FILES_DIR}/electronic_structure/bandstructure/NaCl_phonon_bandstructure.json", "rb") as file:
+            self.bs = PhononBandStructureSymmLine.from_dict(orjson.loads(file.read()))
+        yield
+        plt.close("all")
+
+    def test_dos_plot_element_labels(self):
+        # labels from get_element_dos() are Elements, which used to crash the legend check (len(Element))
+        plotter = PhononDosPlotter()
+        plotter.add_dos_dict(self.dos.get_element_dos())
+        ax = plotter.get_plot()
+        assert sorted(text.get_text() for text in ax.get_legend().get_texts()) == ["Cl", "Na"]
+
+    def test_dos_plot_inverted_xlim(self):
+        plotter = PhononDosPlotter()
+        plotter.add_dos("Total", self.dos)
+        legend = {"loc": "upper right"}
+        ax = plotter.get_plot(invert_axes=True, xlim=(0, 0.5), legend=legend)
+        # the user x (density) limits used to be overwritten by the automatic ones
+        assert ax.get_xlim() == pytest.approx((0, 0.5))
+        assert legend == {"loc": "upper right"}  # the caller's dict used to get a fontsize entry
+
+    def test_unequal_branch_lengths(self):
+        bs = _drop_qpoints_of_first_branch(self.bs)
+        n_points = [branch["end_index"] - branch["start_index"] + 1 for branch in bs.branches]
+        assert len(set(n_points)) > 1
+        plotter = PhononBSPlotter(bs)
+        # both used to fail building an array from the ragged per-branch distances
+        ax = plotter.get_proj_plot()
+        assert len(ax.collections[0].get_segments()) == (len(bs.qpoints) - 1) * bs.nb_bands
+        legend_kwargs = {"loc": "best"}
+        ax = plotter.plot_compare(PhononBSPlotter(bs), legend_kwargs=legend_kwargs)
+        assert [text.get_text() for text in ax.get_legend().get_texts()] == ["self", "other"]
+        assert legend_kwargs == {"loc": "best"}
+        with pytest.raises(ValueError, match="not compatible"):
+            plotter.plot_compare(PhononBSPlotter(self.bs))
+
+    def test_thermo_zero_line_on_given_axes(self):
+        _fig, ax = plt.subplots()
+        _other_fig, other_ax = plt.subplots()  # becomes the current pyplot axes
+        ThermoPlotter(self.dos, self.dos.structure).plot_helmholtz_free_energy(5, 300, 10, ax=ax, show=False)
+        assert ax.get_ylim()[0] < 0 < ax.get_ylim()[1]
+        # the zero line used to be drawn based on (and onto) the current pyplot axes
+        assert [list(line.get_ydata()) for line in ax.get_lines()[1:]] == [[0, 0]]
+        assert other_ax.get_lines() == []

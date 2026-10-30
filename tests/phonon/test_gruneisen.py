@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from matplotlib import colors
+from numpy.testing import assert_allclose
 from pytest import approx
 
 from pymatgen.core import Structure
@@ -68,6 +69,26 @@ class TestGruneisenPhononBandStructureSymmLine(MatSciTest):
 
         assert max(norm.inverse(ax.get_figure()._localaxes[-1].get_yticks())) == approx(max_gruneisen)
         assert isinstance(ax, plt.Axes)
+
+    def test_ph_plot_w_gruneisen_units_label(self):
+        plotter = GruneisenPhononBSPlotter(bs=self.bs_symm_line)
+        ax = plotter.get_plot_gs(plot_ph_bs_with_gruneisen=True, units="mev")
+        # used to echo the raw units argument ("mev")
+        assert ax.get_ylabel() == "Frequencies (meV)"
+
+    def test_plot_compare_gs(self):
+        plotter = GruneisenPhononBSPlotter(bs=self.bs_symm_line)
+        ax = plotter.plot_compare_gs(GruneisenPhononBSPlotter(bs=self.bs_symm_line))
+        # both band structures are plotted as Grüneisen parameters (self used to be plotted as frequencies)
+        assert ax.get_ylabel() == "$\\mathrm{Grüneisen\\ Parameter}$"
+        n_lines = plotter.n_bands * len(plotter.bs_plot_data()["distances"])
+        blue = [line for line in ax.get_lines() if line.get_color() == "b"]
+        red = [line for line in ax.get_lines() if line.get_color() == "r"]
+        assert len(blue) == len(red) == n_lines
+        assert_allclose(
+            np.sort(np.concatenate([line.get_ydata() for line in blue])),
+            np.sort(np.concatenate([line.get_ydata() for line in red])),
+        )
 
     def test_as_dict_from_dict(self):
         new_dict = self.bs_symm_line.as_dict()
