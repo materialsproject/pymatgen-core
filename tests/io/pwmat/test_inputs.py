@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 from pytest import approx
 
 import pymatgen
-from pymatgen.core import Composition, Structure
+from pymatgen.core import Composition, Lattice, Structure
 from pymatgen.io.pwmat.inputs import (
     ACExtractor,
     ACstrExtractor,
@@ -60,6 +60,17 @@ class TestACstrExtractor(MatSciTest):
             assert ac_extractor.coords[idx * 3 + 2] == ac_str_extractor.get_coords()[idx * 3 + 2]
             assert ac_extractor.magmoms[idx] == ac_str_extractor.get_magmoms()[idx]
 
+    def test_extract_rewritten_file(self):
+        # ACExtractor used linecache for n_atoms/lattice, which returned stale data for a rewritten file
+        filepath = self.tmp_path / "atom.config"
+        AtomConfig(Structure(Lattice.cubic(3), ["Si"], [[0, 0, 0]])).write_file(filepath)
+        assert ACExtractor(filepath).n_atoms == 1
+        AtomConfig(Structure(Lattice.cubic(5), ["Si", "Ge"], [[0, 0, 0], [0.5, 0.5, 0.5]])).write_file(filepath)
+        ac_extractor = ACExtractor(filepath)
+        assert ac_extractor.n_atoms == 2
+        assert_allclose(ac_extractor.lattice, [5, 0, 0, 0, 5, 0, 0, 0, 5])
+        assert list(ac_extractor.types) == [14, 32]
+
 
 class TestAtomConfig(MatSciTest):
     def test_init(self):
@@ -79,8 +90,10 @@ class TestAtomConfig(MatSciTest):
         atom_config = AtomConfig.from_file(filepath)
         tmp_file = f"{self.tmp_path}/atom.config.testing.lzma"
         atom_config.write_file(tmp_file)
-        tmp_atom_config = AtomConfig.from_file(filepath)
+        tmp_atom_config = AtomConfig.from_file(tmp_file)
         assert_allclose(atom_config.structure.lattice.abc, tmp_atom_config.structure.lattice.abc, 5)
+        assert tmp_atom_config.structure.species == atom_config.structure.species
+        assert_allclose(tmp_atom_config.structure.frac_coords, atom_config.structure.frac_coords, atol=1e-5)
 
 
 class TestGenKpt(MatSciTest):

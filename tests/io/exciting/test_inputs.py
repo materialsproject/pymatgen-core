@@ -4,7 +4,8 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
-from numpy.testing import assert_allclose
+import numpy as np
+from numpy.testing import assert_allclose, assert_array_equal
 
 from pymatgen.core import Lattice, Structure
 from pymatgen.io.exciting import ExcitingInput
@@ -176,3 +177,30 @@ class TestExcitingInput(MatSciTest):
 
         assert ref_list == test_list
         assert math.isclose(ref_scale, test_scale)
+
+    def test_write_cartesian_round_trip(self):
+        # Cartesian coords must be frac_coords @ lattice.matrix, which matters for non-orthogonal cells
+        lattice = Lattice([[0.0, 2.81, 2.81], [2.81, 0.0, 2.81], [2.81, 2.81, 0.0]])
+        struct = Structure(lattice, ["Na", "Cl"], [[0, 0, 0], [0.25, 0.5, 0.75]])
+        string = ExcitingInput(struct).write_string("unchanged", cartesian=True)
+        assert 'cartesian="true"' in string
+        assert_allclose(ExcitingInput.from_str(string).structure.cart_coords, struct.cart_coords, atol=1e-6)
+
+    def test_from_str_cartesian_false(self):
+        string = ExcitingInput(self.get_structure("Si")).write_string("unchanged")
+        string = string.replace('<structure speciespath="./">', '<structure cartesian="false" speciespath="./">')
+        exc_in = ExcitingInput.from_str(string)
+        assert_allclose(exc_in.structure.frac_coords, self.get_structure("Si").frac_coords, atol=1e-6)
+
+    def test_from_str_stretch(self):
+        # stretch scales each lattice vector (not each Cartesian component)
+        struct = Structure(Lattice([[1.0, 2.0, 0.0], [0.0, 3.0, 0.0], [0.0, 1.0, 4.0]]), ["Si"], [[0, 0, 0]])
+        string = ExcitingInput(struct).write_string("unchanged")
+        string = string.replace("<crystal ", '<crystal stretch="1.0 2.0 0.5" ')
+        exc_in = ExcitingInput.from_str(string)
+        assert_allclose(exc_in.structure.lattice.matrix, [[1.0, 2.0, 0.0], [0.0, 6.0, 0.0], [0.0, 0.5, 2.0]], atol=1e-6)
+
+    def test_init_lockxyz_array(self):
+        lockxyz = np.array([[True, False, True], [False, False, False]])
+        exc_in = ExcitingInput(self.get_structure("Si"), lockxyz=lockxyz)
+        assert_array_equal(exc_in.lockxyz, lockxyz)
