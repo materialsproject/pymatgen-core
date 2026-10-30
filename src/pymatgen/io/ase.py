@@ -16,6 +16,7 @@ from monty.json import MontyDecoder, MSONable, jsanitize
 from pymatgen.core.structure import IMolecule, IStructure, Lattice, Molecule, Structure
 
 try:
+    from ase import units
     from ase.atoms import Atoms
     from ase.calculators.singlepoint import SinglePointDFTCalculator
     from ase.constraints import FixAtoms, FixCartesian
@@ -26,7 +27,7 @@ try:
 
 except ImportError:
     NO_ASE_ERR = PackageNotFoundError("AseAtomsAdaptor requires the ASE package. Use `pip install ase`")
-    encode = decode = FixAtoms = FixCartesian = SinglePointDFTCalculator = Spacegroup = None  # type: ignore[assignment,misc]
+    encode = decode = FixAtoms = FixCartesian = SinglePointDFTCalculator = Spacegroup = units = None  # type: ignore[assignment,misc]
 
     class Atoms:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
@@ -73,12 +74,18 @@ class MSONAtoms(Atoms, MSONable):
         # See ASE issue #1387.
         atoms_no_info = self.copy()
         atoms_no_info.info = {}
-        return {
+        dct = {
             "@module": "pymatgen.io.ase",
             "@class": "MSONAtoms",
             "atoms_json": encode(atoms_no_info),
             "atoms_info": jsanitize(self.info, strict=True),
         }
+        # Global charge and spin multiplicity patched in by AseAtomsAdaptor.get_atoms
+        # are not part of the ASE serialization, so store them explicitly.
+        for attr in ("charge", "spin_multiplicity"):
+            if hasattr(self, attr):
+                dct[attr] = getattr(self, attr)
+        return dct
 
     @classmethod
     def from_dict(cls, dct: dict[str, Any]) -> Self:
@@ -89,6 +96,9 @@ class MSONAtoms(Atoms, MSONable):
         mson_atoms = cls(decode(dct["atoms_json"]))
         atoms_info = MontyDecoder().process_decoded(dct.get("atoms_info", {}))
         mson_atoms.info = atoms_info
+        for attr in ("charge", "spin_multiplicity"):
+            if attr in dct:
+                setattr(mson_atoms, attr, dct[attr])
         return mson_atoms
 
 
@@ -192,7 +202,7 @@ class AseAtomsAdaptor:
         # Set Atoms global charge and spin multiplicity.
         # This is patched into the Atoms object to ensure we don't lose the
         # Pymatgen global charge/spin_multiplicity when interconverting.
-        if isinstance(structure, Molecule):
+        if isinstance(structure, IMolecule):
             atoms.charge = structure.charge
             atoms.spin_multiplicity = structure.spin_multiplicity
 
@@ -240,10 +250,17 @@ class AseAtomsAdaptor:
                 "final_magmom",
                 "final_charge",
                 "selective_dynamics",
+                "velocities",
             }:
                 atoms.set_array(prop, np.array(structure.site_properties[prop]))
-        if any(oxi_states):
+        # Test for None rather than truthiness so that oxidation states of 0 survive the round trip
+        if any(oxi is not None for oxi in oxi_states):
             atoms.set_array("oxi_states", np.array(oxi_states))
+
+        # Structure/Molecule.site_properties["velocities"] (in A/fs, as read from e.g. a POSCAR)
+        # <--> Atoms.get_velocities() (in ASE units of A / (A * sqrt(amu / eV))).
+        if (velocities := structure.site_properties.get("velocities")) is not None:
+            atoms.set_velocities(np.array(velocities, dtype=float) / units.fs)
 
         # Atoms.info <---> Structure.properties
         if properties := structure.properties:
@@ -313,6 +330,8 @@ class AseAtomsAdaptor:
         initial_charges = atoms.get_initial_charges() if atoms.has("initial_charges") else None
         initial_magmoms = atoms.get_initial_magnetic_moments() if atoms.has("initial_magmoms") else None
         oxi_states = atoms.get_array("oxi_states") if atoms.has("oxi_states") else None
+        # ASE stores motion as momenta; convert to velocities in A/fs as used by e.g. Poscar.
+        velocities = atoms.get_velocities() * units.fs if atoms.has("momenta") else None
 
         # If the ASE Atoms object has constraints, make sure that they are of the
         # FixAtoms or FixCartesian kind, which are the only ones that
@@ -413,6 +432,8 @@ class AseAtomsAdaptor:
             structure.add_site_property("selective_dynamics", sel_dyn)
         if tags is not None:
             structure.add_site_property("tags", tags)
+        if velocities is not None:
+            structure.add_site_property("velocities", velocities.tolist())
 
         # Add oxidation states by site
         if oxi_states is not None:
@@ -430,7 +451,10 @@ class AseAtomsAdaptor:
                 "charge",
                 "final_charge",
                 "oxi_states",
+                "momenta",
             }:
+                if prop == "velocities" and velocities is not None:
+                    continue  # a stale custom array; the momenta-derived velocities take precedence
                 structure.add_site_property(prop, atoms.get_array(prop).tolist())
 
         return structure
@@ -455,9 +479,7 @@ class AseAtomsAdaptor:
         Returns:
             MolT: Equivalent pymatgen (I)Molecule
         """
-        molecule = AseAtomsAdaptor.get_structure(atoms, cls=cls, **cls_kwargs)
-
-        # Set the global charge and spin multiplicity
+        # Get the global charge and spin multiplicity
         try:
             charge = atoms.charge
         except AttributeError:
@@ -468,6 +490,12 @@ class AseAtomsAdaptor:
         except AttributeError:
             spin_mult = round(np.sum(atoms.get_initial_magnetic_moments())) + 1 if atoms.has("initial_magmoms") else 1
 
-        molecule.set_charge_and_spin(charge, spin_multiplicity=spin_mult)
+        if issubclass(cls, Molecule):
+            molecule = AseAtomsAdaptor.get_structure(atoms, cls=cls, **cls_kwargs)
+            molecule.set_charge_and_spin(charge, spin_multiplicity=spin_mult)
+            return molecule
 
-        return molecule
+        # Immutable IMolecule has no set_charge_and_spin, so pass them to the constructor
+        return AseAtomsAdaptor.get_structure(
+            atoms, cls=cls, **(cls_kwargs | {"charge": charge, "spin_multiplicity": spin_mult})
+        )

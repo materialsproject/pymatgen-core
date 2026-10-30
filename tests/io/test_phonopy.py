@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from monty.serialization import loadfn
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
@@ -17,6 +18,7 @@ from pymatgen.io.phonopy import (
     get_displaced_structures,
     get_gruneisen_ph_bs_symm_line,
     get_gruneisenparameter,
+    get_gs_ph_bs_symm_line_from_dict,
     get_ph_bs_symm_line,
     get_ph_dos,
     get_phonon_band_structure_from_fc,
@@ -236,6 +238,36 @@ class TestGruneisen:
         # catch the exception when no structure is present
         with pytest.raises(ValueError, match="Please provide a structure or structure path"):
             get_gruneisenparameter(f"{PHONON_DIR}/gruneisen/gruneisen_mesh_InP_without_struct.yaml")
+
+    def test_user_structure_takes_precedence(self):
+        # An explicitly passed structure used to be silently replaced by the one in the YAML
+        # (or rejected when the YAML had none)
+        structure = Structure.from_file(f"{PHONON_DIR}/gruneisen/eq/POSCAR_Si")
+        structure.scale_lattice(structure.volume * 1.1)
+
+        grun_param = get_gruneisenparameter(f"{PHONON_DIR}/gruneisen/gruneisen_mesh_Si.yaml", structure=structure)
+        assert grun_param.structure is structure
+
+        grun_bs = get_gs_ph_bs_symm_line_from_dict(
+            loadfn(f"{PHONON_DIR}/gruneisen/gruneisen_band_Si.yaml"), structure=structure
+        )
+        assert grun_bs.structure is structure
+
+        grun_param = get_gruneisenparameter(
+            f"{PHONON_DIR}/gruneisen/gruneisen_mesh_InP_without_struct.yaml", structure=structure
+        )
+        assert grun_param.structure is structure
+
+    def test_ph_bs_symm_line_fit_with_gamma_label(self):
+        # fit=True with a labeled q-point on a path starting at Gamma used to raise
+        # "TypeError: unhashable type: 'dict'"
+        grun_dict = loadfn(f"{PHONON_DIR}/gruneisen/gruneisen_band_Si.yaml")
+        assert grun_dict["path"][0]["phonon"][0]["q-position"] == [0, 0, 0]
+        grun_dict["path"][0]["phonon"][0]["label"] = "Gamma"
+        grun_bs = get_gs_ph_bs_symm_line_from_dict(
+            grun_dict, structure_path=f"{PHONON_DIR}/gruneisen/eq/POSCAR_Si", fit=True
+        )
+        assert "Gamma" in grun_bs.labels_dict
 
 
 @pytest.mark.skipif(Phonopy is None, reason="Phonopy not present")
