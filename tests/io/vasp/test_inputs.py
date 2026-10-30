@@ -210,6 +210,15 @@ direct
             _poscar = Poscar.from_file(tmp_poscar_path)
         assert not any("Elements in POSCAR would be overwritten" in str(warning.message) for warning in record)
 
+    def test_from_file_pseudo_hydrogen_potcar(self):
+        # POTCAR symbol "H.25" must map to H, not to a fictitious H0.25+ species
+        copyfile(f"{FAKE_POTCAR_DIR}/POT_GGA_PAW_PBE_54/POTCAR.H.25.gz", f"{self.tmp_path}/POTCAR.gz")
+        poscar_str = "H2\n1.0\n5 0 0\n0 5 0\n0 0 5\nH\n2\nDirect\n0 0 0\n0.1 0 0\n"
+        with open(tmp_poscar_path := f"{self.tmp_path}/POSCAR", mode="w", encoding="utf-8") as file:
+            file.write(poscar_str)
+        poscar = Poscar.from_file(tmp_poscar_path)
+        assert poscar.structure.composition == Composition("H2")
+
     def test_from_str_default_names(self):
         """Similar to test_from_file_bad_potcar, ensure "default_names"
         (likely read from POTCAR) triggers correct warning/error.
@@ -510,6 +519,27 @@ direct
 
         temperature = struct[0].specie.atomic_mass.to("kg") * np.sum(v**2) / (3 * const.k) * 1e10
         assert temperature == approx(700, abs=1e-4), "Temperature instantiated incorrectly"
+
+    def test_init_md_data_as_ndarray(self):
+        # numpy arrays (not only lists) must be accepted for MD data
+        struct = Structure(np.eye(3) * 3, ["Si", "Si"], [[0, 0, 0], [0.25, 0.25, 0.25]])
+        poscar = Poscar(
+            struct,
+            velocities=np.full((2, 3), 0.1),
+            predictor_corrector=np.full((2, 3, 3), 0.2),
+            lattice_velocities=np.full((6, 3), 0.3),
+        )
+        assert_allclose(poscar.velocities, np.full((2, 3), 0.1))
+        assert_allclose(poscar.predictor_corrector, np.full((2, 3, 3), 0.2))
+        assert_allclose(poscar.lattice_velocities, np.full((6, 3), 0.3))
+
+    def test_predictor_corrector_preamble_setter(self):
+        poscar = Poscar.from_file(f"{VASP_OUT_DIR}/CONTCAR.MD", check_for_potcar=False)
+        predictor_corrector = poscar.predictor_corrector
+        poscar.predictor_corrector_preamble = "new preamble"
+        assert poscar.predictor_corrector_preamble == "new preamble"
+        # The setter must not clobber the per-site predictor-corrector data
+        assert_allclose(poscar.predictor_corrector, predictor_corrector)
 
     def test_write(self):
         filepath = f"{VASP_IN_DIR}/POSCAR"
@@ -1094,6 +1124,17 @@ SIGMA = 0.1"""
         assert incar["HFSCREEN"] == approx(0.2)
         assert incar["ALGO"] == "All"
 
+    def test_init_does_not_mutate_input(self):
+        params = {"MAGMOM": [1, 2, 3, 4, 5, 6], "LSORBIT": True}
+        incar = Incar(params)
+        assert incar["MAGMOM"] == [[1, 2, 3], [4, 5, 6]]
+        assert params["MAGMOM"] == [1, 2, 3, 4, 5, 6]
+
+    def test_proc_val_list_fortran_floats(self):
+        # Fortran-style floats without a leading digit or with a leading "+"
+        assert Incar.proc_val("MAGMOM", "2*.5 -.5 +1.5") == [0.5, 0.5, -0.5, 1.5]
+        assert Incar.from_str("MAGMOM = .6 2*-.25")["MAGMOM"] == [0.6, -0.25, -0.25]
+
     def test_proc_val(self):
         assert Incar.proc_val("HELLO", "-0.85 0.85") == "-0.85 0.85"
         # `ML_MODE` should always be lower case
@@ -1395,6 +1436,31 @@ Cartesian
         assert kpts == kpt_copy
         kpt_copy.style = Kpoints.supported_modes.Monkhorst
         assert kpts != kpt_copy
+
+    def test_explicit_fractional_weights_round_trip(self):
+        kpoints = Kpoints(
+            comment="explicit",
+            num_kpts=3,
+            style=Kpoints.supported_modes.Reciprocal,
+            kpts=[(0, 0, 0), (0.5, 0, 0), (0.5, 0.5, 0)],
+            kpts_weights=[0.125, 0.375, 2],
+        )
+        lines = str(kpoints).splitlines()
+        assert lines[3:] == ["0 0 0 0.125", "0.5 0 0 0.375", "0.5 0.5 0 2"]
+        assert Kpoints.from_str(str(kpoints)).kpts_weights == [0.125, 0.375, 2]
+
+    def test_generating_basis_round_trip(self):
+        # Automatic mode with generating basis vectors and no (zero) shift line
+        kpoints = Kpoints(
+            comment="basis",
+            num_kpts=0,
+            style=Kpoints.supported_modes.Reciprocal,
+            kpts=[(0.25, 0, 0), (0, 0.25, 0), (0, 0, 0.5)],
+        )
+        new_kpoints = Kpoints.from_str(str(kpoints))
+        assert new_kpoints.kpts == [(0.25, 0, 0), (0, 0.25, 0), (0, 0, 0.5)]
+        assert new_kpoints.kpts_shift == (0, 0, 0)
+        assert new_kpoints.style == Kpoints.supported_modes.Reciprocal
 
     def test_automatic_kpoint(self):
         poscar = Poscar.from_str(
@@ -1933,6 +1999,21 @@ class TestVaspInput(MatSciTest):
         assert vasp_input3["INCAR"]["NSW"] == 100, f"{vasp_input3['INCAR']['NSW']=}"
         orig_nsw_val = self.vasp_input["INCAR"]["NSW"]
         assert orig_nsw_val == 99, f"{orig_nsw_val=}"
+
+    def test_shallow_copy_optional_files_and_potcar_spec(self):
+        vasp_input = VaspInput(
+            self.vasp_input.incar,
+            self.vasp_input.kpoints,
+            self.vasp_input.poscar,
+            "Fe\nP\nO",
+            potcar_spec=True,
+            optional_files={"ICONST": "R 1 2 0"},
+        )
+        vasp_input_copy = vasp_input.copy(deep=False)
+        # File names (dict keys) must be preserved, not lower-cased
+        assert set(vasp_input_copy) == {"INCAR", "KPOINTS", "POSCAR", "POTCAR.spec", "ICONST"}
+        assert vasp_input_copy.potcar == "Fe\nP\nO"
+        assert vasp_input_copy["ICONST"] is vasp_input["ICONST"]
 
     def test_run_vasp(self):
         self.vasp_input.run_vasp(".", vasp_cmd=["cat", "INCAR"])
