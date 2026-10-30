@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import collections
 import fnmatch
-import itertools
 import os
 import re
 import warnings
@@ -26,8 +25,10 @@ from monty.json import MSONable
 
 from pymatgen.core.structure import Structure
 from pymatgen.electronic_structure.bandstructure import LobsterBandStructureSymmLine
-from pymatgen.electronic_structure.core import Orbital, Spin
+from pymatgen.electronic_structure.core import Spin
 from pymatgen.electronic_structure.dos import Dos, LobsterCompleteDos
+from pymatgen.io.lobster.future.outputs.misc import get_orb_from_str
+from pymatgen.io.lobster.future.utils import _wavefunction_on_periodic_grid
 from pymatgen.io.vasp.inputs import Kpoints
 from pymatgen.io.vasp.outputs import Vasprun, VolumetricData
 from pymatgen.util.due import Doi, due
@@ -1453,9 +1454,8 @@ class Fatband:
         if len(filenames) == 0:
             raise ValueError("No FATBAND files in folder or given")
 
-        for fname in filenames:
-            lines = _get_lines(fname)
-
+        file_lines = [_get_lines(fname) for fname in filenames]
+        for fname, lines in zip(filenames, file_lines, strict=True):
             atom_names.append(os.path.split(fname)[1].split("_")[1].capitalize())
             parameters = lines[0].split()
             # atom_type.append(re.split(r"[0-9]+", parameters[3])[0].capitalize())
@@ -1484,9 +1484,7 @@ class Fatband:
         kpoints_array: list = []
         eigenvals: dict = {}
         p_eigenvals: dict = {}
-        for ifilename, filename in enumerate(filenames):
-            lines = _get_lines(filename)
-
+        for ifilename, lines in enumerate(file_lines):
             if ifilename == 0:
                 self.nbands = int(parameters[6])
                 self.number_kpts = kpoints_object.num_kpts - int(lines[1].split()[2]) + 1
@@ -1505,72 +1503,53 @@ class Fatband:
                     self.is_spinpolarized = len(linenumbers) == 2
 
             if ifilename == 0:
-                eigenvals = {}
-                eigenvals[Spin.up] = [[defaultdict(float) for _ in range(self.number_kpts)] for _ in range(self.nbands)]
-                if self.is_spinpolarized:
-                    eigenvals[Spin.down] = [
-                        [defaultdict(float) for _ in range(self.number_kpts)] for _ in range(self.nbands)
-                    ]
-
-                p_eigenvals = {}
-                p_eigenvals[Spin.up] = [
-                    [
-                        {
-                            str(elem): {str(orb): defaultdict(float) for orb in atom_orbital_dict[elem]}
-                            for elem in atom_names
-                        }
-                        for _ in range(self.number_kpts)
-                    ]
-                    for _ in range(self.nbands)
-                ]
-
-                if self.is_spinpolarized:
-                    p_eigenvals[Spin.down] = [
+                spins = [Spin.up, Spin.down] if self.is_spinpolarized else [Spin.up]
+                eigenvals = {
+                    spin: [[defaultdict(float) for _ in range(self.number_kpts)] for _ in range(self.nbands)]
+                    for spin in spins
+                }
+                p_eigenvals = {
+                    spin: [
                         [
                             {
-                                str(elem): {str(orb): defaultdict(float) for orb in atom_orbital_dict[elem]}
-                                for elem in atom_names
+                                elem: {orb: defaultdict(float) for orb in orbs}
+                                for elem, orbs in atom_orbital_dict.items()
                             }
                             for _ in range(self.number_kpts)
                         ]
                         for _ in range(self.nbands)
                     ]
+                    for spin in spins
+                }
 
+            atom_name, orbital_name = atom_names[ifilename], orbital_names[ifilename]
+            read_eigenvals = ifilename == 0 and self.efermi is not None
             idx_kpt = -1
             linenumber = iband = 0
             for line in lines[1:]:
-                if line.split()[0] == "#":
-                    KPOINT = np.array(
-                        [
-                            float(line.split()[4]),
-                            float(line.split()[5]),
-                            float(line.split()[6]),
-                        ]
-                    )
+                parts = line.split()
+                if parts[0] == "#":
                     if ifilename == 0:
-                        kpoints_array.append(KPOINT)
+                        kpoints_array.append(np.array([float(parts[4]), float(parts[5]), float(parts[6])]))
 
                     linenumber = iband = 0
                     idx_kpt += 1
+                    continue
                 if linenumber == self.nbands:
                     iband = 0
-                if line.split()[0] != "#":
-                    if linenumber < self.nbands:
-                        if ifilename == 0 and self.efermi is not None:
-                            eigenvals[Spin.up][iband][idx_kpt] = float(line.split()[1]) + self.efermi
+                if linenumber < self.nbands:
+                    spin = Spin.up
+                elif self.is_spinpolarized:
+                    spin = Spin.down
+                else:
+                    spin = None
+                if spin is not None:
+                    if read_eigenvals:
+                        eigenvals[spin][iband][idx_kpt] = float(parts[1]) + self.efermi
+                    p_eigenvals[spin][iband][idx_kpt][atom_name][orbital_name] = float(parts[2])
 
-                        p_eigenvals[Spin.up][iband][idx_kpt][atom_names[ifilename]][orbital_names[ifilename]] = float(
-                            line.split()[2]
-                        )
-                    if linenumber >= self.nbands and self.is_spinpolarized:
-                        if ifilename == 0 and self.efermi is not None:
-                            eigenvals[Spin.down][iband][idx_kpt] = float(line.split()[1]) + self.efermi
-                        p_eigenvals[Spin.down][iband][idx_kpt][atom_names[ifilename]][orbital_names[ifilename]] = float(
-                            line.split()[2]
-                        )
-
-                    linenumber += 1
-                    iband += 1
+                linenumber += 1
+                iband += 1
 
         self.kpoints_array = kpoints_array
         self.eigenvals = eigenvals
@@ -1936,48 +1915,9 @@ class Wavefunction:
             grid (tuple[int, int, int]): Grid on which wavefunction was calculated, e.g. (1, 2, 2).
             structure (Structure): The Structure object.
         """
-        Nx = grid[0] - 1
-        Ny = grid[1] - 1
-        Nz = grid[2] - 1
-        a = structure.lattice.matrix[0]
-        b = structure.lattice.matrix[1]
-        c = structure.lattice.matrix[2]
-        new_x = []
-        new_y = []
-        new_z = []
-        new_real = []
-        new_imaginary = []
-        new_density = []
-
-        for runner, (x, y, z) in enumerate(itertools.product(range(Nx + 1), range(Ny + 1), range(Nz + 1))):
-            x_here = x / float(Nx) * a[0] + y / float(Ny) * b[0] + z / float(Nz) * c[0]
-            y_here = x / float(Nx) * a[1] + y / float(Ny) * b[1] + z / float(Nz) * c[1]
-            z_here = x / float(Nx) * a[2] + y / float(Ny) * b[2] + z / float(Nz) * c[2]
-
-            if x != Nx and y != Ny and z != Nz:
-                if (
-                    not np.isclose(self.points[runner][0], x_here, 1e-3)
-                    and not np.isclose(self.points[runner][1], y_here, 1e-3)
-                    and not np.isclose(self.points[runner][2], z_here, 1e-3)
-                ):
-                    raise ValueError(
-                        "The provided wavefunction from Lobster does not contain all relevant"
-                        " points. "
-                        "Please use a line similar to: printLCAORealSpaceWavefunction kpoint 1 "
-                        "coordinates 0.0 0.0 0.0 coordinates 1.0 1.0 1.0 box bandlist 1 "
-                    )
-
-                new_x.append(x_here)
-                new_y.append(y_here)
-                new_z.append(z_here)
-
-                new_real.append(self.real[runner])
-                new_imaginary.append(self.imaginary[runner])
-                new_density.append(self.real[runner] ** 2 + self.imaginary[runner] ** 2)
-
-        self.final_real = np.reshape(new_real, [Nx, Ny, Nz])
-        self.final_imaginary = np.reshape(new_imaginary, [Nx, Ny, Nz])
-        self.final_density = np.reshape(new_density, [Nx, Ny, Nz])
+        self.final_real, self.final_imaginary, self.final_density = _wavefunction_on_periodic_grid(
+            grid, structure.lattice.matrix, self.points, self.real, self.imaginary
+        )
 
         self.volumetricdata_real = VolumetricData(structure, {"total": self.final_real})
         self.volumetricdata_imaginary = VolumetricData(structure, {"total": self.final_imaginary})
@@ -2204,46 +2144,6 @@ class SitePotential(MSONable):
     @deprecated(message="Use `madelungenergies_loewdin` instead.", category=DeprecationWarning)
     def madelungenergies_Loewdin(self):
         return self.madelungenergies_loewdin
-
-
-def get_orb_from_str(orbs: list[str]) -> tuple[str, list[tuple[int, Orbital]]]:
-    """Get Orbitals from string representations.
-
-    Args:
-        orbs (list[str]): Orbitals, e.g. ["2p_x", "3s"].
-
-    Returns:
-        tuple[str, list[tuple[int, Orbital]]]: Orbital label, orbitals.
-    """
-    # TODO: also use for plotting of DOS
-    orb_labs = (
-        "s",
-        "p_y",
-        "p_z",
-        "p_x",
-        "d_xy",
-        "d_yz",
-        "d_z^2",
-        "d_xz",
-        "d_x^2-y^2",
-        "f_y(3x^2-y^2)",
-        "f_xyz",
-        "f_yz^2",
-        "f_z^3",
-        "f_xz^2",
-        "f_z(x^2-y^2)",
-        "f_x(x^2-3y^2)",
-    )
-    orbitals = [(int(orb[0]), Orbital(orb_labs.index(orb[1:]))) for orb in orbs]
-
-    orb_label = ""
-    for iorb, orbital in enumerate(orbitals):
-        if iorb == 0:
-            orb_label += f"{orbital[0]}{orbital[1].name}"
-        else:
-            orb_label += f"-{orbital[0]}{orbital[1].name}"
-
-    return orb_label, orbitals
 
 
 class LobsterMatrices:

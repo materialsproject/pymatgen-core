@@ -1406,6 +1406,31 @@ class TestWavefunction(MatSciTest):
         wave1.write_file(filename=density_wavecar_path, part="density")
         assert os.path.isfile(density_wavecar_path)
 
+    def test_set_volumetric_data_values(self):
+        wave = Wavefunction(
+            filename=f"{TEST_DIR}/LCAOWaveFunctionAfterLSO1PlotOfSpin1Kpoint1band1.gz",
+            structure=Structure.from_file(f"{TEST_DIR}/POSCAR_O.gz"),
+        )
+        wave.set_volumetric_data(grid=wave.grid, structure=wave.structure)
+
+        n_x, n_y, n_z = (n - 1 for n in wave.grid)
+        assert wave.final_real.shape == (n_x, n_y, n_z)
+        for i, j, k in [(0, 0, 0), (1, 2, 3), (n_x - 1, n_y - 1, n_z - 1), (5, 0, n_z - 1)]:
+            idx = (i * wave.grid[1] + j) * wave.grid[2] + k
+            assert wave.final_real[i, j, k] == wave.reals[idx]
+            assert wave.final_imaginary[i, j, k] == wave.imaginaries[idx]
+            assert wave.final_density[i, j, k] == approx(wave.reals[idx] ** 2 + wave.imaginaries[idx] ** 2)
+
+    def test_set_volumetric_data_wrong_structure(self):
+        structure = Structure.from_file(f"{TEST_DIR}/POSCAR_O.gz")
+        wave = Wavefunction(
+            filename=f"{TEST_DIR}/LCAOWaveFunctionAfterLSO1PlotOfSpin1Kpoint1band1.gz",
+            structure=structure,
+        )
+        structure.scale_lattice(structure.volume * 8)
+        with pytest.raises(ValueError, match="does not contain all relevant points"):
+            wave.set_volumetric_data(grid=wave.grid, structure=structure)
+
 
 class TestSitePotentials(MatSciTest):
     def setup_method(self) -> None:
@@ -1604,6 +1629,30 @@ class TestCOBICAR(MatSciTest):
             spins=[Spin.down],
             data_type="icoxx",
         ).shape == (cobicar.num_data, 1)
+
+    def test_data_columns_by_spin_and_data_type(self):
+        cobicar = COBICAR(TEST_DIR + "/COBICAR.lobster.B2H6.spin")
+        n_bonds = cobicar.num_bonds
+        interaction = cobicar.interactions[3]
+
+        assert cobicar.interaction_indices_to_data_indices_mapping(3) == [
+            7,
+            8,
+            2 * (n_bonds + 3) + 1,
+            2 * (n_bonds + 3) + 2,
+        ]
+        assert cobicar.interaction_indices_to_data_indices_mapping(3, spins=[Spin.down]) == [
+            2 * (n_bonds + 3) + 1,
+            2 * (n_bonds + 3) + 2,
+        ]
+        assert cobicar.interaction_indices_to_data_indices_mapping([3, 3, n_bonds], spins=Spin.up) == [7, 8]
+
+        for spin in (Spin.up, Spin.down):
+            for data_type in ("coxx", "icoxx"):
+                data = cobicar.get_data_by_properties(indices=[interaction["index"]], spins=[spin], data_type=data_type)
+                matching = cobicar.get_interactions_by_properties(indices=[interaction["index"]])
+                assert data.shape == (cobicar.num_data, len(matching))
+                assert_array_equal(data[:, matching.index(interaction)], interaction[data_type][spin])
 
     def test_read_cobicar_4_centers(self):
         cobicar = COBICAR(TEST_DIR + "/COBICAR.lobster.GeTe_4center")
@@ -1945,3 +1994,13 @@ def test_lobster_matrices_type_from_file_name_only(tmp_path):
     filename = directory / "C_transferMatrices.lobster.gz"
     shutil.copy(f"{TEST_DIR}/C_transferMatrices.lobster.gz", filename)
     assert LobsterMatrices(filename=filename).matrix_type == "transfer"
+
+
+def test_get_orb_from_str():
+    from pymatgen.electronic_structure.core import Orbital
+    from pymatgen.io.lobster.future.outputs.misc import get_orb_from_str
+
+    label, orbitals = get_orb_from_str(["2p_x", "3d_z^2", "4f_x(x^2-3y^2)"])
+    assert label == "2px-3dz2-4f3"
+    assert orbitals == [(2, Orbital.px), (3, Orbital.dz2), (4, Orbital.f3)]
+    assert get_orb_from_str(["3s"]) == ("3s", [(3, Orbital.s)])

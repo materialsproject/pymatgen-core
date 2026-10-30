@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import re
 from itertools import islice
 from pathlib import Path
@@ -9,9 +8,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 import numpy as np
 
 from pymatgen.electronic_structure.core import Orbital, Spin
-from pymatgen.io.lobster.future.constants import LOBSTER_ORBITALS
 from pymatgen.io.lobster.future.core import LobsterFile
-from pymatgen.io.lobster.future.utils import parse_orbital_from_text
+from pymatgen.io.lobster.future.utils import _wavefunction_on_periodic_grid, parse_orbital_from_text
 from pymatgen.io.lobster.future.versioning import version_processor
 from pymatgen.io.vasp.outputs import VolumetricData
 
@@ -121,48 +119,9 @@ class Wavefunction(LobsterFile):
         Raises:
             ValueError: If the wavefunction file does not contain all relevant points.
         """
-        Nx = grid[0] - 1
-        Ny = grid[1] - 1
-        Nz = grid[2] - 1
-        a = structure.lattice.matrix[0]
-        b = structure.lattice.matrix[1]
-        c = structure.lattice.matrix[2]
-        new_x = []
-        new_y = []
-        new_z = []
-        new_real = []
-        new_imaginary = []
-        new_density = []
-
-        for runner, (x, y, z) in enumerate(itertools.product(range(Nx + 1), range(Ny + 1), range(Nz + 1))):
-            x_here = x / float(Nx) * a[0] + y / float(Ny) * b[0] + z / float(Nz) * c[0]
-            y_here = x / float(Nx) * a[1] + y / float(Ny) * b[1] + z / float(Nz) * c[1]
-            z_here = x / float(Nx) * a[2] + y / float(Ny) * b[2] + z / float(Nz) * c[2]
-
-            if x != Nx and y != Ny and z != Nz:
-                if (
-                    not np.isclose(self.points[runner][0], x_here, 1e-3)
-                    and not np.isclose(self.points[runner][1], y_here, 1e-3)
-                    and not np.isclose(self.points[runner][2], z_here, 1e-3)
-                ):
-                    raise ValueError(
-                        "The provided wavefunction from Lobster does not contain all relevant"
-                        " points. "
-                        "Please use a line similar to: printLCAORealSpaceWavefunction kpoint 1 "
-                        "coordinates 0.0 0.0 0.0 coordinates 1.0 1.0 1.0 box bandlist 1 "
-                    )
-
-                new_x.append(x_here)
-                new_y.append(y_here)
-                new_z.append(z_here)
-
-                new_real.append(self.reals[runner])
-                new_imaginary.append(self.imaginaries[runner])
-                new_density.append(self.reals[runner] ** 2 + self.imaginaries[runner] ** 2)
-
-        self.final_real = np.reshape(new_real, [Nx, Ny, Nz])
-        self.final_imaginary = np.reshape(new_imaginary, [Nx, Ny, Nz])
-        self.final_density = np.reshape(new_density, [Nx, Ny, Nz])
+        self.final_real, self.final_imaginary, self.final_density = _wavefunction_on_periodic_grid(
+            grid, structure.lattice.matrix, self.points, self.reals, self.imaginaries
+        )
 
         self.volumetricdata_real = VolumetricData(structure, {"total": self.final_real})
         self.volumetricdata_imaginary = VolumetricData(structure, {"total": self.final_imaginary})
@@ -330,6 +289,27 @@ class SitePotentials(LobsterFile):
         return "SitePotentials.lobster"
 
 
+# LOBSTER orbital labels in the order of the pymatgen Orbital enum, i.e. Orbital(i) is _ORBITAL_LABELS[i]
+_ORBITAL_LABELS: tuple[str, ...] = (
+    "s",
+    "p_y",
+    "p_z",
+    "p_x",
+    "d_xy",
+    "d_yz",
+    "d_z^2",
+    "d_xz",
+    "d_x^2-y^2",
+    "f_y(3x^2-y^2)",
+    "f_xyz",
+    "f_yz^2",
+    "f_z^3",
+    "f_xz^2",
+    "f_z(x^2-y^2)",
+    "f_x(x^2-3y^2)",
+)
+
+
 def get_orb_from_str(orbs: list[str]) -> tuple[str, list[tuple[int, Orbital]]]:
     """Get Orbitals from string representations.
 
@@ -339,14 +319,8 @@ def get_orb_from_str(orbs: list[str]) -> tuple[str, list[tuple[int, Orbital]]]:
     Returns:
         tuple[str, list[tuple[int, Orbital]]]: Orbital label and list of orbitals.
     """
-    orbitals = [(int(orb[0]), Orbital(LOBSTER_ORBITALS.index(orb[1:]))) for orb in orbs]
-
-    orb_label = ""
-    for iorb, orbital in enumerate(orbitals):
-        if iorb == 0:
-            orb_label += f"{orbital[0]}{orbital[1].name}"
-        else:
-            orb_label += f"-{orbital[0]}{orbital[1].name}"
+    orbitals = [(int(orb[0]), Orbital(_ORBITAL_LABELS.index(orb[1:]))) for orb in orbs]
+    orb_label = "-".join(f"{principal}{orbital.name}" for principal, orbital in orbitals)
 
     return orb_label, orbitals
 

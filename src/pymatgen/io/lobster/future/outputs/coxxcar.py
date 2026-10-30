@@ -311,29 +311,17 @@ class COXXCAR(LobsterInteractionsHolder):
         if set(spins_list) - set(file_spins):
             raise ValueError(f"Requested `Spin` {spins_list} is not valid. Valid `Spin`s are: {file_spins}.")
 
-        index_range = np.arange(0, self.num_bonds * 2 * len(spins_list) + 1)
+        # Column layout: energy, then (coxx, icoxx) per interaction for spin up, then the same block for spin down.
+        spin_offsets = {0 if spin == Spin.up else self.num_bonds for spin in spins_list}
+        column_shifts = {"coxx": (1,), "icoxx": (2,)}.get(data_type or "", (1, 2))
 
-        if data_type == "icoxx":
-            index_range = index_range[1::2]
-        elif data_type == "coxx":
-            index_range = index_range[::2]
-
-        real_indices = []
-        for bond_index in interaction_indices:
-            real_indices.extend([bond_index * 2 + 1, bond_index * 2 + 2])
-
-            if Spin.down in spins_list:
-                real_indices.extend(
-                    [
-                        (self.num_bonds + bond_index) * 2 + 1,
-                        (self.num_bonds + bond_index) * 2 + 2,
-                    ]
-                )
-
-        indices_arr = np.array(real_indices, dtype=int)
-        indices_arr = np.intersect1d(indices_arr, index_range)
-
-        return sorted(indices_arr.tolist())
+        return sorted(
+            (spin_offset + bond_index) * 2 + shift
+            for bond_index in set(interaction_indices)
+            if 0 <= bond_index < self.num_bonds
+            for spin_offset in spin_offsets
+            for shift in column_shifts
+        )
 
 
 class COBICAR(COXXCAR):
