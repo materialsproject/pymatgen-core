@@ -201,13 +201,11 @@ class Substitutor(MSONable):
             dictionary, and a probability value
         """
         species_list = [get_el_sp(sp) for sp in species_list]
+        # (candidate species, conditional probability) pairs for each position, computed once instead of in
+        # every node of the recursion
+        level_probs = [[(s1, self._sp.cond_prob(s1, s2)) for s1 in self._sp.species] for s2 in species_list]
         # calculate the highest probabilities to help us stop the recursion
-        max_probabilities = []
-        for s2 in species_list:
-            max_p = 0
-            for s1 in self._sp.species:
-                max_p = max([self._sp.cond_prob(s1, s2), max_p])
-            max_probabilities.append(max_p)
+        max_probabilities = [max((prob for _, prob in probs), default=0) for probs in level_probs]
         output = []
 
         def _recurse(output_prob, output_species):
@@ -221,9 +219,7 @@ class Substitutor(MSONable):
                     }
                     output.append(odict)
                     return
-                for sp in self._sp.species:
-                    i = len(output_prob)
-                    prob = self._sp.cond_prob(sp, species_list[i])
+                for sp, prob in level_probs[len(output_prob)]:
                     _recurse([*output_prob, prob], [*output_species, sp])
 
         _recurse([], [])

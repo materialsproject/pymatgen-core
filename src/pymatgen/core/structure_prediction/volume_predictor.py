@@ -190,24 +190,28 @@ class DLSVolumePredictor:
 
         # Structure object that includes only sites with known atomic radii.
         reduced_structure = Structure.from_sites(sub_sites)
-        smallest_ratio = None
+        species = reduced_structure.species
+        radii = np.array([sp.atomic_radius for sp in species], dtype=float)
+        has_bp = np.array([sp in bp_dict for sp in species], dtype=bool)
+        bp_radii = np.array([bp_dict.get(sp, 0.0) for sp in species])
 
-        for site1 in reduced_structure:
-            sp1 = site1.specie
-            neighbors = reduced_structure.get_neighbors(site1, sp1.atomic_radius + self.cutoff)
+        # One neighbor search out to the largest per-site cutoff, then keep the pairs within each center's
+        # own cutoff (atomic radius + self.cutoff), using the same criterion as get_neighbors
+        numerical_tol = 1e-8
+        centers, neighbors, _, distances = reduced_structure.get_neighbor_list(
+            float(radii.max(initial=0)) + self.cutoff, numerical_tol=numerical_tol
+        )
+        in_cutoff = distances**2 < (radii[centers] + self.cutoff) ** 2 + numerical_tol
+        centers, neighbors, distances = centers[in_cutoff], neighbors[in_cutoff], distances[in_cutoff]
 
-            for nn in neighbors:
-                sp2 = nn.specie
-
-                if sp1 in bp_dict and sp2 in bp_dict:
-                    expected_dist = bp_dict[sp1] + bp_dict[sp2]
-                else:
-                    if sp1.atomic_radius is None:
-                        raise ValueError("atomic_radius of sp1 is None.")
-                    expected_dist = sp1.atomic_radius + sp2.atomic_radius
-
-                if not smallest_ratio or nn.nn_distance / expected_dist < smallest_ratio:
-                    smallest_ratio = nn.nn_distance / expected_dist
+        # Use the DLS bond length if both species have bond parameters, else the sum of atomic radii
+        expected_dists = np.where(
+            has_bp[centers] & has_bp[neighbors],
+            bp_radii[centers] + bp_radii[neighbors],
+            radii[centers] + radii[neighbors],
+        )
+        ratios = distances / expected_dists
+        smallest_ratio = float(ratios.min()) if len(ratios) else None
 
         if not smallest_ratio:
             raise ValueError("Could not find any bonds within the given cutoff in this structure.")

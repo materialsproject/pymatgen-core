@@ -83,11 +83,7 @@ class Entry(MSONable, ABC):
                 Composition, including a {symbol: amt} dict, a string formula, and others.
             energy (float): Energy of the entry.
         """
-        if isinstance(composition, Composition):
-            self._composition = composition
-        else:
-            self._composition = Composition(composition)
-        # self._composition = Composition(composition)
+        self._composition = composition if isinstance(composition, Composition) else Composition(composition)
         self._energy = energy
 
     @property
@@ -716,11 +712,8 @@ class ComputedStructureEntry(ComputedEntry):
             entry_id: An optional id to uniquely identify the entry.
         """
         if composition:
-            if isinstance(composition, Composition):
-                pass
-            else:
+            if not isinstance(composition, Composition):
                 composition = Composition(composition)
-            # composition = Composition(composition)
             if (
                 composition.get_integer_formula_and_factor()[0]
                 != structure.composition.get_integer_formula_and_factor()[0]

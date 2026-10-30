@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import itertools
 import logging
 import math
 import os
@@ -11,6 +10,7 @@ from collections import defaultdict
 from operator import mul
 from typing import TYPE_CHECKING
 
+import numpy as np
 import orjson
 from monty.design_patterns import cached_class
 
@@ -68,22 +68,32 @@ class SubstitutionProbability:
         self.alpha = alpha
         self._l = {}
         self.species = set()
+        # parse each distinct species string once; reusing the instances also makes set/dict lookups hit the
+        # identity check instead of Species.__eq__
+        parse_species = functools.cache(Species.from_str)
         for row in self._lambda_table:
             if "D1+" not in row:
-                s1 = Species.from_str(row[0])
-                s2 = Species.from_str(row[1])
+                s1 = parse_species(row[0])
+                s2 = parse_species(row[1])
                 self.species.add(s1)
                 self.species.add(s2)
                 self._l[frozenset([s1, s2])] = float(row[2])
 
-        # create Z and px
-        self.Z = 0
-        self._px: dict[SpeciesLike, float] = defaultdict(float)
-        for s1, s2 in itertools.product(self.species, repeat=2):
-            value = math.exp(self.get_lambda(s1, s2))
-            self._px[s1] += value / 2
-            self._px[s2] += value / 2
-            self.Z += value
+        # create Z and px. With the symmetric matrix exp_lambda[i, j] = exp(lambda(s_i, s_j)) over all species
+        # pairs, Z is the sum over all entries and px is the row sum (each ordered pair contributes half its
+        # value to each of the two species).
+        species = list(self.species)
+        sp_index = {sp: idx for idx, sp in enumerate(species)}
+        lambdas = np.full((len(species), len(species)), float(alpha))
+        for key, value in self._l.items():
+            s1, *others = key
+            s2 = others[0] if others else s1  # the frozenset of a self-substitution has a single element
+            lambdas[sp_index[s1], sp_index[s2]] = lambdas[sp_index[s2], sp_index[s1]] = value
+        exp_lambdas = np.exp(lambdas)
+        self.Z = float(exp_lambdas.sum())
+        self._px: dict[SpeciesLike, float] = defaultdict(
+            float, zip(species, exp_lambdas.sum(axis=1).tolist(), strict=True)
+        )
 
     def get_lambda(self, s1, s2):
         """
@@ -164,7 +174,9 @@ class SubstitutionProbability:
         return {
             "name": type(self).__name__,
             "version": __version__,
-            "init_args": {"lambda_table": self._l, "alpha": self.alpha},
+            # the raw table rather than self._l, whose frozenset keys are neither JSON-serializable nor
+            # accepted by __init__
+            "init_args": {"lambda_table": self._lambda_table, "alpha": self.alpha},
             "@module": type(self).__module__,
             "@class": type(self).__name__,
         }
@@ -217,13 +229,16 @@ class SubstitutionPredictor:
         for sp in species:
             if get_el_sp(sp) not in self.p.species:
                 raise ValueError(f"the species {sp} is not allowed for the probability model you are using")
-        max_probabilities = []
-        for s1 in species:
-            if to_this_composition:
-                max_p = max(self.p.cond_prob(s2, s1) for s2 in self.p.species)
-            else:
-                max_p = max(self.p.cond_prob(s1, s2) for s2 in self.p.species)
-            max_probabilities.append(max_p)
+        # (candidate species, conditional probability) pairs for each position, computed once instead of in
+        # every node of the recursion
+        level_probs = [
+            [
+                (sp, self.p.cond_prob(sp, s1) if to_this_composition else self.p.cond_prob(s1, sp))
+                for sp in self.p.species
+            ]
+            for s1 in species
+        ]
+        max_probabilities = [max(prob for _, prob in probs) for probs in level_probs]
 
         output = []
 
@@ -240,9 +255,7 @@ class SubstitutionPredictor:
                     if len(output_species) == len(set(output_species)):
                         output.append(odict)
                     return
-                for sp in self.p.species:
-                    i = len(output_prob)
-                    prob = self.p.cond_prob(sp, species[i]) if to_this_composition else self.p.cond_prob(species[i], sp)
+                for sp, prob in level_probs[len(output_prob)]:
                     _recurse([*output_prob, prob], [*output_species, sp])
 
         _recurse([], [])

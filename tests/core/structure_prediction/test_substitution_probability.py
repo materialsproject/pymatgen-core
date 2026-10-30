@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import itertools
+import json
+import math
+
 import orjson
 from pytest import approx
 
@@ -50,6 +54,25 @@ class TestSubstitutionProbability:
         assert sp.pair_corr(li1, na1) == approx(1.65425296864, abs=1e-5), "correlation isn't correct"
         prob = sp.cond_prob_list([o2, li1], [na1, li1])
         assert prob == approx(0.00102673915742, abs=1e-5), "probability isn't correct"
+
+    def test_partition_function(self):
+        # Z and px against a brute-force sum over all ordered species pairs
+        sp = SubstitutionProbability(lambda_table=get_table(), alpha=-5.0)
+        pairs = list(itertools.product(sp.species, repeat=2))
+        assert math.isclose(sp.Z, sum(math.exp(sp.get_lambda(s1, s2)) for s1, s2 in pairs), rel_tol=1e-12)
+        for species in sp.species:
+            expected = sum(math.exp(sp.get_lambda(species, s2)) for s2 in sp.species)
+            assert sp.get_px(species) == approx(expected, rel=1e-12)
+
+    def test_as_from_dict(self):
+        # Regression: as_dict stored the frozenset-keyed lambda map, which is neither JSON-serializable nor
+        # accepted by from_dict
+        sp = SubstitutionProbability(lambda_table=get_table(), alpha=-4.0)
+        restored = SubstitutionProbability.from_dict(json.loads(json.dumps(sp.as_dict())))
+        assert restored.alpha == -4.0
+        assert restored.species == sp.species
+        assert math.isclose(restored.Z, sp.Z)
+        assert restored.prob(Species("S", -2), Species("O", -2)) == approx(sp.prob(Species("S", -2), Species("O", -2)))
 
 
 class TestSubstitutionPredictor:
