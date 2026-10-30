@@ -142,6 +142,11 @@ class TestSlab(MatSciTest):
         species = [str(site.specie) for site in self.zno55.get_sorted_structure()]
         assert species == ["Zn2+"] * 4 + ["O2-"] * 4
 
+    def test_get_sorted_structure_keeps_energy(self):
+        slab = self.zno55.copy()
+        slab.energy = -1.5
+        assert slab.get_sorted_structure().energy == approx(-1.5)
+
     def test_methods(self):
         # Test various structure methods
         self.zno55.get_primitive_structure()
@@ -865,6 +870,23 @@ class TestSlabGenerator(MatSciTest):
         others = [idx for idx in range(len(slab)) if idx != top_idx]
         assert_allclose(moved.frac_coords[others], slab.frac_coords[others])
 
+    def test_init_does_not_modify_input(self):
+        struct = self.MgO.copy()
+        slab_gen = SlabGenerator(struct, (1, 0, 0), 10, 10)
+        assert struct.site_properties == {}
+        assert {"bulk_wyckoff", "bulk_equivalent"} <= set(slab_gen.parent.site_properties)
+        assert {"bulk_wyckoff", "bulk_equivalent"} <= set(slab_gen.get_slab().site_properties)
+
+    def test_move_to_other_side_keeps_site_properties(self):
+        slab_gen = SlabGenerator(self.MgO, (1, 0, 0), 10, 10, center_slab=True, reorient_lattice=False)
+        slab = slab_gen.get_slab()
+        slab.add_site_property("magmom", list(range(len(slab))))
+        top_idx = int(np.argmax(slab.frac_coords[:, 2]))
+        moved = slab_gen.move_to_other_side(slab, [top_idx])
+        assert moved.site_properties == slab.site_properties
+        assert moved.reorient_lattice is False
+        assert_allclose(moved.lattice.matrix, slab.lattice.matrix)
+
     def test_repair_broken_bonds_reversed_pair(self):
         # The reference element is chosen by coordination, so the order of the pair should not matter
         slab_gen = SlabGenerator(self.get_structure("LiFePO4"), (0, 0, 1), 10, 10, center_slab=True)
@@ -1292,7 +1314,7 @@ class TestMillerIndexFinder(MatSciTest):
         [
             ("cscl", (1, 0, 0), "cubic", 6),
             ("cscl", (1, 1, 1), "cubic", 8),
-            ("LiCoO2", (1, 0, 4), "trigonal", 12),
+            ("LiCoO2", (1, 0, 4), "trigonal", 6),
         ],
     )
     def test_get_symmetrically_equivalent_miller_indices_given_system(
@@ -1304,6 +1326,28 @@ class TestMillerIndexFinder(MatSciTest):
         detected = get_symmetrically_equivalent_miller_indices(struct, miller_index)
         assert len(given) == n_expected
         assert set(given) == set(detected)
+
+    def test_get_symmetrically_equivalent_miller_indices_hexagonal_hkl(self):
+        # Equivalent hkl can have larger components than the input, e.g. (1, 1, 0) and (2, -1, 0)
+        hkl = get_symmetrically_equivalent_miller_indices(self.Mg, (1, 1, 0), return_hkil=False)
+        hkil = get_symmetrically_equivalent_miller_indices(self.Mg, (1, 1, -2, 0), return_hkil=False)
+        assert set(hkl) == set(hkil) == {(1, 1, 0), (-1, 2, 0), (-2, 1, 0), (-1, -1, 0), (1, -2, 0), (2, -1, 0)}
+
+    def test_get_symmetrically_equivalent_miller_indices_trigonal_hexagonal_setting(self):
+        # R-3m LiCoO2 in the hexagonal setting: the basal plane is not equivalent to any prismatic plane
+        assert set(get_symmetrically_equivalent_miller_indices(self.LiCoO2, (0, 0, 1), return_hkil=False)) == {
+            (0, 0, 1),
+            (0, 0, -1),
+        }
+        # -3m symmetry of the rhombohedral lattice, expressed in hexagonal hkl
+        assert set(get_symmetrically_equivalent_miller_indices(self.LiCoO2, (1, 0, 4), return_hkil=False)) == {
+            (1, 0, 4),
+            (0, -1, 4),
+            (-1, 1, 4),
+            (-1, 0, -4),
+            (0, 1, -4),
+            (1, -1, -4),
+        }
 
     def test_get_symmetrically_distinct_miller_indices_invalid_cell(self):
         with pytest.raises(ValueError, match="Unsupported cell type invalid"):
