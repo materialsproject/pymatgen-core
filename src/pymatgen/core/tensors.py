@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 import collections.abc
+import functools
 import itertools
 import logging
 import os
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any, Self
 
-    from numpy.typing import NDArray
+    from numpy.typing import ArrayLike, NDArray
 
     from pymatgen.core import Structure
 
@@ -39,6 +40,49 @@ __credits__ = "Maarten de Jong, Shyam Dwaraknath, Wei Chen, Mark Asta, Anubhav J
 logger = logging.getLogger(__name__)
 
 DEFAULT_QUAD = loadfn(os.path.join(os.path.dirname(__file__), "quad_data.json"))
+
+
+def _rotate_tensor(tensor: ArrayLike, rotations: ArrayLike) -> NDArray:
+    """Rotate a full-notation tensor by each of a stack of rotation matrices.
+
+    Equivalent to ``[SymmOp(rot).transform_tensor(tensor) for rot in rotations]``, but contracts one index
+    at a time (O(rank * 3^(rank + 1)) per rotation instead of O(3^(2 * rank))) and handles all rotations at once.
+
+    Args:
+        tensor (NDArray): tensor of shape (3,) * rank.
+        rotations (NDArray): rotation matrices of shape (n, 3, 3).
+
+    Returns:
+        NDArray: rotated tensors of shape (n,) + (3,) * rank.
+    """
+    tensor = np.asarray(tensor)
+    rotations = np.asarray(rotations)
+    idx = string.ascii_lowercase[: tensor.ndim]
+    rotated = np.broadcast_to(tensor, (len(rotations), *tensor.shape))
+    for axis, old in enumerate(idx):
+        new_idx = f"{idx[:axis]}Z{idx[axis + 1 :]}"
+        rotated = np.einsum(f"YZ{old},Y{idx}->Y{new_idx}", rotations, rotated)
+    return rotated
+
+
+@functools.cache
+def _get_voigt_gather_indices(rank: int) -> tuple[tuple[NDArray, ...], tuple[NDArray, ...]]:
+    """Index arrays for vectorized conversion between full and Voigt notation.
+
+    Returns:
+        tuple: (full_idx, voigt_idx). ``full[full_idx]`` (reshaped to the Voigt shape) gives the Voigt
+            tensor from the full one, using the same representative entry as iterating over
+            ``Tensor.get_voigt_dict(rank)`` (the last full index mapping to each Voigt index).
+            ``voigt[voigt_idx]`` (reshaped to (3,) * rank) gives the full tensor from the Voigt one.
+    """
+    voigt_dict = Tensor.get_voigt_dict(rank)
+    representative = {v_ind: ind for ind, v_ind in voigt_dict.items()}  # last one wins, as in the dict loop
+    vshape = (3,) * (rank % 2) + (6,) * (rank // 2)
+    full_idx = np.array([representative[v_ind] for v_ind in itertools.product(*map(range, vshape))]).reshape(-1, rank)
+    voigt_idx = np.array(list(voigt_dict.values())).reshape(-1, len(vshape))
+    for arr in (full_idx, voigt_idx):
+        arr.flags.writeable = False
+    return tuple(full_idx.T), tuple(voigt_idx.T)
 
 
 class Tensor(np.ndarray, MSONable):
@@ -90,7 +134,6 @@ class Tensor(np.ndarray, MSONable):
             return
         self.rank = getattr(obj, "rank", None)
         self._vscale = getattr(obj, "_vscale", None)
-        self._vdict = getattr(obj, "_vdict", None)
 
     def __array_wrap__(self, obj, context=None, return_scalar=None):
         """Override to properly handle scalars and be compatible with NumPy 2.0."""
@@ -217,20 +260,16 @@ class Tensor(np.ndarray, MSONable):
         array = self.voigt if voigt else self
 
         indices = list(itertools.product(*(range(n) for n in array.shape)))
-        remaining = indices.copy()
         # Start with everything near zero
         grouped = [list(zip(*np.where(np.isclose(array, 0, **kwargs)), strict=True))]
-        remaining = [i for i in remaining if i not in grouped[0]]
+        assigned = set(grouped[0])
+        remaining = [i for i in indices if i not in assigned]
         # Iteratively run through remaining indices
         while remaining:
-            new = list(
-                zip(
-                    *np.where(np.isclose(array, array[remaining[0]], **kwargs)),
-                    strict=True,
-                )
-            )
+            new = list(zip(*np.where(np.isclose(array, array[remaining[0]], **kwargs)), strict=True))
             grouped.append(new)
-            remaining = [i for i in remaining if i not in new]
+            assigned = set(new)
+            remaining = [i for i in remaining if i not in assigned]
         # Don't return any empty lists
         return [g for g in grouped if g]
 
@@ -334,8 +373,12 @@ class Tensor(np.ndarray, MSONable):
                 used to generate the symmetry operations
         """
         sga = SpacegroupAnalyzer(structure, symprec)
-        symm_ops = sga.get_symmetry_operations(cartesian=True)
-        return sum(self.transform(symm_op) for symm_op in symm_ops) / len(symm_ops)
+        return self._fit_to_symm_ops(sga.get_symmetry_operations(cartesian=True))
+
+    def _fit_to_symm_ops(self, symm_ops: Sequence[SymmOp]) -> Self:
+        """Average the tensor over a set of (Cartesian) symmetry operations."""
+        rotations = [symm_op.rotation_matrix for symm_op in symm_ops]
+        return type(self)(_rotate_tensor(self, rotations).mean(axis=0))
 
     def is_fit_to_structure(self, structure: Structure, tol: float = 1e-2) -> bool:
         """Test whether a tensor is invariant with respect to the
@@ -352,10 +395,8 @@ class Tensor(np.ndarray, MSONable):
     @property
     def voigt(self) -> NDArray[np.float64]:
         """The tensor in Voigt notation."""
-        v_matrix = np.zeros(self._vscale.shape, dtype=self.dtype)
-        this_voigt_map = self.get_voigt_dict(self.rank)
-        for ind, v in this_voigt_map.items():
-            v_matrix[v] = self[ind]
+        full_idx, _ = _get_voigt_gather_indices(self.rank)
+        v_matrix = np.asarray(self)[full_idx].reshape(self._vscale.shape)
         if not self.is_voigt_symmetric():
             warnings.warn("Tensor is not symmetric, information may be lost in Voigt conversion.", stacklevel=2)
         return v_matrix * self._vscale
@@ -370,9 +411,10 @@ class Tensor(np.ndarray, MSONable):
         for n in range(self.rank % 2, len(transpose_pieces)):
             if len(transpose_pieces[n][0]) == 2:
                 transpose_pieces[n] += [transpose_pieces[n][0][::-1]]
+        arr = np.asarray(self)
         for trans_seq in itertools.product(*transpose_pieces):
             transpose_seq = list(itertools.chain(*trans_seq))
-            if (self - self.transpose(transpose_seq) > tol).any():
+            if (arr - arr.transpose(transpose_seq) > tol).any():
                 return False
         return True
 
@@ -408,9 +450,8 @@ class Tensor(np.ndarray, MSONable):
         if voigt_input.shape != t._vscale.shape:
             raise ValueError("Invalid shape for Voigt matrix")
         voigt_input = voigt_input / t._vscale  # (ruff-preview) noqa: PLR6104
-        this_voigt_map = t.get_voigt_dict(rank)
-        for ind, v in this_voigt_map.items():
-            t[ind] = voigt_input[v]
+        _, voigt_idx = _get_voigt_gather_indices(rank)
+        t[...] = voigt_input[voigt_idx].reshape(t.shape)
         return cls(t)
 
     @staticmethod
@@ -633,13 +674,14 @@ class Tensor(np.ndarray, MSONable):
         Returns:
             Tensor: Populated tensor
         """
+        # Start from the populated (non-zero) entries. These must be set without preconditioning too: the mask
+        # used to be None then, so the guess stayed zero and test_new[None] = self[None] reset the whole tensor
         guess = type(self)(np.zeros(self.shape))
-        mask = None
+        mask = abs(self) > prec
+        guess[mask] = self[mask]
         if precond:
             # Generate the guess from populated
             sops = SpacegroupAnalyzer(structure).get_symmetry_operations()
-            mask = abs(self) > prec
-            guess[mask] = self[mask]
 
             def merge(old, new) -> None:
                 gmask = np.abs(old) > prec
@@ -652,7 +694,7 @@ class Tensor(np.ndarray, MSONable):
             if verbose:
                 logger.info(f"Preconditioning for {len(sops)} symmops")
             for sop in sops:
-                rot = guess.transform(sop)
+                rot = type(guess)(_rotate_tensor(guess, [sop.rotation_matrix])[0])  # i.e. guess.transform(sop)
                 # Store non-zero entries of new that weren't previously
                 # in the guess in the guess
                 merge(guess, rot)
@@ -670,12 +712,14 @@ class Tensor(np.ndarray, MSONable):
             raise ValueError("Guess must have same shape")
         converged = False
         test_new, test_old = [guess.copy()] * 2
+        # same symmetry operations as test_old.fit_to_structure(structure), but only computed once
+        fit_ops = SpacegroupAnalyzer(structure, symprec=0.1).get_symmetry_operations(cartesian=True)
         for idx in range(maxiter):
-            test_new = test_old.fit_to_structure(structure)
+            test_new = test_old._fit_to_symm_ops(fit_ops)
             if vsym:
                 test_new = test_new.voigt_symmetrized
             diff = np.abs(test_old - test_new)
-            converged = (diff < prec).all()
+            converged = bool((diff < prec).all())
             if converged:
                 break
             test_new[mask] = self[mask]
@@ -1064,16 +1108,21 @@ def symmetry_reduce(
     """
     sga = SpacegroupAnalyzer(structure, **kwargs)
     symm_ops = sga.get_symmetry_operations(cartesian=True)
+    rotations = [symm_op.rotation_matrix for symm_op in symm_ops]
     unique_mapping = TensorMapping([tensors[0]], [[]], tol=tol)
+    # All symmetry-transformed copies of each unique tensor, computed once per unique tensor
+    rotated_uniques = [_rotate_tensor(tensors[0], rotations)]
     for tensor in tensors[1:]:
-        is_unique = True
-        for unique_tensor, symm_op in itertools.product(unique_mapping, symm_ops):
-            if np.allclose(unique_tensor.transform(symm_op), tensor, atol=tol):
-                unique_mapping[unique_tensor].append(symm_op)
-                is_unique = False
+        for unique_tensor, rotated in zip(unique_mapping, rotated_uniques, strict=True):
+            # Same test as np.allclose(unique_tensor.transform(symm_op), tensor, atol=tol) for each symm_op
+            matches = np.isclose(rotated, tensor, atol=tol).reshape(len(rotated), -1).all(axis=1)
+            if matches.any():
+                unique_mapping[unique_tensor].append(symm_ops[int(np.argmax(matches))])
                 break
-        if is_unique:
+        else:
             unique_mapping[tensor] = []
+            if len(unique_mapping) > len(rotated_uniques):  # i.e. tensor was added as a new key
+                rotated_uniques.append(_rotate_tensor(tensor, rotations))
     return unique_mapping
 
 

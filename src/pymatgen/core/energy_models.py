@@ -8,6 +8,7 @@ from __future__ import annotations
 import abc
 from typing import TYPE_CHECKING
 
+import numpy as np
 from monty.json import MSONable
 
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -173,14 +174,12 @@ class IsingModel(EnergyModel):
         Returns:
             float: Energy value.
         """
-        all_nn = structure.get_all_neighbors(r=self.max_radius)
-        energy = 0
-        for idx, nns in enumerate(all_nn):
-            # Species.spin defaults to None: treat it like a missing spin
-            s1 = getattr(structure[idx].specie, "spin", None) or 0
-            for nn in nns:
-                energy += self.j * s1 * (getattr(nn.specie, "spin", None) or 0) / (nn.nn_distance**2)
-        return energy
+        centers, neighbors, _, distances = structure.get_neighbor_list(r=self.max_radius)
+        if len(centers) == 0:
+            return 0
+        # Species.spin defaults to None: treat it like a missing spin
+        spins = np.array([getattr(site.specie, "spin", None) or 0 for site in structure], dtype=float)
+        return float(np.sum(self.j * spins[centers] * spins[neighbors] / distances**2))
 
     def as_dict(self):
         """MSONable dict."""
