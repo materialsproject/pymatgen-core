@@ -68,6 +68,23 @@ class TestDos:
                 assert_allclose(summed.densities[spin], 2 * dos.densities[spin])
 
 
+@pytest.mark.parametrize("dos_cls", [Dos, DOS])
+def test_get_interpolated_gap_fermi_level_on_grid(dos_cls):
+    # Occupied states on a grid point exactly at efermi (as in LOBSTER output, where efermi = 0)
+    # belong to the valence band. Used to raise "out of range" ValueError when interpolating the VBM.
+    energies = [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]
+    densities = [0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0]
+    dos = Dos(0.0, energies, {Spin.up: densities}) if dos_cls is Dos else DOS(energies, densities, 0.0)
+    gap, cbm, vbm = dos.get_interpolated_gap(tol=1e-3, abs_tol=True)
+    assert vbm == approx(0.999)
+    assert cbm == approx(2.001)
+    assert gap == approx(1.002)
+
+    # Occupied grid points on both sides of the one at efermi: no gap
+    dos = Dos(0.0, energies, {Spin.up: [0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0]})
+    assert dos.get_interpolated_gap(tol=1e-3, abs_tol=True) == (0.0, 0.0, 0.0)
+
+
 class TestFermiDos:
     def setup_method(self):
         with open(f"{TEST_DIR}/complete_dos.json", "rb") as file:
@@ -259,6 +276,12 @@ class TestCompleteDos:
 
         # The sums of the SPD or the element doses should be the same.
         assert_allclose(sum_spd.energies, sum_element.energies, atol=1e-4)
+
+        # Deserialized PDOS are arrays, as for a CompleteDos parsed from vasprun.xml
+        for site_pdos in dos.pdos.values():
+            for orb_pdos in site_pdos.values():
+                assert all(isinstance(dens, np.ndarray) for dens in orb_pdos.values())
+        assert dos.as_dict()["pdos"] == dct["pdos"]
 
     def test_legacy_dx2_orbital_name(self):
         dct = self.dos.as_dict()
@@ -489,6 +512,15 @@ class TestLobsterCompleteDos:
         with open(f"{TEST_DIR}/structure_MnO.json", "rb") as file:
             data_MnO = orjson.loads(file.read())
         self.structure_MnO = Structure.from_dict(data_MnO)
+
+    def test_get_gap(self):
+        # LOBSTER energies are shifted so that efermi = 0 is a grid point. Occupied states there
+        # used to make get_gap raise (MnO) or be skipped, giving a 7.5 eV gap for KF.
+        assert self.LobsterCompleteDOS_MnO.get_gap() == 0.0
+        assert self.LobsterCompleteDOS_MnO_nonspin.get_gap() == 0.0
+        cbm, vbm = self.LobsterCompleteDOS_nonspin.get_cbm_vbm()
+        assert vbm == approx(3.749874, abs=1e-6)
+        assert cbm == approx(3.758334, abs=1e-6)
 
     def test_get_site_orbital_dos(self):
         # with spin polarization
