@@ -34,6 +34,10 @@ sub_spgrp = partial(re.sub, r"[\s_]", "")
 
 space_groups = {sub_spgrp(k): k for k in SYMM_DATA["space_group_encoding"]}
 
+# Voigt-like order of the reduced matrix used throughout: U11, U22, U33, U23, U13, U12 (xx, yy, zz, yz, xz, xy)
+_REDUCED_ROWS = np.array([0, 1, 2, 1, 0, 0])
+_REDUCED_COLS = np.array([0, 1, 2, 2, 2, 1])
+
 
 class ThermalDisplacementMatrices(MSONable):
     """Handle thermal displacement matrices
@@ -96,17 +100,10 @@ class ThermalDisplacementMatrices(MSONable):
         """
         td = np.array(thermal_displacement)
         matrix_form = np.zeros((len(td), 3, 3))
-        for idx, mat in enumerate(td):
-            # xx, yy, zz, yz, xz, xy
-            matrix_form[idx][0][0] = mat[0]
-            matrix_form[idx][1][1] = mat[1]
-            matrix_form[idx][2][2] = mat[2]
-            matrix_form[idx][1][2] = mat[3]
-            matrix_form[idx][2][1] = mat[3]
-            matrix_form[idx][0][2] = mat[4]
-            matrix_form[idx][2][0] = mat[4]
-            matrix_form[idx][0][1] = mat[5]
-            matrix_form[idx][1][0] = mat[5]
+        if len(td):
+            reduced = td[:, :6]
+            matrix_form[:, _REDUCED_ROWS, _REDUCED_COLS] = reduced
+            matrix_form[:, _REDUCED_COLS, _REDUCED_ROWS] = reduced
         return matrix_form
 
     @staticmethod
@@ -123,14 +120,8 @@ class ThermalDisplacementMatrices(MSONable):
         """
         td = np.array(thermal_displacement)
         reduced_matrix = np.zeros((len(td), 6))
-        for idx, mat in enumerate(td):
-            # xx, yy, zz, yz, xz, xy
-            reduced_matrix[idx][0] = mat[0][0]
-            reduced_matrix[idx][1] = mat[1][1]
-            reduced_matrix[idx][2] = mat[2][2]
-            reduced_matrix[idx][3] = mat[1][2]
-            reduced_matrix[idx][4] = mat[0][2]
-            reduced_matrix[idx][5] = mat[0][1]
+        if len(td):
+            reduced_matrix[:] = td[:, _REDUCED_ROWS, _REDUCED_COLS]
         return reduced_matrix
 
     @property
@@ -142,11 +133,7 @@ class ThermalDisplacementMatrices(MSONable):
         """
         A = self.structure.lattice.matrix.T
         Ainv = np.linalg.inv(A)
-        Ustar = []
-        for mat in self.thermal_displacement_matrix_cart_matrixform:
-            mat_ustar = np.dot(np.dot(Ainv, mat), Ainv.T)
-            Ustar.append(mat_ustar)
-        return np.array(Ustar)
+        return Ainv @ self.thermal_displacement_matrix_cart_matrixform @ Ainv.T
 
     @property
     def Ucif(self) -> np.ndarray:
@@ -162,12 +149,7 @@ class ThermalDisplacementMatrices(MSONable):
             A = self.structure.lattice.matrix.T  # check this again?
             N = np.diag([np.linalg.norm(x) for x in np.linalg.inv(A)])
             Ninv = np.linalg.inv(N)
-            Ucif = []
-            Ustar = self.Ustar
-            for mat in Ustar:
-                mat_cif = np.dot(np.dot(Ninv, mat), Ninv.T)
-                Ucif.append(mat_cif)
-            return np.array(Ucif)
+            return Ninv @ self.Ustar @ Ninv.T
         return self.thermal_displacement_matrix_cif_matrixform
 
     @property
@@ -177,11 +159,7 @@ class ThermalDisplacementMatrices(MSONable):
         Returns:
             np.array: First dimension are the atoms in the structure.
         """
-        B = []
-        for mat in self.Ucif:
-            mat_B = mat * 8 * np.pi**2
-            B.append(mat_B)
-        return np.array(B)
+        return self.Ucif * 8 * np.pi**2
 
     @property
     def beta(self) -> list:
@@ -191,11 +169,7 @@ class ThermalDisplacementMatrices(MSONable):
             np.array: First dimension are the atoms in the structure.
         """
         # will compute beta based on Ustar
-        beta = []
-        for mat in self.Ustar:
-            mat_beta = mat * 2 * np.pi**2
-            beta.append(mat_beta)
-        return beta
+        return list(self.Ustar * 2 * np.pi**2)
 
     @property
     def U1U2U3(self) -> list:
@@ -441,13 +415,10 @@ class ThermalDisplacementMatrices(MSONable):
         # convert the parameters for each atom
         A = structure.lattice.matrix.T
         N = np.diag([np.linalg.norm(x) for x in np.linalg.inv(A)])
-        Ucart = []
-        for mat in thermal_displacement_matrix_cif_matrix_form:
-            mat_ustar = np.dot(np.dot(N, mat), N.T)
-            mat_ucart = np.dot(np.dot(A, mat_ustar), A.T)
-            Ucart.append(mat_ucart)
+        Ustar = N @ thermal_displacement_matrix_cif_matrix_form @ N.T
+        Ucart = A @ Ustar @ A.T
 
-        thermal_displacement_matrix_cart = ThermalDisplacementMatrices.get_reduced_matrix(np.array(Ucart))
+        thermal_displacement_matrix_cart = ThermalDisplacementMatrices.get_reduced_matrix(Ucart)
 
         # get ThermalDisplacementMatrices Object
 
