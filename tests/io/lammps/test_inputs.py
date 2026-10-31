@@ -1138,3 +1138,34 @@ boundary p p p
         # Single stage → header not printed
         assert "Stage 1" not in s
         assert "units metal" in s
+
+    def test_from_str_ampersand_not_at_line_end(self):
+        # "&&" is a logical operator in if/variable commands, only a trailing "&" continues a line
+        contents = 'units metal\nif "${a} > 1 && ${b} < 2" then "print hi"\npair_style lj/cut &\n  2.5\nrun 0'
+        lmp_input = LammpsInputFile.from_str(contents)
+        assert lmp_input.stages[0]["commands"] == [
+            ("units", "metal"),
+            ("if", '"${a} > 1 && ${b} < 2" then "print hi"'),
+            ("pair_style", "lj/cut 2.5"),
+            ("run", "0"),
+        ]
+
+    def test_from_str_roundtrip_keep_stages_no_duplicate_header(self):
+        lmp_input = LammpsInputFile.from_str("# Setup\nunits metal\n\n# Run\nrun 0", keep_stages=True)
+        for _ in range(2):
+            lmp_input = LammpsInputFile.from_str(lmp_input.get_str(), keep_stages=True)
+        assert lmp_input.stages_names == ["Setup", "Run"]
+        assert lmp_input.get_str().count("# LAMMPS input generated from LammpsInputFile") == 1
+
+    def test_from_str_single_line(self):
+        assert LammpsInputFile.from_str("run 0").stages[0]["commands"] == [("run", "0")]
+        assert LammpsInputFile.from_str("run 0", keep_stages=True).stages[0]["commands"] == [("run", "0")]
+
+    def test_append_does_not_mutate_argument(self):
+        lmp_input1 = LammpsInputFile.from_str("units metal")
+        lmp_input2 = LammpsInputFile.from_str("run 0")
+        lmp_input1.append(lmp_input2)
+        assert lmp_input1.stages_names == ["Stage 1", "Stage 2"]
+        assert lmp_input2.stages_names == ["Stage 1"]
+        lmp_input1.stages[1]["commands"].append(("run", "10"))
+        assert lmp_input2.stages[0]["commands"] == [("run", "0")]
