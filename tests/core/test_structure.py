@@ -830,6 +830,57 @@ Direct
             assert_allclose(cy_indices2, py_indices2)
             assert len(cy_offsets) == len(py_offsets)
 
+    @pytest.fixture(params=["cython", "python"])
+    def nacl_neighbor_path(self, request, monkeypatch):
+        """NaCl-like test structure, with get_neighbor_list running on the Cython or the pure-Python path."""
+        if request.param == "python":
+            monkeypatch.setitem(sys.modules, "pymatgen.optimization.neighbors", None)
+        return IStructure(Lattice.cubic(4), ["Na", "Cl", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5], [0.5, 0, 0]])
+
+    def test_get_neighbor_list_sites_external_site_coincident_with_site0(self, nacl_neighbor_path):
+        # A site that is not in the structure but sits on structure site 0 must list it as a
+        # zero-distance neighbor, although its own position in `sites` is also 0.
+        struct = nacl_neighbor_path
+        ext = PeriodicSite("K", [0, 0, 0], struct.lattice)
+        centers, points, images, dists = struct.get_neighbor_list(0.1, sites=[ext])
+        assert centers.tolist() == [0]
+        assert points.tolist() == [0]
+        assert_allclose(images, [[0, 0, 0]])
+        assert_allclose(dists, [0], atol=1e-12)
+        nbrs = struct.get_neighbors(ext, 0.1)
+        assert [(nn.index, nn.species_string) for nn in nbrs] == [(0, "Na")]
+        assert [[nn.index for nn in nns] for nns in struct.get_all_neighbors(0.1, sites=[ext])] == [[0]]
+
+    def test_get_neighbor_list_sites_in_other_order(self, nacl_neighbor_path):
+        # Self exclusion must not depend on matching positions in `sites` and in the structure
+        struct = nacl_neighbor_path
+        centers, points, _, dists = struct.get_neighbor_list(2.1, sites=[struct[2], struct[0]])
+        assert dists.min() > 1
+        all_centers, all_points, _, all_dists = struct.get_neighbor_list(2.1)
+        for center, struct_idx in enumerate([2, 0]):
+            expected = sorted(
+                zip(
+                    all_points[all_centers == struct_idx].tolist(),
+                    all_dists[all_centers == struct_idx].tolist(),
+                    strict=True,
+                )
+            )
+            actual = sorted(zip(points[centers == center].tolist(), dists[centers == center].tolist(), strict=True))
+            assert [idx for idx, _ in actual] == [idx for idx, _ in expected]
+            assert_allclose([dist for _, dist in actual], [dist for _, dist in expected])
+
+    def test_get_neighbor_list_sites_structure_site_not_own_neighbor(self, nacl_neighbor_path):
+        struct = nacl_neighbor_path
+        for site in struct:
+            centers, points, _, dists = struct.get_neighbor_list(0.1, sites=[site])
+            assert len(centers) == 0
+            assert struct.get_neighbors(site, 0.1) == []
+        # exclude_self=False keeps the zero-distance self pair on both paths
+        centers, points, _, dists = struct.get_neighbor_list(0.1, sites=[struct[1]], exclude_self=False)
+        assert centers.tolist() == [0]
+        assert points.tolist() == [1]
+        assert_allclose(dists, [0], atol=1e-12)
+
     @pytest.mark.xfail(reason="TODO: need someone to fix this")
     @pytest.mark.skipif(not os.getenv("CI"), reason="Only run this in CI tests")
     def test_get_all_neighbors_crosscheck_old(self):

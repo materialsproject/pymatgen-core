@@ -57,6 +57,7 @@ from pymatgen.core.units import Length, Mass
 # + symmetry.groups (~6-10 ms) on every `from pymatgen.core import Structure`.
 from pymatgen.util.coord import all_distances, get_angle, lattice_points_in_supercell
 from pymatgen.util.due import Doi, due
+from pymatgen.util.misc import is_np_dict_equal
 
 try:
     from typing import override  # Python 3.12+
@@ -1823,27 +1824,63 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
         Returns:
             tuple: (center_indices, points_indices, offset_vectors, distances)
         """
-        neighbors = self.get_all_neighbors_py(
+        site_coords = np.array([site.coords for site in (self.sites if sites is None else sites)])
+        point_neighbors = get_points_in_spheres(
+            self.cart_coords,
+            site_coords,
             r=r,
-            include_index=True,
-            include_image=True,
-            sites=sites,
+            pbc=self.pbc,
             numerical_tol=numerical_tol,
+            lattice=self.lattice,
         )
         center_indices: list[int] = []
         points_indices: list[int] = []
         offsets: list[tuple] = []
         distances: list[float] = []
-        for idx, nns in enumerate(neighbors):
-            if len(nns) > 0:
-                for nn in nns:
-                    if exclude_self and idx == nn.index and nn.nn_distance <= numerical_tol:
-                        continue
-                    center_indices.append(idx)
-                    points_indices.append(nn.index)
-                    offsets.append(nn.image)
-                    distances.append(nn.nn_distance)
-        return np.array(center_indices), np.array(points_indices), np.array(offsets), np.array(distances)
+        for idx, nns in enumerate(point_neighbors):
+            for _, dist, index, image in nns:
+                center_indices.append(idx)
+                points_indices.append(index)
+                offsets.append(tuple(image))
+                distances.append(dist)
+        neighbor_list = (np.array(center_indices), np.array(points_indices), np.array(offsets), np.array(distances))
+        if not exclude_self:
+            return neighbor_list
+        keep = ~self._self_pair_mask(sites, neighbor_list[0], neighbor_list[1], neighbor_list[3], numerical_tol)
+        return tuple(arr[keep] for arr in neighbor_list)  # type:ignore[return-value]
+
+    def _self_pair_mask(
+        self,
+        sites: Sequence[Site] | None,
+        center_indices: NDArray[np.int_],
+        points_indices: NDArray[np.int_],
+        distances: NDArray[np.float64],
+        numerical_tol: float,
+    ) -> NDArray[np.bool_]:
+        """Mask of the neighbor-list pairs that pair a center site with itself.
+
+        With sites=None, the centers are the structure sites and a self pair is the zero-distance
+        pair of a site with its own index. Otherwise the position of a site in `sites` is unrelated
+        to its index in the structure, so a zero-distance pair is a self pair only if the structure
+        site is the center site itself: the same species, properties and Cartesian coordinates
+        (i.e. the zero image of that site), as in Site equality. An external site coincident with a
+        structure site of another species or properties, or a periodic image of a structure site,
+        is not its own neighbor.
+        """
+        is_zero = distances <= numerical_tol
+        if sites is None:
+            return is_zero & (center_indices == points_indices)
+        mask = np.zeros(len(distances), dtype=bool)
+        all_sites = self.sites
+        for idx in np.flatnonzero(is_zero):
+            csite = sites[center_indices[idx]]
+            psite = all_sites[points_indices[idx]]
+            mask[idx] = csite is psite or (
+                psite.species == csite.species
+                and np.allclose(psite.coords, csite.coords, atol=Site.position_atol)
+                and is_np_dict_equal(psite.properties, csite.properties)
+            )
+        return mask
 
     def get_neighbor_list(
         self,
@@ -1874,7 +1911,10 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 to be within r from the site. The default of 1e-8 should be
                 ok in most instances.
             exclude_self (bool): whether to exclude atom neighboring with itself within
-                numerical tolerance distance, default to True
+                numerical tolerance distance, default to True. If `sites` is given, a site
+                is only excluded as its own neighbor if it is equal to that structure site
+                (same species, properties and coordinates), not based on its position in `sites`.
+                An external site coincident with a structure site of another species is kept.
 
         Returns:
             tuple: (center_indices, points_indices, offset_vectors, distances)
@@ -1889,31 +1929,21 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
                 exclude_self=exclude_self,
             )
 
-        else:
-            if sites is None:
-                sites = self.sites
-            site_coords = np.ascontiguousarray([site.coords for site in sites], dtype=float)
-            cart_coords = np.ascontiguousarray(self.cart_coords, dtype=float)
-            lattice_matrix = np.ascontiguousarray(self.lattice.matrix, dtype=float)
-            pbc = np.ascontiguousarray(self.pbc, dtype=np.int64)
-            center_indices, points_indices, images, distances = find_points_in_spheres(
-                cart_coords,
-                site_coords,
-                r=r,
-                pbc=pbc,
-                lattice=lattice_matrix,
-                tol=numerical_tol,
-            )
-            cond = np.array([True] * len(center_indices))
-            if exclude_self:
-                self_pair = (center_indices == points_indices) & (distances <= numerical_tol)
-                cond = ~self_pair
-            return (
-                center_indices[cond],
-                points_indices[cond],
-                images[cond],
-                distances[cond],
-            )
+        site_coords = np.ascontiguousarray(
+            [site.coords for site in (self.sites if sites is None else sites)], dtype=float
+        )
+        center_indices, points_indices, images, distances = find_points_in_spheres(
+            np.ascontiguousarray(self.cart_coords, dtype=float),
+            site_coords,
+            r=r,
+            pbc=np.ascontiguousarray(self.pbc, dtype=np.int64),
+            lattice=np.ascontiguousarray(self.lattice.matrix, dtype=float),
+            tol=numerical_tol,
+        )
+        if not exclude_self:
+            return center_indices, points_indices, images, distances
+        keep = ~self._self_pair_mask(sites, center_indices, points_indices, distances, numerical_tol)
+        return center_indices[keep], points_indices[keep], images[keep], distances[keep]
 
     def get_symmetric_neighbor_list(
         self,
@@ -2133,47 +2163,38 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             [[pymatgen.core.structure.PeriodicNeighbor], ...]: a list of
                 list of neighbors for each site in structure.
         """
+        # Pass the structure sites explicitly (rather than None) so that self exclusion is based on site
+        # equality: coincident identical sites, e.g. duplicates, are not listed as neighbors of each other.
         if sites is None:
             sites = self.sites
         center_indices, points_indices, images, distances = self.get_neighbor_list(
             r=r, sites=sites, numerical_tol=numerical_tol
         )
+        n_centers = len(sites)
         if len(points_indices) < 1:
-            return [[] for _ in sites]
+            return [[] for _ in range(n_centers)]
         f_coords = self.frac_coords[points_indices] + images
         neighbor_dict: dict[int, list] = defaultdict(list)
         lattice = self.lattice
-        atol = Site.position_atol
         all_sites = self.sites
         for cindex, pindex, image, f_coord, d in zip(
             center_indices, points_indices, images, f_coords, distances, strict=True
         ):
             psite = all_sites[pindex]
-            csite = sites[cindex]
-            if (
-                d > numerical_tol
-                or
-                # This simply compares the psite and csite. The reason why manual comparison is done is
-                # for speed. This does not check the lattice since they are always equal. Also, the or construct
-                # returns True immediately once one of the conditions are satisfied.
-                psite.species != csite.species
-                or (not np.allclose(psite.coords, csite.coords, atol=atol))
-                or (psite.properties != csite.properties)
-            ):
-                neighbor_dict[cindex].append(
-                    PeriodicNeighbor(
-                        species=psite.species,
-                        coords=f_coord,
-                        lattice=lattice,
-                        properties=psite.properties,
-                        nn_distance=d,
-                        index=pindex,
-                        image=tuple(image),
-                        label=psite.label,
-                    )
+            neighbor_dict[cindex].append(
+                PeriodicNeighbor(
+                    species=psite.species,
+                    coords=f_coord,
+                    lattice=lattice,
+                    properties=psite.properties,
+                    nn_distance=d,
+                    index=pindex,
+                    image=tuple(image),
+                    label=psite.label,
                 )
+            )
 
-        return [neighbor_dict[i] for i in range(len(sites))]
+        return [neighbor_dict[i] for i in range(n_centers)]
 
     def get_all_neighbors_py(
         self,

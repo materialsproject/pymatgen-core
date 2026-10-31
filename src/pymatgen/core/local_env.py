@@ -276,20 +276,8 @@ def _get_filtered_neighbors(
 
     # Mirrors Structure.get_all_neighbors(r, sites=[site]), including its exclusion of the
     # central site itself, but defers construction of the neighbor objects.
-    numerical_tol = 1e-8
-    _, points_indices, images, distances = structure.get_neighbor_list(
-        r=r, sites=[cast("PeriodicSite", site)], numerical_tol=numerical_tol
-    )
+    _, points_indices, images, distances = structure.get_neighbor_list(r=r, sites=[cast("PeriodicSite", site)])
     all_sites = structure.sites
-    is_neighbor = np.ones(len(distances), dtype=bool)
-    for idx in np.flatnonzero(distances <= numerical_tol):
-        psite = all_sites[points_indices[idx]]
-        is_neighbor[idx] = (
-            psite.species != site.species
-            or not np.allclose(psite.coords, site.coords, atol=Site.position_atol)
-            or psite.properties != site.properties
-        )
-    points_indices, images, distances = points_indices[is_neighbor], images[is_neighbor], distances[is_neighbor]
     if len(distances) == 0:
         return [], distances
 
