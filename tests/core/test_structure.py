@@ -859,11 +859,15 @@ Direct
         all_centers, all_points, _, all_dists = struct.get_neighbor_list(2.1)
         for center, struct_idx in enumerate([2, 0]):
             expected = sorted(
-                zip(all_points[all_centers == struct_idx].tolist(), all_dists[all_centers == struct_idx], strict=True)
+                zip(
+                    all_points[all_centers == struct_idx].tolist(),
+                    all_dists[all_centers == struct_idx].tolist(),
+                    strict=True,
+                )
             )
-            assert sorted(
-                zip(points[centers == center].tolist(), dists[centers == center], strict=True)
-            ) == pytest.approx(expected)
+            actual = sorted(zip(points[centers == center].tolist(), dists[centers == center].tolist(), strict=True))
+            assert [idx for idx, _ in actual] == [idx for idx, _ in expected]
+            assert_allclose([dist for _, dist in actual], [dist for _, dist in expected])
 
     def test_get_neighbor_list_sites_structure_site_not_own_neighbor(self, nacl_neighbor_path):
         struct = nacl_neighbor_path
