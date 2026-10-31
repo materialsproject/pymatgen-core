@@ -29,6 +29,32 @@ if TYPE_CHECKING:
 
 __author__ = "Shyue Ping Ong, Shyam Dwaraknath, Matthew Horton"
 
+_RTOL = 1e-5  # np.allclose default
+
+
+def _allclose(mat_a: NDArray, mat_b: NDArray, atol: float) -> bool:
+    """Exact equivalent of ``np.allclose(mat_a, mat_b, atol=atol)`` that is ~8x faster for 4x4 matrices.
+
+    SymmOp.__hash__ must be a constant (see there), so building a set of n SymmOps calls __eq__
+    ~n^2/2 times and np.allclose's per-call overhead dominates. Element-wise this applies numpy's
+    isclose rule ``x == y or (|x - y| <= atol + rtol * |y| and isfinite(y))`` with an early exit,
+    so results (including inf/nan handling) are identical. Anything other than two equally shaped
+    real numeric arrays falls back to np.allclose.
+    """
+    if not (
+        isinstance(mat_a, np.ndarray)
+        and isinstance(mat_b, np.ndarray)
+        and mat_a.shape == mat_b.shape
+        and mat_a.dtype.kind in "biuf"
+        and mat_b.dtype.kind in "biuf"
+    ):
+        return bool(np.allclose(mat_a, mat_b, atol=atol))
+    for x, y in zip(mat_a.ravel().tolist(), mat_b.ravel().tolist(), strict=True):
+        if x == y or (abs(x - y) <= atol + _RTOL * abs(y) and math.isfinite(y)):
+            continue
+        return False
+    return True
+
 
 class SymmOp(MSONable):
     """A symmetry operation in Cartesian space. Consists of a rotation plus a
@@ -67,9 +93,12 @@ class SymmOp(MSONable):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
             return NotImplemented
-        return np.allclose(self.affine_matrix, other.affine_matrix, atol=self.tol)
+        return _allclose(self.affine_matrix, other.affine_matrix, self.tol)
 
     def __hash__(self) -> int:
+        # Constant on purpose: __eq__ is tolerance-based (and not transitive), so any hash of the
+        # matrix entries (rounded or not) would give different hashes to some pair of ops that
+        # compare equal. Sets/dicts of SymmOps therefore rely on __eq__ alone.
         return 7
 
     def __repr__(self) -> str:
@@ -560,7 +589,7 @@ class MagSymmOp(SymmOp):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
             return NotImplemented
-        return np.allclose(self.affine_matrix, other.affine_matrix, atol=self.tol) and (
+        return _allclose(self.affine_matrix, other.affine_matrix, self.tol) and (
             self.time_reversal == other.time_reversal
         )
 
@@ -586,10 +615,9 @@ class MagSymmOp(SymmOp):
             ]
         )
 
-    def __hash__(self) -> int:
-        """Useful for obtaining a set of unique MagSymmOps."""
-        hashable_value = (*tuple(self.affine_matrix.flatten()), self.time_reversal)
-        return hash(hashable_value)
+    # Same constant hash as SymmOp. Hashing the exact matrix broke the hash/eq contract, since
+    # __eq__ is tolerance-based (and a SymmOp can compare equal to a MagSymmOp).
+    __hash__ = SymmOp.__hash__
 
     @due.dcite(
         Doi("10.1051/epjconf/20122200010"),
