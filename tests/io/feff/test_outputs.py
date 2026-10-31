@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
 from pytest import approx
 
+from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.feff.inputs import Tags
 from pymatgen.io.feff.outputs import LDos, Xmu
 from pymatgen.util.testing import TEST_FILES_DIR
@@ -26,6 +28,13 @@ class TestFeffLdos:
         complete_dos = TestFeffLdos.ldos.complete_dos
         assert complete_dos.as_dict()["spd_dos"]["s"]["efermi"] == approx(-11.430), (
             "Failed to construct complete_dos dict properly"
+        )
+        # pdos is keyed by the structure's own sites, in structure order
+        sites = list(complete_dos.structure)
+        assert type(complete_dos.pdos) is dict
+        assert all(key is site for key, site in zip(complete_dos.pdos, sites, strict=True))
+        assert complete_dos.get_site_dos(sites[2]).densities[Spin.up] == approx(
+            sum(np.asarray(dens[Spin.up]) for dens in complete_dos.pdos[sites[2]].values())
         )
 
     def test_as_dict_and_from_dict(self):

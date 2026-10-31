@@ -14,6 +14,7 @@ from monty.io import zopen
 from monty.json import MSONable
 
 from pymatgen.core import Element
+from pymatgen.core.sites import _lazy_site_dict
 from pymatgen.electronic_structure.core import Orbital, Spin
 from pymatgen.electronic_structure.dos import CompleteDos, Dos
 from pymatgen.io.feff import Header, Potential, Tags
@@ -110,10 +111,13 @@ class LDos(MSONable):
         orbitals = (Orbital.s, Orbital.py, Orbital.dxy, Orbital.f0)
         site_pot_indices = [pot_dict[specie.symbol] for specie in structure.species]
 
-        pdoss = {
-            structure[idx]: {orb: {Spin.up: list(ldos[pot_index][:, col])} for col, orb in enumerate(orbitals, start=1)}
-            for idx, pot_index in enumerate(site_pot_indices)
-        }
+        pdoss = _lazy_site_dict(
+            structure,
+            [
+                {orb: {Spin.up: list(ldos[pot_index][:, col])} for col, orb in enumerate(orbitals, start=1)}
+                for pot_index in site_pot_indices
+            ],
+        )
 
         # Accumulate site by site, orbital by orbital (same summation order as an element-wise loop)
         t_dos_arr = np.zeros(len(dos_energies))

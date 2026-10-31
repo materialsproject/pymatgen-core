@@ -12,6 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.stats import wasserstein_distance
 
 from pymatgen.core import constants as const
+from pymatgen.core.sites import _lazy_site_dict, _LazySiteDict
 from pymatgen.core.structure import Structure
 from pymatgen.util.coord import get_linear_interpolated_value
 
@@ -19,8 +20,8 @@ if np.lib.NumpyVersion(np.__version__) < "2.0.0":
     np.trapezoid = np.trapz  # type:ignore[assignment]  # noqa: NPY201
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from typing import Self
+    from collections.abc import Callable, Mapping
+    from typing import Any, Self
 
     from numpy.typing import ArrayLike, NDArray
 
@@ -651,7 +652,7 @@ class CompletePhononDos(PhononDos):
             Site is a pymatgen.core.sites.Site object.
     """
 
-    def __init__(self, structure: Structure, total_dos, ph_doses: dict) -> None:
+    def __init__(self, structure: Structure, total_dos, ph_doses: Mapping) -> None:
         """
         Args:
             structure: Structure associated with this particular DOS.
@@ -659,8 +660,28 @@ class CompletePhononDos(PhononDos):
             ph_doses: The phonon DOSes are supplied as a dict of {Site: Densities}.
         """
         super().__init__(frequencies=total_dos.frequencies, densities=total_dos.densities)
-        self.pdos = {site: np.array(dens) for site, dens in ph_doses.items()}
+        # Site.__hash__ only hashes the species, so building a dict keyed by many same-element sites costs O(n^2)
+        # equality checks. Keep pdos as a _LazySiteDict (O(1) lookups by the site objects themselves) and only
+        # build the plain dict when the pdos attribute is read. Internal methods read self._pdos.
+        self.pdos = _lazy_site_dict(list(ph_doses), [np.array(dens) for dens in ph_doses.values()])
         self.structure = structure
+
+    @property
+    def pdos(self) -> dict:
+        """The partial phonon DOS as {Site: densities}."""
+        if isinstance(self._pdos, _LazySiteDict):
+            return self._pdos.to_dict()
+        return self._pdos  # type: ignore[return-value]
+
+    @pdos.setter
+    def pdos(self, pdos: Mapping) -> None:
+        self._pdos = pdos
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Unpickle objects pickled when pdos was a plain instance attribute
+        if "pdos" in state:
+            state = {("_pdos" if key == "pdos" else key): val for key, val in state.items()}
+        self.__dict__.update(state)
 
     def get_site_dos(self, site) -> PhononDos:
         """Get the Dos for a site.
@@ -671,7 +692,7 @@ class CompletePhononDos(PhononDos):
         Returns:
             PhononDos: containing summed orbital densities for site.
         """
-        return PhononDos(self.frequencies, self.pdos[site])
+        return PhononDos(self.frequencies, self._pdos[site])
 
     def get_element_dos(self) -> dict:
         """Get element projected Dos.
@@ -680,7 +701,7 @@ class CompletePhononDos(PhononDos):
             dict of {Element: Dos}
         """
         el_dos = {}
-        for site, atom_dos in self.pdos.items():
+        for site, atom_dos in self._pdos.items():
             el = site.specie
             if el not in el_dos:
                 el_dos[el] = np.array(atom_dos)
@@ -693,7 +714,7 @@ class CompletePhononDos(PhononDos):
         """Get CompleteDos object from dict representation."""
         total_dos = PhononDos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
-        ph_doses = dict(zip(struct, dct["pdos"], strict=True))
+        ph_doses = _lazy_site_dict(struct, dct["pdos"])
 
         return cls(struct, total_dos, ph_doses)
 
@@ -707,9 +728,13 @@ class CompletePhononDos(PhononDos):
             "densities": list(self.densities),
             "pdos": [],
         }
-        if len(self.pdos) > 0:
+        if len(self._pdos) > 0:
+            # Look the structure's own site objects up by identity: each pdos[site] lookup otherwise costs
+            # O(n_sites) equality checks because PeriodicSite only hashes its species.
+            pdos_by_id = {id(site): dens for site, dens in self._pdos.items()}
             for site in self.structure:
-                dct["pdos"].append(list(self.pdos[site]))
+                dens = pdos_by_id.get(id(site))
+                dct["pdos"].append(list(self._pdos[site] if dens is None else dens))
         return dct
 
     def __str__(self) -> str:
