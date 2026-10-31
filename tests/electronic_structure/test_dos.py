@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import gzip
+import pickle
 import re
 import warnings
 
@@ -8,7 +10,7 @@ import numpy as np
 import orjson
 import pytest
 from monty.serialization import loadfn
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
 from pymatgen.core import Element, Structure
@@ -259,6 +261,56 @@ class TestCompleteDos:
             match=r"1000 is out of range of provided x_values \(-23.7934, 14.8107\)",
         ):
             self.dos.get_interpolated_value(1000)
+
+    def test_pdos_site_keyed_dict(self):
+        # pdos is a plain dict keyed by the structure's own sites, in structure order, as before the lazy storage
+        with open(f"{TEST_DIR}/complete_dos.json", "rb") as file:
+            dct = orjson.loads(file.read())
+        dos = CompleteDos.from_dict(dct)
+        sites = list(dos.structure)
+        site_dos_before = [dos.get_site_dos(site).densities for site in sites]
+        element_dos_before = dos.get_element_dos()
+        assert type(dos.pdos) is dict
+        assert all(key is site for key, site in zip(dos.pdos, sites, strict=True))
+        assert dos.pdos is dos.pdos
+        # Results computed before and after the dict was built agree
+        for site, densities in zip(sites, site_dos_before, strict=True):
+            assert dos.pdos[site] is dos._pdos[site]
+            for spin, dens in densities.items():
+                assert_allclose(dos.get_site_dos(site).densities[spin], dens)
+        for el, el_dos in dos.get_element_dos().items():
+            assert_allclose(el_dos.densities[Spin.up], element_dos_before[el].densities[Spin.up])
+
+        # Equal but non-identical sites (another structure instance, or float noise) still work as keys
+        dos = CompleteDos.from_dict(dct)
+        noisy = Structure.from_dict(dct["structure"])
+        noisy.translate_sites(range(len(noisy)), [1e-9, 0, 0], frac_coords=False, to_unit_cell=False)
+        for site, other in zip(dos.structure, noisy, strict=True):
+            assert other is not site
+            assert dos._pdos[other] is dos.pdos[site]
+            assert_array_equal(
+                dos.get_site_orbital_dos(other, Orbital.s).densities[Spin.up], dos.pdos[site][Orbital.s][Spin.up]
+            )
+
+        # Writes to the pdos dict are seen by the methods, and get_normalized shares the same dict
+        dos = CompleteDos.from_dict(dct)
+        site = dos.structure[4]
+        dos.pdos[site] = {Orbital.s: {Spin.up: np.ones(len(dos.energies)), Spin.down: np.zeros(len(dos.energies))}}
+        assert dos.get_site_dos(site).densities[Spin.up].sum() == len(dos.energies)
+        assert dos.as_dict()["pdos"][4] == {"s": {"densities": {"1": [1.0] * 301, "-1": [0.0] * 301}}}
+        assert dos.get_normalized().pdos is dos.pdos
+
+        # Pickling, including objects pickled when pdos was a plain instance attribute
+        dos = CompleteDos.from_dict(dct)
+        dos.get_site_dos(dos.structure[0])
+        for clone in (pickle.loads(pickle.dumps(dos)), copy.deepcopy(dos)):
+            assert clone.as_dict() == dos.as_dict()
+        legacy = CompleteDos.__new__(CompleteDos)
+        state = dict(vars(dos))
+        state["pdos"] = state.pop("_pdos").to_dict()
+        legacy.__setstate__(state)
+        assert legacy.pdos is state["pdos"]
+        assert legacy.as_dict() == dos.as_dict()
 
     def test_as_from_dict(self):
         dct = self.dos.as_dict()

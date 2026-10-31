@@ -7,7 +7,7 @@ import collections.abc
 import json
 import math
 import warnings
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import numpy as np
 from monty.json import MontyDecoder, MontyEncoder, MSONable
@@ -708,3 +708,129 @@ class PeriodicSite(Site, MSONable):
         label = dct.get("label")
         lattice = lattice or Lattice.from_dict(dct["lattice"])
         return cls(species, dct["abc"], lattice, properties=props, label=label)
+
+
+_SiteT = TypeVar("_SiteT", bound="Site")
+_ValueT = TypeVar("_ValueT")
+
+# Fixed, mutually irrational weights for projecting Cartesian coordinates onto one axis in
+# _sites_pairwise_unequal (powers of the reciprocal plastic number; any generic choice works).
+_PROJECTION_WEIGHTS = np.array([1.0, 0.7548776662466927, 0.5698402909980532])
+
+
+def _sites_pairwise_unequal(sites: collections.abc.Sequence[Site]) -> bool:
+    """Whether no two of the sites compare equal in either order, so dict(zip(sites, values)) keeps every site.
+
+    Site equality is tolerance-based on coordinates, so equal sites have Cartesian coordinates within the
+    equality tolerance of each other. Only pairs whose coordinates project within that tolerance onto a fixed
+    axis are compared exactly, which makes this O(n log n) for real structures instead of O(n^2).
+
+    Args:
+        sites (Sequence[Site]): Sites to check.
+
+    Returns:
+        bool: True if all sites are pairwise unequal. False if some pair is equal, or (conservatively) if any
+            coordinate is not finite.
+    """
+    n_sites = len(sites)
+    if n_sites < 2:
+        return True
+    coords = np.array([site.coords for site in sites], dtype=np.float64)
+    if not np.isfinite(coords).all():
+        return False
+    # Per-component bound of the _coords_allclose tolerance (atol + 1e-5 * |y|) over all sites,
+    # doubled as a margin for rounding in the projection.
+    atol = max(Site.position_atol, *(cls.position_atol for cls in {type(site) for site in sites}))
+    window = 2 * (atol + 1e-5 * np.abs(coords).max()) * _PROJECTION_WEIGHTS.sum()
+    projections = coords @ _PROJECTION_WEIGHTS
+    order = np.argsort(projections, kind="stable")
+    sorted_proj = projections[order]
+    window_ends = np.searchsorted(sorted_proj, sorted_proj + window, side="right")
+    for idx in np.flatnonzero(window_ends > np.arange(1, n_sites + 1)).tolist():
+        site = sites[order[idx]]
+        for other_idx in order[idx + 1 : window_ends[idx]].tolist():
+            other = sites[other_idx]
+            if site == other or other == site:
+                return False
+    return True
+
+
+class _LazySiteDict(collections.abc.Mapping):
+    """Read-only stand-in for dict(zip(sites, values)) that only builds the dict when it is needed.
+
+    Site.__hash__ only hashes the species because Site.__eq__ compares coordinates with a tolerance, so
+    building or querying a dict keyed by many sites of the same element costs O(n) equality checks per key
+    (O(n^2) overall). This mapping answers lookups by site identity in O(1) and iterates the parallel lists,
+    building the (single, cached) real dict only for lookups by a non-identical site or when asked for it
+    via to_dict(). Create it with _lazy_site_dict(), which only does so when the sites are pairwise unequal;
+    then iterating it gives exactly the items of the equivalent dict, in the same order.
+    """
+
+    __slots__ = ("_dict", "_index", "_sites", "_values")
+
+    def __init__(self, sites: collections.abc.Sequence[Site], values: collections.abc.Sequence[Any]) -> None:
+        """Initialize from parallel lists of pairwise unequal sites and their values."""
+        self._sites = sites
+        self._values = values
+        self._index: dict[int, int] | None = None
+        self._dict: dict[Site, Any] | None = None
+
+    def to_dict(self) -> dict[Site, Any]:
+        """The equivalent dict, built once and then shared by every holder of this mapping."""
+        if self._dict is None:
+            self._dict = dict(zip(self._sites, self._values, strict=True))
+        return self._dict
+
+    def __getitem__(self, site: Site) -> Any:
+        # Once the dict has been handed out it may have been modified, so it becomes the source of truth.
+        if self._dict is None:
+            if self._index is None:
+                self._index = {id(key): idx for idx, key in enumerate(self._sites)}
+            idx = self._index.get(id(site))
+            if idx is not None:
+                return self._values[idx]
+        return self.to_dict()[site]
+
+    def __iter__(self) -> collections.abc.Iterator[Site]:
+        return iter(self._sites if self._dict is None else self._dict)
+
+    def __len__(self) -> int:
+        return len(self._sites if self._dict is None else self._dict)
+
+    def items(self) -> collections.abc.Iterable[tuple[Site, Any]]:  # type: ignore[override]
+        """(site, value) pairs, in insertion order."""
+        return zip(self._sites, self._values, strict=True) if self._dict is None else self._dict.items()
+
+    def values(self) -> collections.abc.Iterable[Any]:  # type: ignore[override]
+        """Values, in insertion order."""
+        return self._values if self._dict is None else self._dict.values()
+
+    def __getstate__(self) -> tuple:
+        # The identity index is only valid for the live site objects, so it is never pickled or copied.
+        return self._sites, self._values, self._dict
+
+    def __setstate__(self, state: tuple) -> None:
+        self._sites, self._values, self._dict = state
+        self._index = None
+
+
+def _lazy_site_dict(
+    sites: collections.abc.Sequence[_SiteT], values: collections.abc.Sequence[_ValueT]
+) -> collections.abc.Mapping[_SiteT, _ValueT]:
+    """Return a mapping equivalent to dict(zip(sites, values)), avoiding its O(n^2) construction if possible.
+
+    Private helper (not part of the public API) for site-keyed containers such as CompleteDos.pdos.
+
+    Args:
+        sites (Sequence[Site]): Keys. Must be the same length as values.
+        values (Sequence): Values.
+
+    Returns:
+        A _LazySiteDict if the keys are pairwise unequal Sites, else the plain dict.
+    """
+    sites, values = list(sites), list(values)
+    if len(sites) != len(values):
+        raise ValueError(f"Got {len(sites)} sites but {len(values)} values.")
+    if all(isinstance(site, Site) for site in sites) and _sites_pairwise_unequal(sites):
+        return _LazySiteDict(sites, values)
+    return dict(zip(sites, values, strict=True))

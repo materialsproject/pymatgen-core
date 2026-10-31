@@ -23,6 +23,7 @@ from monty.dev import deprecated
 from monty.io import zopen
 from monty.json import MSONable
 
+from pymatgen.core.sites import _lazy_site_dict
 from pymatgen.core.structure import Structure
 from pymatgen.electronic_structure.bandstructure import LobsterBandStructureSymmLine
 from pymatgen.electronic_structure.core import Spin
@@ -834,10 +835,11 @@ class Doscar:
         # for DOCAR.LCFO.lobster, pdos is different than for non-LCFO DOSCAR so we need to handle it differently
         # for now we just set pdos_dict to be empty if LCFO is in the filename
         # Todo: handle LCFO pdos properly in future when we have complete set of orbitals
+        sites = [final_struct[i] for i in range(len(self._pdos))]
         if not self._is_lcfo:
-            pdoss_dict = {final_struct[i]: pdos for i, pdos in enumerate(self._pdos)}
+            pdoss_dict = _lazy_site_dict(sites, self._pdos)
         else:
-            pdoss_dict = {final_struct[i]: {} for i, _ in enumerate(self._pdos)}
+            pdoss_dict = _lazy_site_dict(sites, [{} for _ in sites])
 
         self._completedos = LobsterCompleteDos(final_struct, self._tdos, pdoss_dict)
 

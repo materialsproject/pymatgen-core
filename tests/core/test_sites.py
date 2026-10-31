@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import pickle
 
 import numpy as np
@@ -7,7 +8,8 @@ import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Site, Species
+from pymatgen.core import Composition, Element, Lattice, PeriodicSite, Site, Species, Structure
+from pymatgen.core.sites import _lazy_site_dict, _LazySiteDict, _sites_pairwise_unequal
 from pymatgen.electronic_structure.core import Magmom
 from pymatgen.util.testing import MatSciTest
 
@@ -357,6 +359,97 @@ class TestPeriodicSite(MatSciTest):
         assert PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(1)) != PeriodicSite("Co", [0, 0, 0], Lattice.cubic(1))
         assert PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(1)) != PeriodicSite("Fe", [0, 0, 0], Lattice.cubic(2))
         assert Site("Fe", [0, 0, 0]) != Site("Co", [0, 0, 0])
+
+    def test_hash_consistent_with_tolerant_eq(self):
+        # Sites differing only by float noise compare equal, so they must hash equal and find each other in dicts
+        lattice = Lattice.cubic(5)
+        site = PeriodicSite("Fe", [0.1, 0.2, 0.3], lattice, properties={"magmom": 2})
+        noisy = PeriodicSite("Fe", [0.1 + 1e-9, 0.2 - 1e-9, 0.3], lattice, properties={"magmom": 2})
+        assert site == noisy
+        assert hash(site) == hash(noisy)
+        assert {site: 1}[noisy] == 1
+        assert Site("Fe", [0, 0, 1]) == Site("Fe", [0, 0, 1 + 1e-9])
+        assert hash(Site("Fe", [0, 0, 1])) == hash(Site("Fe", [0, 0, 1 + 1e-9]))
+
+
+class TestLazySiteDict:
+    def setup_method(self):
+        self.struct = Structure(Lattice.cubic(3), ["Si"], [[0, 0, 0]]) * (3, 3, 3)
+        self.struct.append("O", [0.5, 0.5, 0.5])
+        self.values = [{"idx": idx} for idx in range(len(self.struct))]
+
+    def test_sites_pairwise_unequal(self):
+        sites = list(self.struct)
+        assert _sites_pairwise_unequal(sites)
+        assert _sites_pairwise_unequal(sites[:1])
+        assert _sites_pairwise_unequal([])
+        # The same site twice, or an equal site within the coordinate tolerance
+        assert not _sites_pairwise_unequal([*sites, sites[5]])
+        near = PeriodicSite("Si", sites[5].frac_coords + 1e-8, self.struct.lattice)
+        assert near == sites[5]
+        assert not _sites_pairwise_unequal([*sites, near])
+        # Same position but different species or properties are unequal sites
+        other_species = PeriodicSite("Ge", sites[5].frac_coords, self.struct.lattice)
+        assert _sites_pairwise_unequal([*sites, other_species])
+        # Non-finite coordinates are conservatively reported as possibly equal
+        assert not _sites_pairwise_unequal([Site("Fe", [np.inf, 0, 0]), Site("Fe", [0, 0, 0])])
+        # Equality is only one-directional near the relative-tolerance edge: still detected
+        site_a, site_b = Site("Fe", [1e3, 0, 0]), Site("Fe", [1e3 + 0.01001005, 0, 0])
+        assert (site_a == site_b) != (site_b == site_a)
+        assert not _sites_pairwise_unequal([site_a, site_b])
+
+    def test_matches_dict(self):
+        sites = list(self.struct)
+        ref = dict(zip(sites, self.values, strict=True))
+        lazy = _lazy_site_dict(self.struct, self.values)
+        assert isinstance(lazy, _LazySiteDict)
+        assert len(lazy) == len(ref)
+        assert list(lazy) == list(ref)
+        assert all(key is ref_key for key, ref_key in zip(lazy, ref, strict=True))
+        assert list(lazy.items()) == list(ref.items())
+        assert list(lazy.values()) == list(ref.values())
+        for site in sites:
+            assert lazy[site] is ref[site]
+        assert lazy._dict is None  # identity lookups do not build the dict
+
+        # Lookups by equal but non-identical sites (float noise) give the same values as the plain dict
+        copies = [PeriodicSite(s.species, s.frac_coords + 1e-10, s.lattice) for s in sites]
+        assert all(lazy[copy] is ref[copy] for copy in copies)
+        missing = PeriodicSite("Fe", [0.1, 0.1, 0.1], self.struct.lattice)
+        with pytest.raises(KeyError):
+            lazy[missing]
+        assert missing not in lazy
+
+        # Once the dict is handed out it is the source of truth, and it is built only once
+        dct = lazy.to_dict()
+        assert dct == ref
+        assert lazy.to_dict() is dct
+        dct[sites[3]] = "new"
+        del dct[sites[4]]
+        assert lazy[sites[3]] == "new"
+        assert sites[4] not in lazy
+        assert len(lazy) == len(ref) - 1
+        assert dict(lazy.items()) == dct
+
+    def test_fallback_to_dict(self):
+        sites = list(self.struct)
+        # Duplicate sites collapse exactly as in a plain dict
+        dup = _lazy_site_dict([*sites, sites[2]], [*self.values, "dup"])
+        assert type(dup) is dict
+        assert dup == dict(zip([*sites, sites[2]], [*self.values, "dup"], strict=True))
+        # Non-site keys
+        assert _lazy_site_dict(["a", "b"], [1, 2]) == {"a": 1, "b": 2}
+        with pytest.raises(ValueError, match="Got 2 sites but 1 values"):
+            _lazy_site_dict(sites[:2], [1])
+
+    def test_pickle_and_copy(self):
+        lazy = _lazy_site_dict(self.struct, self.values)
+        lazy[self.struct[0]]  # build the identity index
+        for clone in (pickle.loads(pickle.dumps(lazy)), copy.deepcopy(lazy)):
+            assert clone._index is None
+            assert list(clone.items()) == list(lazy.items())
+            for site in clone:
+                assert clone[site] == lazy[site]
 
 
 def get_distance_and_image_old(site1, site2, jimage=None):

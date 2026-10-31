@@ -29,6 +29,7 @@ from tqdm import tqdm
 from pymatgen.core import Composition, Element, Lattice, Structure
 from pymatgen.core import constants as _const
 from pymatgen.core.entries import ComputedEntry, ComputedStructureEntry
+from pymatgen.core.sites import _lazy_site_dict
 from pymatgen.core.trajectory import Trajectory
 from pymatgen.core.units import unitized
 from pymatgen.electronic_structure.bandstructure import (
@@ -864,7 +865,7 @@ class Vasprun(MSONable):
     def complete_dos(self) -> CompleteDos:
         """A CompleteDos object which incorporates the total DOS and all projected DOS."""
         final_struct = self.final_structure
-        pdoss = {final_struct[i]: pdos for i, pdos in enumerate(self.pdos)}
+        pdoss = _lazy_site_dict([final_struct[i] for i in range(len(self.pdos))], self.pdos)
         return CompleteDos(self.final_structure, self.tdos, pdoss)
 
     @property
@@ -874,7 +875,7 @@ class Vasprun(MSONable):
         volume.
         """
         final_struct = self.final_structure
-        pdoss = {final_struct[i]: pdos for i, pdos in enumerate(self.pdos)}
+        pdoss = _lazy_site_dict([final_struct[i] for i in range(len(self.pdos))], self.pdos)
         return CompleteDos(self.final_structure, self.tdos, pdoss, normalize=True)
 
     @property

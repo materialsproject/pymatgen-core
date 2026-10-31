@@ -17,6 +17,7 @@ from scipy.stats import wasserstein_distance
 
 from pymatgen.core import Structure, get_el_sp
 from pymatgen.core.constants import value as _constant
+from pymatgen.core.sites import _lazy_site_dict, _LazySiteDict
 from pymatgen.core.spectrum import Spectrum
 from pymatgen.electronic_structure.core import Orbital, OrbitalType, Spin
 from pymatgen.util.coord import get_linear_interpolated_value
@@ -665,6 +666,27 @@ class CompleteDos(Dos):
         self.pdos = pdoss
         self.structure = structure
 
+    # Site.__hash__ only hashes the species, so a dict keyed by many same-element sites costs O(n) equality checks
+    # per lookup or insertion. The site-keyed constructors (from_dict, Vasprun, LDos, ...) therefore store pdos as a
+    # _LazySiteDict, which answers lookups by the structure's own site objects in O(1) and only builds the plain
+    # dict when the pdos attribute is read. Internal methods read self._pdos to stay on the fast path.
+    @property
+    def pdos(self) -> dict[PeriodicSite, dict[Orbital, dict[Spin, NDArray]]]:
+        """The PDOS as {PeriodicSite: {Orbital: {Spin: densities}}}."""
+        if isinstance(self._pdos, _LazySiteDict):
+            return self._pdos.to_dict()
+        return self._pdos  # type: ignore[return-value]
+
+    @pdos.setter
+    def pdos(self, pdos: Mapping[PeriodicSite, Mapping[Orbital, Mapping[Spin, ArrayLike]]]) -> None:
+        self._pdos = pdos
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Unpickle objects pickled when pdos was a plain instance attribute
+        if "pdos" in state:
+            state = {("_pdos" if key == "pdos" else key): val for key, val in state.items()}
+        self.__dict__.update(state)
+
     def __str__(self) -> str:
         return f"Complete DOS for {self.structure}"
 
@@ -676,7 +698,7 @@ class CompleteDos(Dos):
         return type(self)(
             structure=self.structure,
             total_dos=self,
-            pdoss=self.pdos,
+            pdoss=self._pdos,
             normalize=True,
         )
 
@@ -690,7 +712,7 @@ class CompleteDos(Dos):
         Returns:
             Dos: for a particular orbital of a particular site.
         """
-        return Dos(self.efermi, self.energies, self.pdos[site][orbital])
+        return Dos(self.efermi, self.energies, self._pdos[site][orbital])
 
     def get_site_dos(self, site: PeriodicSite) -> Dos:
         """Get the total DOS for a site with all orbitals.
@@ -701,7 +723,7 @@ class CompleteDos(Dos):
         Returns:
             Dos: Total DOS for a site with all orbitals.
         """
-        site_dos = functools.reduce(add_densities, self.pdos[site].values())
+        site_dos = functools.reduce(add_densities, self._pdos[site].values())
         return Dos(self.efermi, self.energies, site_dos)
 
     def get_site_spd_dos(self, site: PeriodicSite) -> dict[OrbitalType, Dos]:
@@ -714,7 +736,7 @@ class CompleteDos(Dos):
             dict[OrbitalType, Dos]
         """
         spd_dos: dict[OrbitalType, dict[Spin, np.ndarray]] = {}
-        for orb, pdos in self.pdos[site].items():
+        for orb, pdos in self._pdos[site].items():
             orbital_type = _get_orb_type(orb)
             if orbital_type in spd_dos:
                 spd_dos[orbital_type] = add_densities(spd_dos[orbital_type], pdos)
@@ -736,7 +758,7 @@ class CompleteDos(Dos):
         """
         t2g_dos = []
         eg_dos = []
-        for orb, pdos in self.pdos[site].items():
+        for orb, pdos in self._pdos[site].items():
             if orb in (Orbital.dxy, Orbital.dxz, Orbital.dyz):
                 t2g_dos.append(pdos)
             elif orb in (Orbital.dx2_y2, Orbital.dz2):
@@ -753,7 +775,7 @@ class CompleteDos(Dos):
             dict[OrbitalType, Dos]
         """
         spd_dos = {}
-        for atom_dos in self.pdos.values():
+        for atom_dos in self._pdos.values():
             for orb, pdos in atom_dos.items():
                 orbital_type = _get_orb_type(orb)
                 if orbital_type not in spd_dos:
@@ -769,7 +791,7 @@ class CompleteDos(Dos):
             dict[Element, Dos]
         """
         el_dos: dict[SpeciesLike, dict[Spin, ArrayLike]] = {}
-        for site, atom_dos in self.pdos.items():
+        for site, atom_dos in self._pdos.items():
             el = site.specie
             for pdos in atom_dos.values():
                 el_dos[el] = add_densities(el_dos[el], pdos) if el in el_dos else pdos  # type: ignore[assignment]
@@ -787,7 +809,7 @@ class CompleteDos(Dos):
         """
         el = get_el_sp(el)
         el_dos = {}
-        for site, atom_dos in self.pdos.items():
+        for site, atom_dos in self._pdos.items():
             if site.specie == el:
                 for orb, pdos in atom_dos.items():
                     orbital_type = _get_orb_type(orb)
@@ -1343,16 +1365,16 @@ class CompleteDos(Dos):
         """Get CompleteDos object from dict representation."""
         tdos = Dos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
-        pdoss = {}
-        for idx in range(len(dct["pdos"])):
-            at = struct[idx]
+        site_pdoss = []
+        for site_pdos in dct["pdos"]:
             orb_dos = {}
             # TODO(2027-08-17): Remove legacy "dx2" deserialization.
-            for orb_str, odos in dct["pdos"][idx].items():
+            for orb_str, odos in site_pdos.items():
                 orb = Orbital["dx2_y2" if orb_str == "dx2" else orb_str]
                 orb_dos[orb] = {Spin(int(k)): np.asarray(v) for k, v in odos["densities"].items()}
-            pdoss[at] = orb_dos
-        return cls(struct, tdos, pdoss)
+            site_pdoss.append(orb_dos)
+        sites = [struct[idx] for idx in range(len(site_pdoss))]
+        return cls(struct, tdos, _lazy_site_dict(sites, site_pdoss))
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-serializable dict representation of CompleteDos."""
@@ -1366,14 +1388,14 @@ class CompleteDos(Dos):
             "densities": {str(spin): dens.tolist() for spin, dens in self.densities.items()},
             "pdos": [],
         }
-        if len(self.pdos) > 0:
+        if len(self._pdos) > 0:
             # PeriodicSite hashes only by species, so each pdos[site] lookup costs O(n_sites) equality
             # checks. pdos is normally keyed by the structure's own site objects, so look those up by identity.
-            pdos_by_id = {id(site): site_pdos for site, site_pdos in self.pdos.items()}
+            pdos_by_id = {id(site): site_pdos for site, site_pdos in self._pdos.items()}
             for at in self.structure:
                 site_pdos = pdos_by_id.get(id(at))
                 if site_pdos is None:
-                    site_pdos = self.pdos[at]
+                    site_pdos = self._pdos[at]
                 dd = {}
                 for orb, pdos in site_pdos.items():
                     orb_name = "dx2" if orb is Orbital.dx2_y2 else str(orb)
@@ -1426,7 +1448,7 @@ class LobsterCompleteDos(CompleteDos):
         if orbital[1:] not in _lobster_orb_labs:
             raise ValueError("orbital is not correct")
 
-        return Dos(self.efermi, self.energies, self.pdos[site][orbital])  # type: ignore[index]
+        return Dos(self.efermi, self.energies, self._pdos[site][orbital])  # type: ignore[index]
 
     def get_site_t2g_eg_resolved_dos(
         self,
@@ -1444,7 +1466,7 @@ class LobsterCompleteDos(CompleteDos):
 
         t2g_dos = []
         eg_dos = []
-        for orb, pdos in self.pdos[site].items():
+        for orb, pdos in self._pdos[site].items():
             orbital = _get_orb_lobster(str(orb))
             if orbital is None:
                 raise ValueError("orbital is None")
@@ -1469,7 +1491,7 @@ class LobsterCompleteDos(CompleteDos):
         """
         spd_dos = {}
         orb = None
-        for atom_dos in self.pdos.values():
+        for atom_dos in self._pdos.values():
             for orb, pdos in atom_dos.items():
                 orbital_type = _get_orb_type_lobster(str(orb))
                 if orbital_type not in spd_dos:
@@ -1490,7 +1512,7 @@ class LobsterCompleteDos(CompleteDos):
         """
         el = get_el_sp(el)
         el_dos = {}
-        for site, atom_dos in self.pdos.items():
+        for site, atom_dos in self._pdos.items():
             if site.specie == el:
                 for orb, pdos in atom_dos.items():
                     orbital_type = _get_orb_type_lobster(str(orb))
@@ -1506,13 +1528,15 @@ class LobsterCompleteDos(CompleteDos):
         """Get LobsterCompleteDos from a dict representation."""
         tdos = Dos.from_dict(dct)
         struct = Structure.from_dict(dct["structure"])
-        pdos = {}
-        for idx in range(len(dct["pdos"])):
-            pdos[struct[idx]] = {
+        site_pdoss = [
+            {
                 orb_str: {Spin(int(k)): np.asarray(v) for k, v in odos["densities"].items()}
-                for orb_str, odos in dct["pdos"][idx].items()
+                for orb_str, odos in site_pdos.items()
             }
-        return cls(struct, tdos, pdos)
+            for site_pdos in dct["pdos"]
+        ]
+        sites = [struct[idx] for idx in range(len(site_pdoss))]
+        return cls(struct, tdos, _lazy_site_dict(sites, site_pdoss))
 
 
 def add_densities(
