@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from pytest import approx
 
-from pymatgen.core.interface import GrainBoundary, GrainBoundaryGenerator, Interface, count_layers, label_termination
+from pymatgen.core.interface import (
+    GrainBoundary,
+    GrainBoundaryGenerator,
+    Interface,
+    _get_in_plane_reflection,
+    count_layers,
+    label_termination,
+)
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.structure import Structure
@@ -922,7 +931,7 @@ class TestInterface(MatSciTest):
         iface = Interface.from_slabs(substrate_slab=substrate, film_slab=film, gap=2.0, vacuum_over_film=5.0)
         # The input substrate is not modified
         assert_allclose(substrate.lattice.matrix, substrate_matrix)
-        # The substrate c vector is flipped so the lattice is right-handed
+        # The substrate is relabelled (a, -b, c) so the lattice is right-handed
         assert np.linalg.det(iface.lattice.matrix) > 0
         assert iface.gap == approx(2.0)
         assert iface.vacuum_over_film == approx(5.0)
@@ -932,6 +941,91 @@ class TestInterface(MatSciTest):
         assert iface.film.composition.reduced_formula == "Ge"
         # c = film thickness (1 A) + substrate thickness (1 A) + gap + vacuum
         assert iface.lattice.c == approx(1 + 1 + 2 + 5)
+
+    @pytest.mark.parametrize(
+        "lattice_2d",
+        [
+            [[4, 0], [0, 5]],  # rectangular
+            [[4, 0], [-2, 2 * np.sqrt(3)]],  # hexagonal
+            [[4, 0], [4 * np.cos(1.2), 4 * np.sin(1.2)]],  # centred rectangular
+            [[4, 0], [8, 5]],  # rectangular in a non-reduced basis
+        ],
+    )
+    @pytest.mark.parametrize("left_handed", ["", "film", "substrate", "film+substrate"])
+    def test_from_slabs_turns_film_over(self, lattice_2d, left_handed):
+        """The film is rotated onto the substrate, not mirrored, and neither slab is mirrored (issue #154)."""
+        film, substrate = (
+            Structure(
+                Lattice([[*lattice_2d[0], 0], [*lattice_2d[1], 0], [0, 0, 15]]),
+                species,
+                [[0.1, 0.1, 0.3], [0.4, 0.1, 0.3], [0.1, 0.4, 0.3], [0.1, 0.1, 0.4]],
+            )
+            for species in (["H", "Li", "Be", "B"], ["N", "O", "F", "Ne"])
+        )
+
+        def handedness(struct, species):
+            # Sign of the chiral tetrahedron spanned by four distinct species
+            frac = {site.specie.symbol: site.frac_coords for site in struct}
+            diffs = np.array([frac[sp] - frac[species[0]] for sp in species[1:]])
+            diffs[:, :2] -= np.round(diffs[:, :2])
+            return np.sign(np.linalg.det(struct.lattice.get_cartesian_coords(diffs)))
+
+        film_handedness, sub_handedness = (
+            handedness(film, ["H", "Li", "Be", "B"]),
+            handedness(substrate, ["N", "O", "F", "Ne"]),
+        )
+        relabel = {"film": film, "substrate": substrate}
+        for name, struct in relabel.items():
+            if name in left_handed:
+                # Same atoms in the left-handed cell (b, a, c)
+                matrix = struct.lattice.matrix
+                relabel[name] = Structure(Lattice(matrix[[1, 0, 2]]), struct.species, struct.frac_coords[:, [1, 0, 2]])
+
+        iface = Interface.from_slabs(relabel["substrate"], relabel["film"], gap=2, vacuum_over_film=10)
+        assert np.linalg.det(iface.lattice.matrix) > 0
+        assert handedness(iface, ["H", "Li", "Be", "B"]) == film_handedness
+        assert handedness(iface, ["N", "O", "F", "Ne"]) == sub_handedness
+        # The top film atom (B) now faces the substrate
+        assert min(iface.film, key=lambda site: site.coords[2]).specie.symbol == "B"
+
+    def test_from_slabs_oblique_chiral_film_warns(self):
+        oblique = Lattice([[4, 0, 0], [1.3, 5.2, 0], [0, 0, 15]])
+        film = Structure(
+            oblique, ["H", "Li", "Be", "B"], [[0.1, 0.1, 0.3], [0.4, 0.1, 0.3], [0.1, 0.4, 0.3], [0.1, 0.1, 0.4]]
+        )
+        with pytest.warns(UserWarning, match="film is chiral and its 2D lattice is oblique"):
+            Interface.from_slabs(film, film)
+        # An achiral film has no handedness to lose
+        achiral = Structure(oblique, ["Si"], [[0, 0, 0.3]])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            Interface.from_slabs(achiral, achiral)
+
+    @pytest.mark.parametrize("left_handed_substrate", [False, True])
+    def test_from_slabs_in_plane_offset(self, left_handed_substrate):
+        matrix = [[3, 0, 0], [0, 4, 0], [0, 0, -10 if left_handed_substrate else 10]]
+        substrate = Structure(Lattice(matrix), ["Si", "Si"], [[0, 0, 0.1], [0.5, 0.5, 0.2]])
+        film = Structure(Lattice.orthorhombic(3, 4, 10), ["C", "O"], [[0, 0, 0.1], [0.25, 0.5, 0.2]])
+        shifted = Interface.from_slabs(substrate, film, in_plane_offset=(0.3, 0.2), vacuum_over_film=5)
+        unshifted = Interface.from_slabs(substrate, film, vacuum_over_film=5)
+        frac_shift = shifted.film.frac_coords - unshifted.film.frac_coords
+        film_shift = shifted.lattice.get_cartesian_coords(frac_shift - np.round(frac_shift))
+        # The film is shifted by 0.3 a + 0.2 b of the substrate (b is along -y in a left-handed substrate)
+        assert_allclose(film_shift, [[0.9, -0.8 if left_handed_substrate else 0.8, 0]] * 2, atol=1e-8)
+        # Resetting the offset gives back the unshifted interface
+        shifted.in_plane_offset = (0, 0)
+        assert_allclose(shifted.cart_coords, unshifted.cart_coords, atol=1e-8)
+
+
+def test_get_in_plane_reflection():
+    # Rectangular: reflection line along a, i.e. (u, v) -> (u, -v)
+    assert_allclose(_get_in_plane_reflection(Lattice.orthorhombic(3, 4, 10)), [[1, 0], [0, -1]])
+    # Hexagonal (gamma = 120): along a, b -> b' = -a - b
+    assert_allclose(_get_in_plane_reflection(Lattice.hexagonal(3, 10)), [[1, 0], [-1, -1]])
+    # Centred rectangular with |a| = |b|: the reflection swaps a and b
+    assert_allclose(_get_in_plane_reflection(Lattice.from_parameters(3, 3, 10, 90, 90, 70)), [[0, 1], [1, 0]])
+    # Oblique: no reflection line
+    assert _get_in_plane_reflection(Lattice.from_parameters(3, 4, 10, 90, 90, 80)) is None
 
 
 def test_label_termination():
