@@ -849,8 +849,25 @@ class VoronoiNN(NearNeighbors):
                 - volume - Volume of Voronoi cell for this face
                 - n_verts - Number of vertices on the facet
         """
+        return self._get_voronoi_polyhedra(structure, n, self._get_targets(structure))
+
+    def _get_targets(self, structure: Structure) -> list:
+        """Target elements: self.targets, or all elements in structure if not set.
+
+        This builds the structure's Composition, so per-site code paths should call it
+        once and pass the result on rather than calling it for every site.
+        """
+        return structure.elements if self.targets is None else self.targets
+
+    def _get_voronoi_polyhedra(self, structure: Structure, n: int, targets: list) -> dict:
+        """Get a weighted polyhedra around a site, see get_voronoi_polyhedra.
+
+        Args:
+            structure (Structure): structure for which to evaluate the coordination environment.
+            n (int): site index.
+            targets (list): target elements, as returned by _get_targets.
+        """
         # Assemble the list of neighbors used in the tessellation. Gets all atoms within a certain radius
-        targets = structure.elements if self.targets is None else self.targets
         center = structure[n]
 
         # max cutoff is the longest diagonal of the cell + room for noise
@@ -918,7 +935,7 @@ class VoronoiNN(NearNeighbors):
             return [self.get_voronoi_polyhedra(structure, 0)], []
 
         # Assemble the list of neighbors used in the tessellation
-        targets = structure.elements if self.targets is None else self.targets
+        targets = self._get_targets(structure)
 
         # Initialize the list of sites with the atoms in the origin unit cell
         # The `get_all_neighbors` function returns neighbors for each site's image in
@@ -1011,61 +1028,64 @@ class VoronoiNN(NearNeighbors):
         # Get the coordinates of the central site
         center_coords = sites[site_idx].coords
 
-        # Iterate through all the faces in the tessellation
+        # Iterate through the faces of the tessellation that include the site in question,
+        # in the same order as voro.ridge_dict but without building (and scanning) that dict
+        ridge_points = voro.ridge_points
+        ridge_vertices = voro.ridge_vertices
         results = {}
-        for nn, vind in voro.ridge_dict.items():
-            # Get only those that include the site in question
-            if site_idx in nn:
-                other_site = nn[0] if nn[1] == site_idx else nn[1]
-                if -1 in vind:
-                    # -1 indices correspond to the Voronoi cell
-                    #  missing a face
-                    if self.allow_pathological:
-                        continue
+        for ridge_idx in np.flatnonzero((ridge_points == site_idx).any(axis=1)).tolist():
+            vind = ridge_vertices[ridge_idx]
+            nn = ridge_points[ridge_idx].tolist()
+            other_site = nn[0] if nn[1] == site_idx else nn[1]
+            if -1 in vind:
+                # -1 indices correspond to the Voronoi cell
+                #  missing a face
+                if self.allow_pathological:
+                    continue
 
-                    raise RuntimeError("This structure is pathological, infinite vertex in the Voronoi construction")
+                raise RuntimeError("This structure is pathological, infinite vertex in the Voronoi construction")
 
-                # Get the solid angle of the face
-                facets = [all_vertices[idx] for idx in vind]
-                angle = solid_angle(center_coords, facets)
+            # Get the solid angle of the face
+            facets = [all_vertices[idx] for idx in vind]
+            angle = solid_angle(center_coords, facets)
 
-                # Compute the volume of associated with this face
-                volume = 0
-                # qvoronoi returns vertices in CCW order, so I can break
-                # the face up in to segments (0,1,2), (0,2,3), ... to compute
-                # its area where each number is a vertex size
-                for j, k in pairwise(vind[1:]):
-                    volume += vol_tetra(
-                        center_coords,
-                        all_vertices[vind[0]],
-                        all_vertices[j],
-                        all_vertices[k],
-                    )
+            # Compute the volume of associated with this face
+            volume = 0
+            # qvoronoi returns vertices in CCW order, so I can break
+            # the face up in to segments (0,1,2), (0,2,3), ... to compute
+            # its area where each number is a vertex size
+            for j, k in pairwise(vind[1:]):
+                volume += vol_tetra(
+                    center_coords,
+                    all_vertices[vind[0]],
+                    all_vertices[j],
+                    all_vertices[k],
+                )
 
-                # Compute the distance of the site to the face
-                face_dist = np.linalg.norm(center_coords - sites[other_site].coords) / 2
+            # Compute the distance of the site to the face
+            face_dist = np.linalg.norm(center_coords - sites[other_site].coords) / 2
 
-                # Compute the area of the face (knowing V=Ad/3)
-                face_area = 3 * volume / face_dist
+            # Compute the area of the face (knowing V=Ad/3)
+            face_area = 3 * volume / face_dist
 
-                # Compute the normal of the facet
-                normal = np.subtract(sites[other_site].coords, center_coords)
-                normal /= np.linalg.norm(normal)
+            # Compute the normal of the facet
+            normal = np.subtract(sites[other_site].coords, center_coords)
+            normal /= np.linalg.norm(normal)
 
-                # Store by face index
-                results[other_site] = {
-                    "site": sites[other_site],
-                    "normal": normal,
-                    "solid_angle": angle,
-                    "volume": volume,
-                    "face_dist": face_dist,
-                    "area": face_area,
-                    "n_verts": len(vind),
-                }
+            # Store by face index
+            results[other_site] = {
+                "site": sites[other_site],
+                "normal": normal,
+                "solid_angle": angle,
+                "volume": volume,
+                "face_dist": face_dist,
+                "area": face_area,
+                "n_verts": len(vind),
+            }
 
-                # If we are computing which neighbors are adjacent, store the vertices
-                if compute_adj_neighbors:
-                    results[other_site]["verts"] = vind
+            # If we are computing which neighbors are adjacent, store the vertices
+            if compute_adj_neighbors:
+                results[other_site]["verts"] = vind
 
         # all sites should have at least two connected ridges in periodic system
         if len(results) == 0:
@@ -1125,11 +1145,15 @@ class VoronoiNN(NearNeighbors):
                 of which represents a coordinated site, its image location,
                 and its weight.
         """
+        return self._get_nn_info(structure, n, self._get_targets(structure))
+
+    def _get_nn_info(self, structure: Structure, n: int, targets: list) -> list[dict]:
+        """get_nn_info with the target elements (see _get_targets) passed in."""
         # Run the tessellation
-        nns = self.get_voronoi_polyhedra(structure, n)
+        nns = self._get_voronoi_polyhedra(structure, n, targets)
 
         # Extract the NN info
-        return self._extract_nn_info(structure, nns)
+        return self._extract_nn_info(structure, nns, targets)
 
     def get_all_nn_info(self, structure: Structure):
         """Get nearest-neighbor info for all sites in a structure.
@@ -1142,7 +1166,7 @@ class VoronoiNN(NearNeighbors):
         """
         all_voro_cells, root_sites = self._get_all_voronoi_polyhedra(structure)
         root_site_indices = {id(site): idx for idx, site in enumerate(root_sites)}
-        targets = structure.elements if self.targets is None else self.targets
+        targets = self._get_targets(structure)
         return [self._extract_nn_info(structure, cell, targets, root_site_indices) for cell in all_voro_cells]
 
     def _extract_nn_info(
@@ -1167,7 +1191,7 @@ class VoronoiNN(NearNeighbors):
         """
         # Get the target information
         if targets is None:
-            targets = structure.elements if self.targets is None else self.targets
+            targets = self._get_targets(structure)
 
         # Extract the NN info
         if not nns:  # no neighbors among the target elements
@@ -1252,8 +1276,9 @@ class IsayevNN(VoronoiNN):
             - "site_index": The index of the near-neighbor site in the original
               structure.
         """
-        nns = self.get_voronoi_polyhedra(structure, n)
-        return self._filter_nns(structure, n, nns)
+        targets = self._get_targets(structure)
+        nns = self._get_voronoi_polyhedra(structure, n, targets)
+        return self._filter_nns(structure, n, nns, targets)
 
     def get_all_nn_info(self, structure: Structure) -> list[list[dict[str, Any]]]:
         """Get nearest-neighbor info for all sites in a structure.
@@ -1267,7 +1292,7 @@ class IsayevNN(VoronoiNN):
         """
         all_nns, root_sites = self._get_all_voronoi_polyhedra(structure)
         root_site_indices = {id(site): idx for idx, site in enumerate(root_sites)}
-        targets = structure.elements if self.targets is None else self.targets
+        targets = self._get_targets(structure)
         return [self._filter_nns(structure, n, nns, targets, root_site_indices) for n, nns in enumerate(all_nns)]
 
     def _filter_nns(
@@ -1293,7 +1318,7 @@ class IsayevNN(VoronoiNN):
         """
         # Get the target information
         if targets is None:
-            targets = structure.elements if self.targets is None else self.targets
+            targets = self._get_targets(structure)
 
         site = structure[n]
 
@@ -2119,6 +2144,7 @@ def solid_angle(center, coords):
     """
     # Compute the displacement from the center
     disp = [np.subtract(c, center) for c in coords]
+    disp_list = [vec.tolist() for vec in disp]
 
     # Compute the magnitude of each vector
     r_norm = [np.linalg.norm(idx) for idx in disp]
@@ -2128,7 +2154,7 @@ def solid_angle(center, coords):
     angle = 0
     for ii in range(1, len(disp) - 1):
         jj = ii + 1
-        tp = np.abs(np.dot(disp[0], np.cross(disp[ii], disp[jj])))
+        tp = np.abs(np.dot(disp[0], _cross3(disp_list[ii], disp_list[jj])))
         de = (
             r_norm[0] * r_norm[ii] * r_norm[jj]
             + r_norm[jj] * np.dot(disp[0], disp[ii])
@@ -2155,7 +2181,18 @@ def vol_tetra(vt1, vt2, vt3, vt4):
     Returns:
         float: volume of the tetrahedron.
     """
-    return np.abs(np.dot((vt1 - vt4), np.cross((vt2 - vt4), (vt3 - vt4)))) / 6
+    return np.abs(np.dot((vt1 - vt4), _cross3((vt2 - vt4).tolist(), (vt3 - vt4).tolist()))) / 6
+
+
+def _cross3(vec1: list[float], vec2: list[float]) -> np.ndarray:
+    """Cross product of two 3-vectors given as lists of numbers.
+
+    Much faster than np.cross for single vectors, and bit-identical to it: every
+    component is one product minus another, evaluated as in np.cross.
+    """
+    x1, y1, z1 = vec1
+    x2, y2, z2 = vec2
+    return np.array((y1 * z2 - z1 * y2, z1 * x2 - x1 * z2, x1 * y2 - y1 * x2))
 
 
 def get_okeeffe_params(el_symbol):
@@ -4071,8 +4108,67 @@ class CrystalNN(NearNeighbors):
                 to the coordination number (1 or smaller), 'site_index' gives index of
                 the corresponding site in the original structure.
         """
-        nn_data = self.get_nn_data(structure, n)
+        return self._nn_data_to_nn_info(self.get_nn_data(structure, n))
 
+    def get_all_nn_info(self, structure: Structure) -> list[list[dict]]:
+        """Get a listing of all neighbors for all sites in a structure.
+
+        Same as calling get_nn_info for each site, but the structure-wide bond targets are
+        determined only once.
+
+        Args:
+            structure (Structure): Input structure
+
+        Returns:
+            List of NN site information for each site in the structure. Each
+                entry has the same format as `get_nn_info`
+        """
+        if type(self).get_nn_info is not CrystalNN.get_nn_info or type(self).get_nn_data is not CrystalNN.get_nn_data:
+            # respect overrides of the per-site methods in subclasses
+            return super().get_all_nn_info(structure)
+
+        if self.cation_anion:  # targets depend on the charge of each site
+            site_species = [site.specie for site in structure]
+            all_targets = [self._get_targets(structure, n, site_species) for n in range(len(structure))]
+        else:
+            all_targets = [structure.elements] * len(structure)
+
+        return [
+            self._nn_data_to_nn_info(self._get_nn_data(structure, n, None, targets))
+            for n, targets in enumerate(all_targets)
+        ]
+
+    def _get_targets(self, structure: Structure, n: int, site_species: list | None = None) -> list:
+        """Get the possible bond targets of site n, used as VoronoiNN targets.
+
+        Args:
+            structure (Structure): enclosing structure object
+            n (int): index of the site
+            site_species (list): species of all sites in structure (only used with cation_anion),
+                to avoid recomputing them for every site.
+
+        Returns:
+            list: all elements in the structure or, with cation_anion, the distinct species
+                with opposite or zero charge.
+        """
+        if not self.cation_anion:
+            return structure.elements
+
+        m_oxi = structure[n].specie.oxi_state
+        if site_species is None:
+            site_species = [site.specie for site in structure]
+        target = []
+        for specie in site_species:
+            oxi_state = getattr(specie, "oxi_state", None)
+            if oxi_state is not None and oxi_state * m_oxi <= 0:  # opposite charge
+                target.append(specie)
+        if not target:
+            raise ValueError("No valid targets for site within cation_anion constraint!")
+        # deduplicate (in order) so that target membership tests do not scale with the number of sites
+        return list(dict.fromkeys(target))
+
+    def _nn_data_to_nn_info(self, nn_data: CrystalNN.NNData) -> list[dict]:
+        """Convert the output of get_nn_data into that of get_nn_info."""
         if not self.weighted_cn:
             max_key = max(nn_data.cn_weights, key=lambda k: nn_data.cn_weights[k])
             nn = nn_data.cn_nninfo[max_key]
@@ -4106,24 +4202,16 @@ class CrystalNN(NearNeighbors):
             - a dict of CN -> weight
             - a dict of CN -> associated near neighbor sites
         """
+        return self._get_nn_data(structure, n, length, self._get_targets(structure, n))
+
+    def _get_nn_data(self, structure: Structure, n: int, length: int | None, targets: list):
+        """get_nn_data with the bond targets of site n (see _get_targets) passed in."""
         length = length or self.fingerprint_length
 
-        # determine possible bond targets
-        target = None
-        if self.cation_anion:
-            target = []
-            m_oxi = structure[n].specie.oxi_state
-            for site in structure:
-                oxi_state = getattr(site.specie, "oxi_state", None)
-                if oxi_state is not None and oxi_state * m_oxi <= 0:  # opposite charge
-                    target.append(site.specie)
-            if not target:
-                raise ValueError("No valid targets for site within cation_anion constraint!")
-
-        # get base VoronoiNN targets
-        cutoff = self.search_cutoff
-        vnn = VoronoiNN(weight="solid_angle", targets=target, cutoff=cutoff)
-        nn = vnn.get_nn_info(structure, n)
+        # get base VoronoiNN neighbors (a new instance per site as VoronoiNN may grow its cutoff).
+        # Facet adjacency is not used here (poly_info is dropped below), so skip computing it.
+        vnn = VoronoiNN(weight="solid_angle", targets=targets, cutoff=self.search_cutoff, compute_adj_neighbors=False)
+        nn = vnn._get_nn_info(structure, n, targets)
 
         # solid angle weights can be misleading in open / porous structures
         # adjust weights to correct for this behavior
