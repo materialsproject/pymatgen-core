@@ -32,6 +32,7 @@ from pymatgen.core.local_env import (
     OpenBabelNN,
     ValenceIonicRadiusEvaluator,
     VoronoiNN,
+    _cross3,
     _get_default_radius,
     _get_radius,
     _handle_disorder,
@@ -132,6 +133,13 @@ class TestVoronoiNN(MatSciTest):
                 angle += nn["solid_angle"]
             assert 4 * np.pi == approx(angle)
         assert solid_angle([0, 0, 0], [[1, 0, 0], [-1, 0, 0], [0, 1, 0]]) == np.pi
+
+    def test_cross3_matches_np_cross(self):
+        # _cross3 replaces np.cross in solid_angle and vol_tetra; it must be bit-identical
+        rng = np.random.default_rng(42)
+        for vec1, vec2 in rng.normal(scale=5, size=(1000, 2, 3)):
+            assert _cross3(vec1.tolist(), vec2.tolist()).tolist() == np.cross(vec1, vec2).tolist()
+        assert _cross3([1, 0, 0], [0, 1, 0]).tolist() == [0, 0, 1]
 
     def test_nn_shell(self):
         # First, make a SC lattice. Make my math easier
@@ -1262,6 +1270,32 @@ class TestCrystalNN(MatSciTest):
     def test_cation_anion(self):
         cnn = CrystalNN(weighted_cn=True, cation_anion=True)
         assert cnn.get_cn(self.lifepo4, 0, use_weights=True) == approx(5.8630, abs=1e-2)
+
+    @pytest.mark.parametrize("kwargs", [{}, {"weighted_cn": True}, {"cation_anion": True}])
+    def test_get_all_nn_info_matches_get_nn_info(self, kwargs):
+        # get_all_nn_info determines the bond targets once for all sites: results (including
+        # neighbor order and exact weights) must be identical to calling get_nn_info per site
+        def summarize(info):
+            return [(e["site_index"], tuple(e["image"]), e["weight"], tuple(e["site"].coords)) for e in info]
+
+        cnn = CrystalNN(**kwargs)
+        all_nn_info = cnn.get_all_nn_info(self.lifepo4)
+        assert len(all_nn_info) == len(self.lifepo4)
+        for idx, info in enumerate(all_nn_info):
+            assert summarize(info) == summarize(cnn.get_nn_info(self.lifepo4, idx))
+
+    def test_get_all_nn_info_respects_subclass_override(self):
+        class CappedCrystalNN(CrystalNN):
+            def get_nn_info(self, structure, n):
+                return super().get_nn_info(structure, n)[:2]
+
+        all_nn_info = CappedCrystalNN().get_all_nn_info(self.lifepo4)
+        assert [len(info) for info in all_nn_info] == [2] * len(self.lifepo4)
+
+    def test_cation_anion_no_targets(self):
+        struct = Structure(Lattice.cubic(3), [Species("Na", 1), Species("K", 1)], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        with pytest.raises(ValueError, match="No valid targets for site within cation_anion constraint"):
+            CrystalNN(cation_anion=True).get_all_nn_info(struct)
 
     def test_x_diff_weight(self):
         cnn = CrystalNN(weighted_cn=True, x_diff_weight=0)
