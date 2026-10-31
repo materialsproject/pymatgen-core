@@ -10,8 +10,11 @@ For additional flexibility and automation, use the atomate2-lammps implementatio
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from monty.io import zopen
 
 from pymatgen.io.core import InputSet
 from pymatgen.io.lammps.data import CombinedData, LammpsData
@@ -27,6 +30,16 @@ __copyright__ = "Copyright 2021, The Materials Project"
 __version__ = "0.2"
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_atoms_style_hint(data_path: PathLike) -> str | None:
+    """Get the atom_style from the "Atoms # <style>" section header of a LAMMPS data file, if present."""
+    with zopen(data_path, mode="rt", encoding="utf-8") as file:
+        next(file, None)  # the first line is a free-form title
+        for line in file:
+            if match := re.match(r"\s*Atoms\s*#\s*(\w+)", line):
+                return match[1]
+    return None
 
 
 class LammpsInputSet(InputSet):
@@ -93,14 +106,16 @@ class LammpsInputSet(InputSet):
         """
         input_file = LammpsInputFile.from_file(f"{directory}/in.lammps", keep_stages=keep_stages)
         atom_style = input_file.get_args("atom_style")
-        if atom_style == []:  # not set in the input file: LammpsData default
-            atom_style = "full"
-        if isinstance(atom_style, list):
-            raise ValueError("Variable atom_style is specified multiple times in the input file.")  # noqa: TRY004
+        if isinstance(atom_style, list) and atom_style:
+            raise ValueError("Variable atom_style is specified multiple times in the input file.")
         # Fall back to "input.data", the name used by LammpsInputSet.write_input
         data_path = Path(directory) / "system.data"
         if not data_path.is_file() and (Path(directory) / "input.data").is_file():
             data_path = Path(directory) / "input.data"
+        if atom_style == []:
+            # Not set in the input file: use the "Atoms # <style>" hint of the data file,
+            # else the LAMMPS default "atomic"
+            atom_style = _get_atoms_style_hint(data_path) or "atomic"
         data_file = LammpsData.from_file(str(data_path), atom_style=atom_style)
         return cls(inputfile=input_file, data=data_file, calc_type="read_from_dir")
 

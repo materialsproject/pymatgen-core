@@ -540,7 +540,9 @@ class LammpsData(MSONable):
                     index=index,
                     na_rep="",
                 )
-            parts.append(section_template.format(kw=key, df=df_string))
+            # Tag the Atoms section with its style, as LAMMPS write_data does, so readers can recover it
+            kw = f"Atoms # {self.atom_style}" if key == "Atoms" else key
+            parts.append(section_template.format(kw=kw, df=df_string))
         body = "\n".join(parts)
 
         return file_template.format(stats=stats, box=box, body=body)
