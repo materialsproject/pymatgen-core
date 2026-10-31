@@ -3283,10 +3283,16 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             symprec (float): Tolerance for symmetry determination. Defaults to 0.01 A.
             **kwargs: Additional arguments passed to the respective backend's constructor.
                 For spglib, these are passed to SpacegroupAnalyzer (e.g. symprec, angle_tolerance).
-                For moyopy, these are passed to MoyoDataset constructor.
+                For moyopy, these are passed to MoyoDataset constructor. The setting defaults to
+                moyopy.Setting.spglib() so that both backends choose the same Hall setting; pass
+                setting=moyopy.Setting.standard() for the ITA standard setting.
 
         Returns:
-            MoyoDataset | SpglibDataset: Symmetry dataset from the chosen backend.
+            dict | MoyoDataset | SpglibDataset: The raw symmetry dataset from the chosen backend if
+                return_raw_dataset, else a dict with the keys "hall_number", "number", "international" (short
+                Hermann-Mauguin symbol), "site_symmetry_symbols", "wyckoffs", "orbits" and "std_origin_shift". All
+                but "std_origin_shift" agree between backends; the origin of the standardized cell is only unique up
+                to the symmetry-equivalent choices, and the backends may pick different ones.
 
         Raises:
             ImportError: If the requested backend is not installed.
@@ -3305,6 +3311,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
 
             # Convert structure to MoyoDataset format
             moyo_cell = moyopy.interface.MoyoAdapter.from_structure(cast("Structure", self))
+            kwargs.setdefault("setting", moyopy.Setting.spglib())
             dataset = moyopy.MoyoDataset(cell=moyo_cell, symprec=symprec, **kwargs)
 
         else:
@@ -3323,9 +3330,10 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             dictdata["orbits"] = dataset.crystallographic_orbits
             dictdata["std_origin_shift"] = dataset.origin_shift
         else:
-            from pymatgen.symmetry.groups import SpaceGroup
+            from moyopy import HallSymbolEntry
 
-            dictdata["international"] = SpaceGroup.from_int_number(dataset.number).symbol
+            # Short HM symbol of the Hall setting, in spglib's spelling ("P 2_1/c" -> "P2_1/c")
+            dictdata["international"] = HallSymbolEntry(dataset.hall_number).hm_short.replace(" ", "")
             dictdata["orbits"] = dataset.orbits
             dictdata["std_origin_shift"] = dataset.std_origin_shift
 
