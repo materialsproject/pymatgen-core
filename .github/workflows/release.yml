@@ -71,8 +71,33 @@ jobs:
           name: dist-${{ matrix.os }}-${{ matrix.python-version }}
           path: ./wheelhouse/*.whl
 
+  build_pyodide:
+    # WebAssembly wheel for Pyodide/JupyterLite (PEP 783 pyemscripten tag, accepted by PyPI).
+    # Only Pyodide 314 (cp314) produces a pyemscripten tag that PyPI accepts.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          # See build_sdist: a version derived from Git needs the release tag.
+          ref: ${{ github.event.release.tag_name || github.sha }}
+          fetch-depth: 0
+
+      - name: Build Pyodide wheel
+        uses: pypa/cibuildwheel@v4.3.5
+        env:
+          CIBW_PLATFORM: pyodide
+          CIBW_BUILD: cp314-pyodide_wasm32
+
+      - name: Save artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-pyodide
+          path: ./wheelhouse/*.whl
+
   release:
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels, build_sdist, build_pyodide]
     runs-on: ubuntu-latest
     environment:
       name: ${{ github.event_name == 'workflow_dispatch' && 'testpypi' || 'pypi' }}
