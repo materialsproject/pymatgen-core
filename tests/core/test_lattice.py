@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import itertools
+import pickle
 
 import numpy as np
 import pytest
@@ -627,6 +629,46 @@ class TestLattice(MatSciTest):
         )
 
         assert_allclose(l2.get_frac_coords_from_lll(lll_frac_coords), l2_frac_coords)
+
+    def test_lll_inverse_cached(self):
+        lattice = Lattice([[1.0, 0.1, 0.0], [1.0, 2.1, 0.0], [0.0, 2.0, 3.0]])
+        lll_inverse = lattice.lll_inverse
+        assert_array_equal(lll_inverse, np.linalg.inv(lattice.lll_mapping))
+        assert lattice.lll_inverse is lll_inverse
+        assert not lll_inverse.flags.writeable
+
+    @pytest.mark.parametrize("method", ["pickle", "copy", "deepcopy"])
+    def test_pickle_and_copy_drop_caches(self, method):
+        lattice = Lattice.from_parameters(3, 4, 5, 80, 90, 100, pbc=(True, False, True))
+        _ = lattice.inv_matrix, lattice.lll_inverse, lattice.lengths, lattice.angles, lattice.volume
+        state = lattice.__getstate__()
+        assert set(state) == {"_matrix", "_pbc"}
+        assert lattice.as_dict() == Lattice(lattice.matrix, pbc=lattice.pbc).as_dict()
+
+        other = pickle.loads(pickle.dumps(lattice)) if method == "pickle" else getattr(copy, method)(lattice)
+        assert other._inv_matrix is None
+        assert other._lll_inverse is None
+        assert other._lll_matrix_mappings == {}
+        assert not {"lengths", "angles", "volume"} & set(other.__dict__)
+        assert not other.matrix.flags.writeable  # deepcopy returns a writable copy unless re-frozen
+        assert other == lattice
+        assert hash(other) == hash(lattice)
+        assert other.pbc == lattice.pbc
+        assert_array_equal(other.inv_matrix, lattice.inv_matrix)
+        assert_array_equal(other.lll_inverse, lattice.lll_inverse)
+        assert other.parameters == lattice.parameters
+
+    def test_setstate_drops_legacy_caches(self):
+        lattice = Lattice.cubic(2.0)
+        stale = {"_matrix": lattice.matrix, "_pbc": lattice.pbc, "_inv_matrix": np.eye(3), "_diags": None}
+        stale |= {"lengths": (1.0, 1.0, 1.0), "_lll_inverse": np.eye(3), "_lll_matrix_mappings": {0.75: (0, 0)}}
+        restored = Lattice.__new__(Lattice)
+        restored.__setstate__(stale)
+        assert "_diags" not in restored.__dict__
+        assert restored.lengths == (2.0, 2.0, 2.0)
+        assert_allclose(restored.inv_matrix, np.eye(3) / 2)
+        assert_allclose(restored.lll_inverse, np.eye(3))
+        assert_array_equal(restored.lll_matrix, lattice.lll_matrix)
 
     def test_get_miller_index_from_sites(self):
         # test on a cubic system
