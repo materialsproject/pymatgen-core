@@ -179,6 +179,7 @@ BASIS:
   V_pv: '3d 3p 4s '
   V_sv: '3d 3p 3s 4s '
   W: '5d 6s '
+  W_pv: '5d 5p 6s '
   W_sv: '5d 5p 5s 6s '
   Xe: '5p 5s '
   Y_sv: '4d 4p 4s 5s '

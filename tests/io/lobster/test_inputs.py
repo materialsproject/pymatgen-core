@@ -6,9 +6,10 @@ import numpy as np
 import pytest
 from pytest import approx
 
+from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.io.lobster import Lobsterin
-from pymatgen.io.lobster.inputs import get_all_possible_basis_combinations
+from pymatgen.io.lobster.inputs import MODULE_DIR, get_all_possible_basis_combinations
 from pymatgen.io.vasp.inputs import Incar, Kpoints, Potcar
 from pymatgen.util.testing import FAKE_POTCAR_DIR, TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
@@ -348,6 +349,15 @@ class TestLobsterin(MatSciTest):
             Structure.from_file(f"{TEST_DIR}/POSCAR.GaAs"),
             potcar_symbols=potcar_names,
         ) == ["Ga 3d 4p 4s ", "As 4p 4s "]
+
+        # W_pv only exists in the PBE_52 POTCAR set
+        bcc_w = Structure(Lattice.cubic(3.16), ["W", "W"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        for basis_set in ("standard", "min", "max"):
+            assert lobsterin1.get_basis(
+                bcc_w,
+                potcar_symbols=["W_pv"],
+                address_basis_file=f"{MODULE_DIR}/lobster_basis/BASIS_PBE_54_{basis_set}.yaml",
+            ) == ["W 5d 5p 6s "]
 
     def test_get_all_possible_basis_functions(self):
         potcar = Potcar.from_file(f"{VASP_IN_DIR}/POTCAR_Fe3O4.gz")
