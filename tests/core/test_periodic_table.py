@@ -11,7 +11,7 @@ import pytest
 from pytest import approx
 
 from pymatgen.core import DummySpecies, Element, Lattice, Species, Structure, get_el_sp
-from pymatgen.core.periodic_table import ElementBase, ElementType
+from pymatgen.core.periodic_table import ElementBase, ElementType, Specie
 from pymatgen.core.units import Ha_to_eV
 from pymatgen.io.core import ParseError
 from pymatgen.util.testing import MatSciTest
@@ -497,6 +497,26 @@ class TestSpecies(MatSciTest):
         assert Element("Fe") == Element("Fe")
         assert Species("Fe", 0) != Element("Fe")
         assert Element("Fe") != Species("Fe", 0)
+        # every attribute compared by __eq__ must matter, including isotope (A) and spin
+        assert Species("Fe", 2, spin=5) == Species.from_str("Fe2+,spin=5")
+        assert Species("Fe", 2, spin=5) != Species("Fe", 2, spin=4)
+        assert Species("D", 1) != Species("H", 1)
+        assert Species("D", 1) == Species("D", 1)
+        assert Species("Fe", 2) != DummySpecies("X", 2)
+        assert Species("Fe", 2) == Specie("Fe", 2)
+
+    def test_hash(self):
+        # equal species hash equally (hash is cached), and the cached hash is never pickled
+        # since str hashes are salted per process
+        fe2 = Species("Fe", 2, spin=5)
+        assert hash(fe2) == hash(Species.from_str("Fe2+,spin=5")) == hash(str(fe2))
+        assert "_hash" in fe2.__dict__
+        assert "_hash" not in fe2.__getstate__()
+        unpickled = pickle.loads(pickle.dumps(fe2))
+        assert "_hash" not in unpickled.__dict__
+        assert unpickled == fe2
+        assert hash(unpickled) == hash(fe2)
+        assert len({Species("Fe", 2), Species("Fe2+"), Species("Fe", 3), DummySpecies("X", 2)}) == 3
 
     def test_cmp(self):
         assert self.specie1 < self.specie2, "Fe2+ should be < Fe3+"
