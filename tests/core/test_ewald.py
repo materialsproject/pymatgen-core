@@ -327,14 +327,35 @@ class TestEwaldMinimizerExtra:
         with pytest.raises(NotImplementedError, match="Complete algo not yet implemented"):
             EwaldMinimizer(matrix, [[0, 1, [0, 1], "X"]], algo=EwaldMinimizer.ALGO_COMPLETE)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=IndexError,
-        reason="minimize_matrix() skips the search for ALGO_TIME_LIMIT, leaving output_lists empty",
-    )
     def test_time_limit_algo(self, matrix):
+        # minimize_matrix() used to skip the search for ALGO_TIME_LIMIT, so __init__ raised IndexError
         e_min = EwaldMinimizer(matrix, [[0, 2, [0, 1, 2, 3], "X"]], algo=EwaldMinimizer.ALGO_TIME_LIMIT)
         assert e_min.minimized_sum == approx(brute_force_removal(matrix, 2, [0, 1, 2, 3]))
+
+    def test_multiple_manipulations_match_brute_force(self):
+        rng = np.random.default_rng(42)
+        matrix = rng.uniform(-5, 15, size=(10, 10))  # deliberately not symmetric
+        m_list = [[0.5, 2, [1, 3, 5, 7], "a"], [0, 1, [2, 8, 9], "b"]]
+        e_min = EwaldMinimizer(matrix, m_list, num_to_return=100)
+
+        sym = (matrix + matrix.T) / 2
+        energies = []
+        for half in combinations(m_list[0][2], 2):
+            for removed in combinations(m_list[1][2], 1):
+                scale = np.ones(len(matrix))
+                scale[list(half)] = 0.5
+                scale[list(removed)] = 0
+                energies.append((sym * np.outer(scale, scale)).sum())
+
+        # every ordering is returned, sorted by energy, with indices referring to the input matrix
+        assert len(e_min.output_lists) == len(energies)
+        assert [out[0] for out in e_min.output_lists] == approx(sorted(energies))
+        for matrix_sum, output in e_min.output_lists:
+            scale = np.ones(len(matrix))
+            for idx, species in output:
+                scale[idx] = 0.5 if species == "a" else 0
+            assert (sym * np.outer(scale, scale)).sum() == approx(matrix_sum)
+        assert e_min.minimized_sum == approx(min(energies))
 
     def test_best_case_time_limit(self, matrix):
         m_list = [[0, 2, [0, 1, 2, 3], "X"]]

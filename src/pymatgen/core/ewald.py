@@ -153,10 +153,10 @@ class EwaldSummation(MSONable):
 
     def compute_partial_energy(self, removed_indices):
         """Get total Ewald energy for certain sites being removed, i.e. zeroed out."""
-        total_energy_matrix = self.total_energy_matrix.copy()
-        for idx in removed_indices:
-            total_energy_matrix[idx, :] = 0
-            total_energy_matrix[:, idx] = 0
+        total_energy_matrix = self.total_energy_matrix
+        removed_indices = list(removed_indices)
+        total_energy_matrix[removed_indices, :] = 0
+        total_energy_matrix[:, removed_indices] = 0
         return total_energy_matrix.sum()
 
     def compute_sub_structure(self, sub_structure, tol: float = 1e-3):
@@ -171,44 +171,37 @@ class EwaldSummation(MSONable):
         Returns:
             Ewald sum of substructure.
         """
-        total_energy_matrix = self.total_energy_matrix.copy()
+        total_energy_matrix = self.total_energy_matrix
 
-        def find_match(site):
-            for test_site in sub_structure:
-                frac_diff = abs(np.array(site.frac_coords) - np.array(test_site.frac_coords)) % 1
-                frac_diff = [abs(a) < tol or abs(a) > 1 - tol for a in frac_diff]
-                if all(frac_diff):
-                    return test_site
-            return None
+        # is_match[i, j]: site i of the original structure coincides with site j of the sub structure
+        frac_diff = np.abs(self._struct.frac_coords[:, None, :] - sub_structure.frac_coords[None, :, :]) % 1
+        is_match = np.all((frac_diff < tol) | (frac_diff > 1 - tol), axis=-1)
+        has_match = is_match.any(axis=1)
+        # each site of the original structure is matched to the first coinciding site of the sub structure
+        match_indices = is_match.argmax(axis=1) if len(sub_structure) else np.zeros(len(self._struct), dtype=int)
 
-        matches = []
-        for idx, site in enumerate(self._struct):
-            matching_site = find_match(site)
-            if matching_site:
-                new_charge = compute_average_oxidation_state(matching_site)
-                old_charge = self._oxi_states[idx]
-                if old_charge == 0:
-                    # the interactions of an uncharged site are all zero and cannot be rescaled
-                    if new_charge != 0:
-                        raise ValueError(
-                            f"Cannot compute the Ewald sum of a sub structure that charges site {idx}, "
-                            "which is uncharged in the original structure."
-                        )
-                    scaling_factor = 1
-                else:
-                    scaling_factor = new_charge / old_charge
-                matches.append(matching_site)
+        scaling_factors = np.zeros(len(self._struct))
+        for idx in np.flatnonzero(has_match):
+            new_charge = compute_average_oxidation_state(sub_structure[match_indices[idx]])
+            old_charge = self._oxi_states[idx]
+            if old_charge == 0:
+                # the interactions of an uncharged site are all zero and cannot be rescaled
+                if new_charge != 0:
+                    raise ValueError(
+                        f"Cannot compute the Ewald sum of a sub structure that charges site {idx}, "
+                        "which is uncharged in the original structure."
+                    )
+                scaling_factors[idx] = 1
             else:
-                scaling_factor = 0
-            total_energy_matrix[idx, :] *= scaling_factor
-            total_energy_matrix[:, idx] *= scaling_factor
+                scaling_factors[idx] = new_charge / old_charge
 
-        if len(matches) != len(sub_structure):
+        if has_match.sum() != len(sub_structure):
+            matched = set(match_indices[has_match].tolist())
             output = ["Missing sites."]
-            output.extend(f"unmatched = {site}" for site in sub_structure if site not in matches)
+            output.extend(f"unmatched = {site}" for idx, site in enumerate(sub_structure) if idx not in matched)
             raise ValueError("\n".join(output))
 
-        return total_energy_matrix.sum()
+        return (total_energy_matrix * scaling_factors[:, None] * scaling_factors[None, :]).sum()
 
     @property
     def reciprocal_space_energy(self):
@@ -553,13 +546,9 @@ class EwaldMinimizer:
                 process is extremely expensive).
         """
         # Setup and checking of inputs
-        self._matrix = copy(matrix)
+        matrix = np.asarray(matrix)
         # Make the matrix diagonally symmetric (so matrix[i,:] == matrix[:,j])
-        for ii in range(len(self._matrix)):
-            for jj in range(ii, len(self._matrix)):
-                value = (self._matrix[ii, jj] + self._matrix[jj, ii]) / 2
-                self._matrix[ii, jj] = value
-                self._matrix[jj, ii] = value
+        self._matrix = (matrix + matrix.T) / 2
 
         # sort the m_list based on number of permutations. The recursion consumes the index
         # lists in place, so work on a copy to leave the caller's m_list untouched.
@@ -590,9 +579,30 @@ class EwaldMinimizer:
         """Get the permutations that produce the lowest
         Ewald sum calls recursive function to iterate through permutations.
         """
-        if self._algo in (EwaldMinimizer.ALGO_FAST, EwaldMinimizer.ALGO_BEST_FIRST):
-            return self._recurse(self._matrix, self._m_list, set(range(len(self._matrix))))
-        return None
+        if self._algo not in (EwaldMinimizer.ALGO_FAST, EwaldMinimizer.ALGO_BEST_FIRST, EwaldMinimizer.ALGO_TIME_LIMIT):
+            return
+
+        # Only the rows and columns of manipulated sites change during the search. Lump all other sites into a
+        # single extra row/column so that the matrix sum and the row sums of the manipulated sites are preserved
+        # on a much smaller matrix, which makes every step of the recursion cheaper.
+        manip_indices = sorted({idx for manip in self._m_list for idx in manip[2]})
+        n_manip = len(manip_indices)
+        is_fixed = np.ones(len(self._matrix), dtype=bool)
+        is_fixed[manip_indices] = False
+        reduced = np.empty((n_manip + 1, n_manip + 1))
+        reduced[:n_manip, :n_manip] = self._matrix[np.ix_(manip_indices, manip_indices)]
+        reduced[:n_manip, n_manip] = reduced[n_manip, :n_manip] = self._matrix[np.ix_(manip_indices, is_fixed)].sum(1)
+        reduced[n_manip, n_manip] = self._matrix[np.ix_(is_fixed, is_fixed)].sum()
+
+        # The recursion works on positions in the reduced matrix. The mapping is monotonic, so the order of
+        # the output lists (which bisect compares on ties) is unchanged when mapping back.
+        position = {idx: pos for pos, idx in enumerate(manip_indices)}
+        m_list = [[frac, num, [position[idx] for idx in indices], *rest] for frac, num, indices, *rest in self._m_list]
+        self._recurse(reduced, m_list, set(range(n_manip)))
+        self._output_lists = [
+            [matrix_sum, [[manip_indices[pos], *rest] for pos, *rest in output]]
+            for matrix_sum, output in self._output_lists
+        ]
 
     def add_m_list(self, matrix_sum, m_list):
         """Add an m_list to the output_lists and updates the current
@@ -628,38 +638,40 @@ class EwaldMinimizer:
 
         indices = list(indices_left.intersection(m_indices))
 
-        interaction_matrix = matrix[indices, :][:, indices]
+        rows = matrix[indices]
+        interaction_matrix = rows[:, indices]
 
-        fractions = np.zeros(len(interaction_matrix)) + 1
+        fractions = np.ones(len(indices))
         fractions[: len(fraction_list)] = fraction_list
-        fractions = np.sort(fractions)
+        fractions.sort()
+        one_minus_fractions = 1 - fractions
 
         # Sum associated with each index (disregarding interactions between
         # indices)
-        sums = 2 * np.sum(matrix[indices], axis=1)
-        sums = np.sort(sums)
+        sums = 2 * rows.sum(axis=1)
+        sums.sort()
 
         # Interaction corrections. Can be reduced to (1-x)(1-y) for x,y in
         # fractions each element in a column gets multiplied by (1-x), and then
         # the sum of the columns gets multiplied by (1-y) since fractions are
         # less than 1, there is no effect of one choice on the other
-        step1 = np.sort(interaction_matrix) * (1 - fractions)
-        step2 = np.sort(np.sum(step1, axis=1))
-        step3 = step2 * (1 - fractions)
-        interaction_correction = np.sum(step3)
+        step1 = np.sort(interaction_matrix) * one_minus_fractions
+        step2 = step1.sum(axis=1)
+        step2.sort()
+        interaction_correction = (step2 * one_minus_fractions).sum()
 
         if self._algo == self.ALGO_TIME_LIMIT:
             elapsed_time = datetime.now(tz=UTC) - self._start_time
             speedup_parameter = elapsed_time.total_seconds() / 1800
-            avg_int = np.sum(interaction_matrix, axis=None)
-            avg_frac = np.mean(np.outer(1 - fractions, 1 - fractions))
+            avg_int = interaction_matrix.sum()
+            avg_frac = np.mean(np.outer(one_minus_fractions, one_minus_fractions))
             average_correction = avg_int * avg_frac
 
             interaction_correction = average_correction * speedup_parameter + interaction_correction * (
                 1 - speedup_parameter
             )
 
-        return np.sum(matrix) + np.inner(sums[::-1], fractions - 1) + interaction_correction
+        return matrix.sum() + np.inner(sums[::-1], fractions - 1) + interaction_correction
 
     @classmethod
     def get_next_index(cls, matrix, manipulation, indices_left):
@@ -668,8 +680,8 @@ class EwaldMinimizer:
         """
         f = manipulation[0]
         indices = list(indices_left.intersection(manipulation[2]))
-        sums = np.sum(matrix[indices], axis=1)
-        return indices[sums.argmax(axis=0)] if f < 1 else indices[sums.argmin(axis=0)]
+        sums = matrix[indices].sum(axis=1)
+        return indices[sums.argmax()] if f < 1 else indices[sums.argmin()]
 
     def _recurse(self, matrix, m_list, indices, output_m_list=None):
         """Find the minimal permutations using a binary tree search strategy.
@@ -695,7 +707,7 @@ class EwaldMinimizer:
             m_list.pop()
             # if there are no more manipulations left to do check the value
             if not m_list:
-                matrix_sum = np.sum(matrix)
+                matrix_sum = matrix.sum()
                 if matrix_sum < self._current_minimum:
                     self.add_m_list(matrix_sum, output_m_list)
                 return
@@ -713,8 +725,9 @@ class EwaldMinimizer:
 
         # Make the matrix and new m_list where we do the manipulation to the
         # index that we just got
-        matrix2 = np.copy(matrix)
-        m_list2 = deepcopy(m_list)
+        matrix2 = matrix.copy()
+        # Both branches consume index lists in place, so each needs its own copies (but can share the species)
+        m_list2 = [[frac, num, list(idx_list), *rest] for frac, num, idx_list, *rest in m_list]
         output_m_list2 = copy(output_m_list)
 
         matrix2[index, :] *= m_list[-1][0]

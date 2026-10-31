@@ -57,6 +57,30 @@ def get_linear_assignment_solution(cost_matrix: np.ndarray):
     return col_ind, orig_c[row_ind, col_ind].sum()
 
 
+def _get_species_runs(species_and_occu: Sequence[Composition]) -> list[tuple[Composition, slice]]:
+    """Group consecutive sites with equal species, like itertools.groupby.
+
+    Comparing the underlying dicts first is a cheap exact check that avoids most of the much slower
+    tolerance-based Composition.__eq__ calls, since consecutive sites usually have identical species.
+
+    Args:
+        species_and_occu: Species (as Compositions) of each site.
+
+    Returns:
+        list of (species of the first site in the run, slice of the site indices in the run).
+    """
+    runs = []
+    start = 0
+    for idx in range(1, len(species_and_occu) + 1):
+        if idx < len(species_and_occu):
+            ref, comp = species_and_occu[start], species_and_occu[idx]
+            if ref.items() == comp.items() or ref == comp:
+                continue
+        runs.append((species_and_occu[start], slice(start, idx)))
+        start = idx
+    return runs
+
+
 class SiteOrderedIStructure(IStructure):
     """
     Imutable structure where the order of sites matters.
@@ -70,11 +94,17 @@ class SiteOrderedIStructure(IStructure):
 
     def __eq__(self, other: object) -> bool:
         """Check for IStructure equality and same site order."""
-        if not super().__eq__(other):
-            return False
+        if not all(hasattr(other, attr) for attr in ("lattice", "sites", "properties")):
+            return NotImplemented
         other = cast("SiteOrderedIStructure", other)  # make mypy happy
 
-        return list(self.sites) == list(other.sites)
+        # Equal sites in the same order imply the O(N^2) order-independent site check of IStructure.__eq__,
+        # so only the lattice and properties remain to be compared. This makes LRU cache hits O(N).
+        return (
+            list(self.sites) == list(other.sites)
+            and self.lattice == other.lattice
+            and self.properties == other.properties
+        )
 
     def __hash__(self) -> int:
         """Hash incorporating site positions to avoid LRU cache collisions.
@@ -596,14 +626,8 @@ class StructureMatcher(MSONable):
         """
         mask = np.zeros((len(struct2), len(struct1), fu), dtype=bool)
 
-        inner = []
-        for sp2, group_1 in itertools.groupby(enumerate(struct2.species_and_occu), key=lambda x: x[1]):
-            group_1 = list(group_1)
-            inner.append((sp2, slice(group_1[0][0], group_1[-1][0] + 1)))
-
-        for sp1, group_2 in itertools.groupby(enumerate(struct1.species_and_occu), key=lambda x: x[1]):
-            group_2 = list(group_2)
-            group_2 = slice(group_2[0][0], group_2[-1][0] + 1)
+        inner = _get_species_runs(struct2.species_and_occu)
+        for sp1, group_2 in _get_species_runs(struct1.species_and_occu):
             for sp2, group_1 in inner:
                 mask[group_1, group_2, :] = not self._comparator.are_equal(sp1, sp2)
 
@@ -650,6 +674,16 @@ class StructureMatcher(MSONable):
         if not self._subset and not hash_match:
             return False
 
+        return self._fit_processed(struct1, struct2, symmetric, skip_structure_reduction)
+
+    def _fit_processed(
+        self,
+        struct1: Structure | IStructure,
+        struct2: Structure | IStructure,
+        symmetric: bool,
+        skip_structure_reduction: bool,
+    ) -> bool:
+        """Fit two structures that have already been through _process_species and the hash check."""
         if not symmetric:
             struct1, struct2, fu, s1_supercell = self._preprocess(
                 struct1, struct2, skip_structure_reduction=skip_structure_reduction
@@ -884,26 +918,26 @@ class StructureMatcher(MSONable):
         sorted_s_list = sorted(enumerate(s_list), key=s_hash)
         all_groups = []
 
-        # For each pre-grouped list of structures, perform actual matching.
+        # For each pre-grouped list of structures, perform actual matching. The structures are already
+        # species-processed and reduced, and share the same hash within a group, so the corresponding steps of
+        # fit / fit_anonymous are skipped.
         for _, g in itertools.groupby(sorted_s_list, key=s_hash):
             unmatched = list(g)
             while len(unmatched) > 0:
                 i, refs = unmatched.pop(0)
-                matches = [i]
                 if anonymous:
-                    inds = filter(
-                        lambda i: self.fit_anonymous(refs, unmatched[i][1], skip_structure_reduction=True),
-                        list(range(len(unmatched))),
-                    )
+                    is_match = [
+                        self._fit_anonymous_processed(refs, struct, niggli=True, skip_structure_reduction=True)
+                        for _, struct in unmatched
+                    ]
                 else:
-                    inds = filter(
-                        lambda i: self.fit(refs, unmatched[i][1], symmetric=symmetric, skip_structure_reduction=True),
-                        list(range(len(unmatched))),
-                    )
-                inds = list(inds)
-                matches.extend([unmatched[i][0] for i in inds])
-                unmatched = [unmatched[i] for i in range(len(unmatched)) if i not in inds]
-                all_groups.append([original_s_list[i] for i in matches])
+                    is_match = [
+                        self._fit_processed(refs, struct, symmetric=symmetric, skip_structure_reduction=True)
+                        for _, struct in unmatched
+                    ]
+                matches = [i] + [j for (j, _), matched in zip(unmatched, is_match, strict=True) if matched]
+                unmatched = [item for item, matched in zip(unmatched, is_match, strict=True) if not matched]
+                all_groups.append([original_s_list[j] for j in matches])
 
         return all_groups
 
@@ -1144,6 +1178,16 @@ class StructureMatcher(MSONable):
             bool: True if a species mapping can map struct1 to struct2
         """
         struct1, struct2 = self._process_species([struct1, struct2])
+        return self._fit_anonymous_processed(struct1, struct2, niggli, skip_structure_reduction)
+
+    def _fit_anonymous_processed(
+        self,
+        struct1: Structure | IStructure,
+        struct2: Structure | IStructure,
+        niggli: bool,
+        skip_structure_reduction: bool,
+    ) -> bool:
+        """Anonymous fit of two structures that have already been through _process_species."""
         struct1, struct2, fu, s1_supercell = self._preprocess(struct1, struct2, niggli, skip_structure_reduction)
 
         matches = self._anonymous_match(struct1, struct2, fu, s1_supercell, break_on_match=True, single_match=True)
@@ -1238,8 +1282,10 @@ class StructureMatcher(MSONable):
             return None
         sc, t, mapping = trans
         sites = list(s2)
-        # Append the ignored sites at the end.
-        sites.extend([site for site in struct2 if site not in s2])
+        # Append the ignored sites at the end. Without ignored species, s2 is a copy of struct2, so skip the
+        # O(N^2) site comparison.
+        if self._ignored_species:
+            sites.extend([site for site in struct2 if site not in s2])
         temp = Structure.from_sites(sites)
 
         temp.make_supercell(sc)
