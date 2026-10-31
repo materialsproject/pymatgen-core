@@ -252,8 +252,63 @@ class TestSymmOp(MatSciTest):
         symm_op = SymmOp.from_xyz_str("x + 0.5, y + 0.25, z + 0.75")
         assert_allclose(symm_op.translation_vector, [0.5, 0.25, 0.75])
 
+    @pytest.mark.parametrize("tol", [0.0, 1e-8, 0.01, 0.1])
+    def test_eq_matches_allclose(self, tol):
+        """__eq__ must give exactly np.allclose(atol=tol), incl. at the tolerance boundary and for inf/nan."""
+        rng = np.random.default_rng(42)
+        specials = np.array([0.0, -0.0, 1.0, -1.0, 0.5, 1 / 3, np.inf, -np.inf, np.nan, 1e300])
+        for _ in range(2000):
+            mat_a = rng.choice(specials, size=(4, 4))
+            mat_b = mat_a.copy()
+            idx = tuple(rng.integers(4, size=2))
+            match rng.integers(4):
+                case 0:
+                    mat_b += rng.uniform(-2 * tol - 1e-12, 2 * tol + 1e-12, size=(4, 4))
+                case 1:  # just inside the allclose tolerance
+                    with np.errstate(invalid="ignore"):
+                        mat_b[idx] = mat_a[idx] + tol + 1e-5 * abs(mat_a[idx])
+                case 2:  # just outside the allclose tolerance
+                    with np.errstate(invalid="ignore"):
+                        mat_b[idx] = np.nextafter(mat_a[idx] + tol + 1e-5 * abs(mat_a[idx]), np.inf)
+                case _:
+                    mat_b = rng.choice(specials, size=(4, 4))
+            for op1, op2 in [(SymmOp(mat_a, tol), SymmOp(mat_b, tol)), (SymmOp(mat_b, tol), SymmOp(mat_a, tol))]:
+                with np.errstate(invalid="ignore", over="ignore"):
+                    expected = bool(np.allclose(op1.affine_matrix, op2.affine_matrix, atol=tol))
+                assert (op1 == op2) is expected
+                if expected:
+                    assert hash(op1) == hash(op2)
+
+        # integer matrices take the same path as floats
+        int_op = SymmOp(np.eye(4, dtype=int))
+        assert int_op == SymmOp(np.eye(4) + 0.009)
+        assert int_op != SymmOp(np.eye(4) + 0.011)
+
+    def test_hash_consistent_with_tolerance_eq(self):
+        """Ops perturbed by just under the tolerance compare (and hash) equal, so a set dedupes them."""
+        base = SymmOp(SymmOp.from_xyz_str("-y+1/2, x, z+1/4").affine_matrix)  # default tol=0.01
+        rng = np.random.default_rng(0)
+        perturbed = [SymmOp(base.affine_matrix + rng.uniform(-0.0099, 0.0099, size=(4, 4))) for _ in range(20)]
+        assert all(op == base for op in perturbed)
+        assert {hash(op) for op in [base, *perturbed]} == {hash(base)}
+        assert len({base, *perturbed}) == 1
+        assert len({base, SymmOp(base.affine_matrix + 0.011)}) == 2
+
 
 class TestMagSymmOp(MatSciTest):
+    def test_hash_consistent_with_tolerance_eq(self):
+        """MagSymmOp used to hash its exact matrix although __eq__ is tolerance-based."""
+        op = MagSymmOp.from_xyzt_str("-y, x, z+1/2, -1")
+        close = MagSymmOp(op.affine_matrix + 0.005, -1)
+        assert op == close
+        assert hash(op) == hash(close)
+        assert len({op, close}) == 1
+        assert len({op, MagSymmOp(op.affine_matrix, 1)}) == 2
+        # a plain SymmOp compares equal to a MagSymmOp with the same matrix, so must hash the same too
+        symm_op = SymmOp(op.affine_matrix)
+        assert symm_op == op
+        assert hash(symm_op) == hash(op)
+
     def test_xyzt_string(self):
         xyzt_strings = ["x, y, z, +1", "x, y, z, -1", "-y+1/2, x+1/2, x+1/2, +1"]
 
