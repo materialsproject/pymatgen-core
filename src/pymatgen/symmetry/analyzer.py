@@ -79,12 +79,9 @@ def _get_symmetry_dataset(cell, symprec, angle_tolerance):
     """Simple wrapper to cache results of spglib.get_symmetry_dataset since this call is
     expensive.
     """
-    try:
-        dataset = call_spglib(spglib.get_symmetry_dataset, cell, symprec=symprec, angle_tolerance=angle_tolerance)
-        if dataset is None:
-            raise SymmetryUndeterminedError("Unable to determine symmetry")
-    except spglib._spglib.SpglibCppError as e:
-        raise SymmetryUndeterminedError(str(e))
+    dataset = call_spglib(spglib.get_symmetry_dataset, cell, symprec=symprec, angle_tolerance=angle_tolerance)
+    if dataset is None:
+        raise SymmetryUndeterminedError("Unable to determine symmetry")
     return dataset
 
 
