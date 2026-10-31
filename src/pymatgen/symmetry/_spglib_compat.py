@@ -1,9 +1,9 @@
 """Compatibility layer for spglib's switch from return-None to exception-based error handling.
 
 spglib 2.7 deprecated its old error handling: failures return None, and every call (successful or not) emits
-"DeprecationWarning: Set OLD_ERROR_HANDLING to false and catch the errors directly". spglib 2.8 makes raising
-SpglibError the default and 3.0 removes the old behavior. pymatgen supports spglib >= 2.5, which predates both
-SpglibError and the OLD_ERROR_HANDLING switch.
+"DeprecationWarning: Set OLD_ERROR_HANDLING to false and catch the errors directly". The old behavior is still the
+default in spglib 2.8 and is due to be removed in 3.0. pymatgen supports spglib >= 2.5, which predates both SpglibError
+and the OLD_ERROR_HANDLING switch.
 
 call_spglib opts in to the new behavior only for the duration of a pymatgen call, without changing the setting for
 other code using spglib, and converts SpglibError back to None. Callers therefore keep a single "None means failure"
