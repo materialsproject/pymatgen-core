@@ -83,6 +83,16 @@ If you'd like to use the latest unreleased changes on the main branch, you can i
 pip install -U git+https://github.com/materialsproject/pymatgen-core
 ```
 
+`pymatgen-core` also runs in the browser with [Pyodide](https://pyodide.org) (e.g. JupyterLite), using Pyodide 314 or later:
+
+```python
+import micropip
+
+await micropip.install("pymatgen-core")
+```
+
+[spglib](https://github.com/spglib/spglib) is not available in Pyodide, so `pymatgen.symmetry` and other functionality that depends on it is unavailable there.
+
 Note that `pymatgen-core` imports under the same `pymatgen` namespace (e.g. `from pymatgen.core import Structure`), so existing code continues to work. Some extra functionality (e.g., generation of POTCARs) does require additional setup (see the [`pymatgen` docs]).
 
 ## Change Log

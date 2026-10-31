@@ -71,7 +71,8 @@ dependencies = [
     # scipy<1.14.1 is incompatible with NumPy 2.0 on Windows
     # https://github.com/scipy/scipy/issues/21052
     "scipy>=1.14.1; platform_system == 'Windows'",
-    "spglib>=2.5",
+    # spglib has no Emscripten (Pyodide) wheels; only pymatgen.symmetry needs it
+    "spglib>=2.5; sys_platform != 'emscripten'",
     "sympy>=1.3", # PR #4116
     "tabulate>=0.9.0",
     "tqdm>=4.67.3",
@@ -151,6 +152,16 @@ before-all = "ln -s /usr/lib64/libgfortran.so.5 /usr/lib64/libgfortran.so.3"
 
 [tool.cibuildwheel.macos]
 repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel} --ignore-missing-dependencies"
+
+[tool.cibuildwheel.pyodide]
+# Smoke test in the Pyodide runtime: the Cython extensions load and the core objects work
+test-command = """python -c "
+from pymatgen.core import Composition, Lattice, Structure
+s = Structure(Lattice.cubic(4.2), ['Cs', 'Cl'], [[0, 0, 0], [0.5, 0.5, 0.5]])
+assert len(s.get_neighbor_list(4.0)[0]) == 16
+assert s.distance_matrix[0, 1] > 3.6
+assert Composition('LiFePO4').reduced_formula == 'LiFePO4'
+\""""
 
 [tool.ruff]
 line-length = 120
