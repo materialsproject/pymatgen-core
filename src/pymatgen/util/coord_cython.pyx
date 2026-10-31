@@ -132,7 +132,7 @@ def pbc_shortest_vectors(lattice, fcoords1, fcoords2, mask=None, return_d2=False
         return (vectors, np.empty((I, J))) if return_d2 else vectors
 
     if n_pbc == 3:
-        # Lattice.lll_inverse inverts a 3x3 matrix on every access, so fetch it once
+        # Fetch the (cached) LLL inverse once for both coordinate sets
         lll_inverse = lattice.lll_inverse
         fcoords1 = np.dot(fcoords1, lll_inverse)
         fcoords2 = np.dot(fcoords2, lll_inverse)
