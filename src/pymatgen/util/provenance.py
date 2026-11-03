@@ -36,14 +36,9 @@ def is_valid_bibtex(reference: str) -> bool:
     Returns:
         bool: True if reference is valid BibTeX.
     """
-    from bibtexparser.bparser import BibTexParser
+    from bibtexparser import parse_string
 
-    parser = BibTexParser()
-    try:
-        bib_database = parser.parse(reference)
-        return bool(bib_database.entries)
-    except Exception:
-        return False
+    return bool(parse_string(reference).entries)
 
 
 class HistoryNode(NamedTuple):

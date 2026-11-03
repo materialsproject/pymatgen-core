@@ -1403,8 +1403,10 @@ class CifParser:
         Returns:
             BibTeX string.
         """
-        from bibtexparser.bibdatabase import BibDatabase
-        from bibtexparser.bwriter import BibTexWriter
+        from bibtexparser import Library, write_string
+        from bibtexparser.middlewares import AddEnclosingMiddleware
+        from bibtexparser.model import Entry, Field
+        from bibtexparser.writer import BibtexFormat
 
         bibtex_keys: dict[str, tuple[str, ...]] = {
             "author": ("_publ_author_name", "_citation_author_name"),
@@ -1423,13 +1425,13 @@ class CifParser:
             "doi": ("_journal_DOI", "_citation_DOI"),
         }
 
-        db = BibDatabase()
-        db.entries = []
+        library = Library()
+        display_order = ("author", "title", "journal", "volume", "year", "pages")
 
         for idx, data in enumerate(self._cif.data.values()):
             # Convert to lower-case keys, some CIF files inconsistent
             _data = {k.lower(): v for k, v in data.data.items()}
-            entry = {"ENTRYTYPE": "article", "ID": f"cifref{idx}"}
+            entry: dict[str, str] = {}
 
             for field, tags in bibtex_keys.items():
                 for tag in tags:
@@ -1452,16 +1454,19 @@ class CifParser:
                 entry.pop("page_first", None)  # and remove page_first, page_list if present
                 entry.pop("page_last", None)
 
-            db.entries.append(entry)
+            # Fields in display_order first, then the rest alphabetically
+            keys = [key for key in display_order if key in entry] + sorted(set(entry) - set(display_order))
+            library.add(Entry("article", f"cifref{idx}", [Field(key, entry[key]) for key in keys]))
 
         # NOTE: the following is added to make output consistent with
         # previous pybtex implementation
-        writer = BibTexWriter()
-        writer.indent = "    "
-        writer.display_order = ("author", "title", "journal", "volume", "year", "pages")
-
-        # Replace curly brackets with double quotes (skip the first and last one)
-        return re.sub(r"(^\s*\w+\s*=\s*)\{([^{}]*)\}", r'\1"\2"', writer.write(db), flags=re.MULTILINE)
+        bibtex_format = BibtexFormat()
+        bibtex_format.indent = "    "
+        bibtex_format.block_separator = "\n"
+        enclose_in_quotes = AddEnclosingMiddleware(
+            reuse_previous_enclosing=False, enclose_integers=True, default_enclosing='"'
+        )
+        return write_string(library, unparse_stack=[enclose_in_quotes], bibtex_format=bibtex_format)
 
     def as_dict(self) -> dict:
         """MSONable dict."""
