@@ -2029,12 +2029,66 @@ class ReconstructionGenerator:
         return [slab.make_supercell(self.trans_matrix) for slab in SlabGenerator(**self.slabgen_params).get_slabs()]
 
 
+@overload
 def get_symmetrically_equivalent_miller_indices(
     structure: Structure | IStructure,
-    miller_index: tuple[int, ...],
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    return_hkil: Literal[False],
+    system: CrystalSystem | None = None,
+) -> list[tuple[int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    return_hkil: Literal[True],
+    system: Literal["cubic", "monoclinic", "orthorhombic", "tetragonal", "triclinic"],
+) -> list[tuple[int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    return_hkil: Literal[True],
+    system: Literal["trigonal", "hexagonal"],
+) -> list[tuple[int, int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    *,
+    system: Literal["cubic", "monoclinic", "orthorhombic", "tetragonal", "triclinic"],
+) -> list[tuple[int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    *,
+    system: Literal["trigonal", "hexagonal"],
+) -> list[tuple[int, int, int, int]]: ...
+
+
+@overload
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
     return_hkil: bool = True,
     system: CrystalSystem | None = None,
-) -> list:
+) -> list[tuple[int, int, int]] | list[tuple[int, int, int, int]]: ...
+
+
+def get_symmetrically_equivalent_miller_indices(
+    structure: Structure | IStructure,
+    miller_index: tuple[int, int, int] | tuple[int, int, int, int],
+    return_hkil: bool = True,
+    system: CrystalSystem | None = None,
+) -> list[tuple[int, int, int]] | list[tuple[int, int, int, int]]:
     """Get indices for all equivalent sites within a given structure.
     Analysis is based on the symmetry of its reciprocal lattice.
 
@@ -2046,17 +2100,16 @@ def get_symmetrically_equivalent_miller_indices(
             index for hexagonal systems, or hkl (False).
         system: The crystal system of the structure.
     """
+    # Maximum index includes i, if present
+    max_idx = max(np.abs(miller_index))
+
     # Convert to hkl if hkil, because the symmetry operations only handle tuples of 3
-    if len(miller_index) >= 3:
-        _miller_index: tuple[int, ...] = (
+    if len(miller_index) == 4:
+        miller_index = (
             miller_index[0],
             miller_index[1],
             miller_index[-1],
         )
-    else:
-        _miller_index = (miller_index[0], miller_index[1], miller_index[2])
-
-    max_idx = max(np.abs(miller_index))
 
     # Skip crystal system analysis if already given
     if not system:
@@ -2074,15 +2127,15 @@ def get_symmetrically_equivalent_miller_indices(
 
     # Equivalent indices can have larger components than the input, e.g. (1, 1, 0) and (2, -1, 0)
     # in a hexagonal hkl setting, so search up to the largest component of all symmetry images.
-    search_max = max(max_idx, *(int(np.max(np.abs(np.rint(op.operate(_miller_index))))) for op in symm_ops))
+    search_max = max(max_idx, *(int(np.max(np.abs(np.rint(op.operate(miller_index))))) for op in symm_ops))
     idx_range = range(search_max, -search_max - 1, -1)
 
-    equivalent_millers: list[tuple[int, int, int]] = [_miller_index]  # type: ignore[list-item]
-    equivalent_set: set[tuple[int, ...]] = {_miller_index}
+    equivalent_millers: list[tuple[int, int, int]] = [miller_index]  # type: ignore[list-item]
+    equivalent_set: set[tuple[int, int, int]] = {miller_index}
     affine_ops = _stack_affine_matrices(symm_ops)
     # Explicit x3 repeat instead of keyword, so mypy understands it correctly
     for miller in itertools.product(idx_range, idx_range, idx_range):
-        if miller == _miller_index:
+        if miller == miller_index:
             continue
 
         if any(idx != 0 for idx in miller):
@@ -2101,7 +2154,7 @@ def get_symmetrically_equivalent_miller_indices(
 
     # Convert hkl to hkil if necessary
     if return_hkil and system in {"trigonal", "hexagonal"}:
-        return [(hkl[0], hkl[1], -1 * hkl[0] - hkl[1], hkl[2]) for hkl in equivalent_millers]
+        return [(hkl[0], hkl[1], -hkl[0] - hkl[1], hkl[2]) for hkl in equivalent_millers]
 
     return equivalent_millers
 
