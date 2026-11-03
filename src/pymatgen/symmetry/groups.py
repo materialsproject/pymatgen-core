@@ -368,6 +368,9 @@ class SpaceGroup(SymmetryGroup):
                 spg["hermann_mauguin_u"],
             ]:
                 self.symbol = spg["hermann_mauguin_u"]
+                # universal_h_m is unique per tabulated setting (basis, origin and :H/:R choice), so it
+                # identifies the group for __eq__/__hash__ independently of the spelling used to construct it.
+                self._setting_symbol: str = spg["universal_h_m"]
                 if int_symbol in SpaceGroup.sg_encoding:
                     self.full_symbol = SpaceGroup.sg_encoding[int_symbol]["full_symbol"]
                     self.point_group = SpaceGroup.sg_encoding[int_symbol]["point_group"]
@@ -395,6 +398,7 @@ class SpaceGroup(SymmetryGroup):
             data = SpaceGroup.sg_encoding[int_symbol]
 
             self.symbol = int_symbol
+            self._setting_symbol = int_symbol
             # TODO: Support different origin choices.
             enc = list(data["enc"])
             inversion = int(enc.pop(0))
@@ -692,6 +696,17 @@ class SpaceGroup(SymmetryGroup):
         if not hexagonal and int_number in (146, 148, 155, 160, 161, 166, 167):
             symbol += ":R"
         return cls(symbol)
+
+    def __eq__(self, other: object) -> bool:
+        """Two space groups are equal if they are the same tabulated setting, regardless of
+        whether they were constructed from the short, full or setting-qualified symbol.
+        """
+        if not isinstance(other, SpaceGroup):
+            return NotImplemented
+        return self._setting_symbol == other._setting_symbol
+
+    def __hash__(self) -> int:
+        return hash(self._setting_symbol)
 
     def __repr__(self) -> str:
         symbol = self.symbol

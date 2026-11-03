@@ -135,6 +135,26 @@ class TestSpaceGroup:
         assert sg.order == 2
         assert SymmOp.from_rotation_and_translation(np.diag(diagonal)) in sg.symmetry_ops
 
+    @pytest.mark.parametrize("number", range(1, 231))
+    def test_eq_round_trips_through_symbol(self, number):
+        sg = SpaceGroup.from_int_number(number)
+        for symbol in (sg.symbol, sg.full_symbol):
+            other = SpaceGroup(symbol)
+            assert other == sg
+            assert hash(other) == hash(sg)
+            assert other.symmetry_ops == sg.symmetry_ops
+
+    def test_eq_distinguishes_settings(self):
+        assert SpaceGroup("P2") == SpaceGroup("P121") == SpaceGroup.from_int_number(3)
+        assert len({SpaceGroup("P2_1/c"), SpaceGroup("P12_1/c1"), SpaceGroup.from_int_number(14)}) == 1
+        # Different unique axis, basis or rhombohedral setting are different groups.
+        assert SpaceGroup("P2") != SpaceGroup("P112")
+        assert SpaceGroup("P2") != SpaceGroup("P121(2*a+c,b,c)")
+        assert SpaceGroup("R-3m:H") != SpaceGroup("R-3m:R")
+        assert SpaceGroup("Fm-3m") != SpaceGroup("Fm-3m(a-1/4,b-1/4,c-1/4)")
+        assert SpaceGroup("Fm-3m") != PointGroup("m-3m")
+        assert SpaceGroup("Fm-3m") != "Fm-3m"
+
     @pytest.mark.parametrize("number", range(3, 16))
     def test_monoclinic_symbol_settings(self, number):
         sg = SpaceGroup.from_int_number(number)
