@@ -572,6 +572,14 @@ class TestIStructure(MatSciTest):
             assert interpolated_structs[0].lattice == inter_struct.lattice
             assert_allclose(inter_struct[1].frac_coords, [0.75, 0.5, 0.75])
 
+        # end_amplitude scales the shortest periodic path, not a wrapped scaled vector
+        start = IStructure(Lattice.cubic(4), ["Li"], [[0.1, 0.2, 0.3]])
+        end = IStructure(Lattice.cubic(4), ["Li"], [[0.7, 0.2, 0.3]])
+        half = start.interpolate(end, nimages=2, end_amplitude=0.5)
+        assert_allclose([s[0].frac_coords[0] for s in half], [0.1, 0.0, -0.1], atol=1e-12)
+        double = start.interpolate(end, nimages=[0, 0.25, 0.5], end_amplitude=2)
+        assert_allclose([s[0].frac_coords[0] for s in double], [0.1, -0.1, -0.3], atol=1e-12)
+
     def test_interpolate_lattice(self):
         coords = [[0, 0, 0], [0.75, 0.5, 0.75]]
         struct = IStructure(self.lattice, ["Si"] * 2, coords)

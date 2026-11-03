@@ -2587,9 +2587,10 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
 
             end_coords = sorted_end_coords
 
-        vec = end_amplitude * (end_coords - start_coords)
+        vec = end_coords - start_coords
         if pbc:
             vec[:, self.pbc] -= np.round(vec[:, self.pbc])
+        vec *= end_amplitude
         sp = self.species_and_occu
         structs = []
 
