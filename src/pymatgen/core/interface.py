@@ -2492,6 +2492,8 @@ def _get_in_plane_reflection(lattice: Lattice, tol: float = 1e-3) -> NDArray | N
 
     if not reflections:
         return None
+    # Each reflection line has exactly one reflection. Prefer the one fixing a (line along a), then the one
+    # fixing b; otherwise the largest entry sum picks the line along a + b (a <-> b) over a - b (a <-> -b)
     return min(
         reflections,
         key=lambda refl: (refl[0].tolist() != [1, 0], refl[1].tolist() != [0, 1], -refl.sum()),
@@ -2825,6 +2827,9 @@ class Interface(Structure):
             in_plane_offset (tuple): fractional shift in plane for the film with
                 respect to the substrate. For example, (0.5, 0.5) will shift the
                 film by half the substrate's a- and b-vectors. Defaults to (0, 0).
+                If the substrate cell is left-handed, the interface cell uses the
+                substrate's (a, -b, c), so the stored Interface.in_plane_offset is
+                (x, -y) for a passed (x, y). This is the same physical shift.
             gap (float): gap between substrate and film in Angstroms. Defaults to 1.6.
             vacuum_over_film (float): vacuum space above the film in Angstroms.
                 Defaults to 0.
@@ -2879,9 +2884,12 @@ class Interface(Structure):
         if film_left_handed == sub_left_handed:
             reflection = _get_in_plane_reflection(film_slab.lattice)
             if reflection is not None:
+                # Rows of the reflection are the images of a and b, so fractional row vectors map as f @ R
                 film_coords[:, :2] = np.mod(film_coords[:, :2] @ reflection, 1)
             elif not any(
-                np.linalg.det(op.rotation_matrix) < 0 for op in SpacegroupAnalyzer(film_slab).get_symmetry_operations()
+                np.linalg.det(op.rotation_matrix) < 0
+                # symprec matches Slab.is_symmetric, so a slightly relaxed achiral slab is not reported as chiral
+                for op in SpacegroupAnalyzer(film_slab, symprec=0.1).get_symmetry_operations()
             ):
                 warnings.warn(
                     "The film is chiral and its 2D lattice is oblique, so it can only be turned over as "
