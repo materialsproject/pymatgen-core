@@ -350,14 +350,15 @@ class TestLobsterin(MatSciTest):
             potcar_symbols=potcar_names,
         ) == ["Ga 3d 4p 4s ", "As 4p 4s "]
 
-        # W_pv only exists in the PBE_52 POTCAR set
+        # W_pv only exists in the PBE_52 POTCAR set, which the bundled PBE_54 basis files do not cover
         bcc_w = Structure(Lattice.cubic(3.16), ["W", "W"], [[0, 0, 0], [0.5, 0.5, 0.5]])
         for basis_set in ("standard", "min", "max"):
-            assert lobsterin1.get_basis(
-                bcc_w,
-                potcar_symbols=["W_pv"],
-                address_basis_file=f"{MODULE_DIR}/lobster_basis/BASIS_PBE_54_{basis_set}.yaml",
-            ) == ["W 5d 5p 6s "]
+            with pytest.raises(ValueError, match=r"POTCAR symbol: W_pv.*only cover the POTCAR symbols of the PBE_54"):
+                lobsterin1.get_basis(
+                    bcc_w,
+                    potcar_symbols=["W_pv"],
+                    address_basis_file=f"{MODULE_DIR}/lobster_basis/BASIS_PBE_54_{basis_set}.yaml",
+                )
 
     def test_get_all_possible_basis_functions(self):
         potcar = Potcar.from_file(f"{VASP_IN_DIR}/POTCAR_Fe3O4.gz")

@@ -444,7 +444,11 @@ class LobsterIn(UserDict, MSONable):
         for idx, name in enumerate(potcar_symbols):
             if name not in basis:
                 raise ValueError(
-                    f"Missing basis information for POTCAR symbol: {name}. Please provide the basis manually."
+                    f"Missing basis information for POTCAR symbol: {name}. The basis files shipped with pymatgen "
+                    "only cover the POTCAR symbols of the PBE_54 set, so symbols that only exist in older sets "
+                    "(e.g. W_pv, At_d, Cd_pv and Cd_sv from PBE_52) are not included. Please provide the basis "
+                    "manually, e.g. via dict_for_basis in standard_calculations_from_vasp_files, or pass your "
+                    "own address_basis_file."
                 )
             basis_functions.append(basis[name].split())
             list_forin.append(f"{atom_types_potcar[idx]} {basis[name]}")
