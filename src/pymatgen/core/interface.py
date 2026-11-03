@@ -2455,6 +2455,51 @@ def symm_group_cubic(mat: NDArray) -> NDArray:
     return np.unique(np.array(all_vectors), axis=0)
 
 
+def _get_in_plane_reflection(lattice: Lattice, tol: float = 1e-3) -> NDArray | None:
+    """Find a reflection line of the 2D lattice spanned by the a and b vectors.
+
+    Args:
+        lattice (Lattice): lattice whose c vector is perpendicular to a and b.
+        tol (float): relative tolerance on the 2D metric tensor.
+
+    Returns:
+        Integer 2x2 matrix whose rows are the images of a and b in terms of a and b,
+        preferring the reflection line along a, then along b, then along a + b.
+        None for an oblique lattice, which has no reflection line.
+    """
+    # Lagrange-Gauss reduction: lattice vectors as short as the reduced basis vectors have
+    # coefficients in {-1, 0, 1}, so every reflection does too in the reduced basis
+    vecs = lattice.matrix[:2].copy()
+    to_reduced = np.eye(2, dtype=int)
+    while True:
+        if vecs[1] @ vecs[1] < vecs[0] @ vecs[0]:
+            vecs, to_reduced = vecs[::-1].copy(), to_reduced[::-1].copy()
+        mu = round(vecs[0] @ vecs[1] / (vecs[0] @ vecs[0]))
+        if mu == 0:
+            break
+        vecs[1] -= mu * vecs[0]
+        to_reduced[1] -= mu * to_reduced[0]
+
+    metric = vecs @ vecs.T
+    from_reduced = np.round(np.linalg.inv(to_reduced)).astype(int)
+    reflections = []
+    for entries in product((-1, 0, 1), repeat=4):
+        refl = np.reshape(entries, (2, 2))
+        if round(np.linalg.det(refl)) == -1 and np.allclose(
+            refl @ metric @ refl.T, metric, rtol=0, atol=tol * np.trace(metric)
+        ):
+            reflections.append(from_reduced @ refl @ to_reduced)
+
+    if not reflections:
+        return None
+    # Each reflection line has exactly one reflection. Prefer the one fixing a (line along a), then the one
+    # fixing b; otherwise the largest entry sum picks the line along a + b (a <-> b) over a - b (a <-> -b)
+    return min(
+        reflections,
+        key=lambda refl: (refl[0].tolist() != [1, 0], refl[1].tolist() != [0, 1], -refl.sum()),
+    )
+
+
 class Interface(Structure):
     """Store data for defining an interface between two Structures."""
 
@@ -2770,7 +2815,8 @@ class Interface(Structure):
     ) -> Self:
         """Make an Interface by merging a substrate and film slabs
         The film a- and b-vectors will be forced to be the substrate slab's
-        a- and b-vectors.
+        a- and b-vectors. The film is turned over onto the substrate by a 2-fold
+        rotation about an in-plane axis, so its top surface faces the substrate.
 
         For now, it's suggested to use a factory method that will ensure the
         appropriate Interface is already met.
@@ -2781,6 +2827,9 @@ class Interface(Structure):
             in_plane_offset (tuple): fractional shift in plane for the film with
                 respect to the substrate. For example, (0.5, 0.5) will shift the
                 film by half the substrate's a- and b-vectors. Defaults to (0, 0).
+                If the substrate cell is left-handed, the interface cell uses the
+                substrate's (a, -b, c), so the stored Interface.in_plane_offset is
+                (x, -y) for a passed (x, y). This is the same physical shift.
             gap (float): gap between substrate and film in Angstroms. Defaults to 1.6.
             vacuum_over_film (float): vacuum space above the film in Angstroms.
                 Defaults to 0.
@@ -2804,15 +2853,6 @@ class Interface(Structure):
         ):
             raise ValueError("The lattice angles alpha or beta of the substrate slab are not approximately 90 degrees.")
 
-        # Ensure sub is right-handed
-        # IE sub has surface facing "up"
-        sub_vecs = substrate_slab.lattice.matrix.copy()
-        if np.dot(np.cross(*sub_vecs[:2]), sub_vecs[2]) < 0:
-            sub_vecs[2] *= -1.0
-            # Copy first, so a substrate passed as a plain Structure is not modified
-            substrate_slab = substrate_slab.copy()
-            substrate_slab.lattice = Lattice(sub_vecs)
-
         # Find the limits of C-coords
         sub_coords = substrate_slab.frac_coords
         film_coords = film_slab.frac_coords
@@ -2822,10 +2862,13 @@ class Interface(Structure):
         film_max_c = np.max(film_coords[:, 2]) * film_slab.lattice.c
         min_height = np.abs(film_max_c - film_min_c) + np.abs(sub_max_c - sub_min_c)
 
-        # Construct new lattice
+        # Construct new lattice. It is right-handed with the substrate surface facing "up", so a
+        # left-handed substrate (a, b, c) is relabelled (a, -b, c) instead of being mirrored.
+        sub_left_handed = np.linalg.det(substrate_slab.lattice.matrix) < 0
+        film_left_handed = np.linalg.det(film_slab.lattice.matrix) < 0
         abc = (*substrate_slab.lattice.abc[:2], min_height + gap + vacuum_over_film)
-        angles = substrate_slab.lattice.angles
-        lattice = Lattice.from_parameters(*abc, *angles)
+        alpha, beta, gamma = substrate_slab.lattice.angles
+        lattice = Lattice.from_parameters(*abc, alpha, beta, 180 - gamma if sub_left_handed else gamma)
 
         # Get the species
         species = substrate_slab.species + film_slab.species
@@ -2835,9 +2878,34 @@ class Interface(Structure):
         sub_coords = np.subtract(sub_coords, [0, 0, np.min(sub_coords[:, 2])])
         sub_coords[:, 2] *= substrate_slab.lattice.c / lattice.c
 
-        # Flip the film over
+        # Turn the film over by a 2-fold rotation about an in-plane axis. Negating the fractional
+        # z alone is that rotation if the film and substrate cells have opposite handedness, and
+        # a mirror otherwise, which first needs a reflection line of the film's 2D lattice.
+        if film_left_handed == sub_left_handed:
+            reflection = _get_in_plane_reflection(film_slab.lattice)
+            if reflection is not None:
+                # Rows of the reflection are the images of a and b, so fractional row vectors map as f @ R
+                film_coords[:, :2] = np.mod(film_coords[:, :2] @ reflection, 1)
+            elif not any(
+                np.linalg.det(op.rotation_matrix) < 0
+                # symprec matches Slab.is_symmetric, so a slightly relaxed achiral slab is not reported as chiral
+                for op in SpacegroupAnalyzer(film_slab, symprec=0.1).get_symmetry_operations()
+            ):
+                warnings.warn(
+                    "The film is chiral and its 2D lattice is oblique, so it can only be turned over as "
+                    "its mirror image (the other enantiomer). Use a film cell whose a and b vectors have "
+                    "the opposite handedness to the substrate's.",
+                    stacklevel=2,
+                )
         film_coords[:, 2] *= -1.0
         film_coords[:, 2] *= film_slab.lattice.c / lattice.c
+
+        if sub_left_handed:
+            sub_coords[:, 1] = np.mod(-sub_coords[:, 1], 1)
+            film_coords[:, 1] = np.mod(-film_coords[:, 1], 1)
+            in_plane_offset = (in_plane_offset[0], -in_plane_offset[1])
+        if any(in_plane_offset):
+            film_coords[:, :2] = np.mod(film_coords[:, :2] + in_plane_offset, 1)
 
         # Shift the film coords to right over the substrate + gap
         film_coords = np.subtract(film_coords, [0, 0, np.min(film_coords[:, 2])])
