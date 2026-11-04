@@ -1631,9 +1631,9 @@ def f0(E: float | NDArray, fermi: float, T: float) -> float:
 def _trapezoid_weights(x: NDArray) -> NDArray:
     """
     Get weights ``w(x)`` such that ``w(x) @ y == trapezoid(y, x=x)``
-    for any ``y`` on the fixed grid ``x``.
+    for any ``y`` on the fixed grid ``x``, including integer-valued grids.
     """
-    weights = np.zeros_like(x)  # same shape as ``x``
+    weights = np.zeros_like(x, dtype=float)  # half-intervals need floating-point weights
     if len(x) > 1:
         dx = np.diff(x)
         weights[0] = dx[0] / 2
