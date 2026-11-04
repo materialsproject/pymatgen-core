@@ -533,7 +533,8 @@ class BandStructure:
         Args:
             kpoint (1x3 array): Coordinate of the Kpoint.
             cartesian (bool): Whether kpoint is in Cartesian or fractional coordinates.
-            tol (float): Tolerance below which coordinates are considered equal.
+            tol (float): Tolerance in fractional reciprocal coordinates below which
+                coordinates are considered equal.
 
         Returns:
             (1x3 NDArray) | None: None if structure is not available.
@@ -541,9 +542,11 @@ class BandStructure:
         if not self.structure:
             return None
 
+        # Generate and compare the orbit in one fractional reciprocal basis.
+        frac_kpoint = self.lattice_rec.get_fractional_coords(kpoint) if cartesian else kpoint
         sg = SpacegroupAnalyzer(self.structure)
-        symm_ops = sg.get_point_group_operations(cartesian=cartesian)
-        points = np.dot(kpoint, [m.rotation_matrix for m in symm_ops])
+        symm_ops = sg.get_point_group_operations(cartesian=False)
+        points = np.dot(frac_kpoint, [m.rotation_matrix for m in symm_ops])
         rm_list = []
         # Identify and remove duplicates from equivalent k-points
         for i in range(len(points) - 1):
@@ -551,7 +554,8 @@ class BandStructure:
                 if np.allclose(pbc_diff(points[i], points[j]), [0, 0, 0], atol=tol):
                     rm_list.append(i)
                     break
-        return np.delete(points, rm_list, axis=0)
+        points = np.delete(points, rm_list, axis=0)
+        return self.lattice_rec.get_cartesian_coords(points) if cartesian else points
 
     def get_kpoint_degeneracy(
         self,
@@ -564,7 +568,8 @@ class BandStructure:
         Args:
             kpoint (1x3 NDArray): Coordinate of the k-point.
             cartesian (bool): Whether kpoint is in Cartesian or fractional coordinates.
-            tol (float): Tolerance below which coordinates are considered equal.
+            tol (float): Tolerance in fractional reciprocal coordinates below which
+                coordinates are considered equal.
 
         Returns:
             int | None: Degeneracy, or None if structure is not available.

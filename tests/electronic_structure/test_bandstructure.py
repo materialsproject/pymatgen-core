@@ -20,6 +20,7 @@ from pymatgen.electronic_structure.bandstructure import (
 from pymatgen.electronic_structure.core import Orbital, Spin
 from pymatgen.electronic_structure.plotter import BSPlotterProjected
 from pymatgen.io.vasp import BSVasprun
+from pymatgen.util.coord import pbc_diff
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, VASP_OUT_DIR, MatSciTest
 
 TEST_DIR = f"{TEST_FILES_DIR}/electronic_structure/bandstructure"
@@ -288,6 +289,16 @@ class TestBandStructureSymmLine(MatSciTest):
         assert [0.5, 0.5, 0.0] in cbm_eqs
         vbm_eqs = bs.get_sym_eq_kpoints(vbm_k)
         assert [0.0, 0.0, 0.0] in vbm_eqs
+
+        # Cartesian input describes the same physical points, and results stay Cartesian.
+        cbm_k_cart = bs.get_cbm()["kpoint"].cart_coords
+        assert bs.get_kpoint_degeneracy(cbm_k_cart, cartesian=True) == 3
+        cbm_eqs_cart = bs.get_sym_eq_kpoints(cbm_k_cart, cartesian=True)
+        assert len(cbm_eqs_cart) == 3
+        expected_cbm = np.array([[0.5, 0.0, 0.5], [0.0, 0.5, 0.5], [0.5, 0.5, 0.0]])
+        # Returned points may be ordered differently and shifted by reciprocal lattice vectors.
+        for eq_cart in bs.lattice_rec.get_fractional_coords(cbm_eqs_cart):
+            assert np.min(np.max(np.abs(pbc_diff(expected_cbm, eq_cart)), axis=1)) < 1e-5
 
         # images closer than tol must be merged (tol used to be passed as rtol and ignored)
         near_gamma = [1e-4, 0.0, 0.0]
