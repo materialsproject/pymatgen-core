@@ -13,7 +13,7 @@ from monty.serialization import loadfn
 from numpy.testing import assert_allclose, assert_array_equal
 from pytest import approx
 
-from pymatgen.core import Element, Structure
+from pymatgen.core import Element, Lattice, Structure
 from pymatgen.electronic_structure.core import Orbital, OrbitalType, Spin
 from pymatgen.electronic_structure.dos import DOS, CompleteDos, Dos, FermiDos, LobsterCompleteDos
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
@@ -187,6 +187,24 @@ class TestFermiDos:
         assert e_conc == approx(2.4935783946261567e12)
         assert h_conc == approx(8.311872785950934e11)
         assert simple_dos.get_doping(fermi_level=1.0, temperature=300) == approx(h_conc - e_conc)
+
+    def test_get_e_h_concs_integer_energy_grid(self):
+        # Regression test: on an integer-valued energy grid, the half-interval
+        # trapezoid weights at the integration boundaries used to be truncated
+        # to zero, undercounting the electron concentration.
+        structure = Structure(Lattice.cubic(3), ["H"], [[0, 0, 0]])
+        densities = {Spin.up: np.array([1, 1, 0, 0, 0, 1, 1], dtype=float)}
+        e_concs = []
+        for dtype in (int, float):
+            dos = Dos(0, np.array([-3, -2, -1, 0, 1, 2, 3], dtype=dtype), densities)
+            fermi_dos = FermiDos(dos, structure=structure, nelecs=1)
+            e_concs.append(fermi_dos.get_e_h_concs(fermi_level=3, temperature=300)[0])
+
+        # Physical value for this 27 Å³ cell with unit electron count; the old
+        # integer-weight bug gave 2.469135802469135e22 cm^-3 here.
+        assert e_concs[0] == approx(3.086419753086419e22, rel=1e-6)
+        # The result must not depend on whether the energy grid is int or float.
+        assert e_concs[1] == approx(e_concs[0], rel=1e-12)
 
     def test_get_cbm_vbm_doping(self):
         dos = Dos(
