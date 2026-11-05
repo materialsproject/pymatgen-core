@@ -9,6 +9,7 @@ from monty.serialization import loadfn
 from numpy.testing import assert_allclose
 from pytest import approx
 
+from pymatgen.core import Structure
 from pymatgen.core.lattice import Lattice
 from pymatgen.electronic_structure.bandstructure import (
     BandStructure,
@@ -304,6 +305,37 @@ class TestBandStructureSymmLine(MatSciTest):
         near_gamma = [1e-4, 0.0, 0.0]
         assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-2) == 1
         assert bs.get_kpoint_degeneracy(near_gamma, tol=1e-6) == 8
+
+    def test_get_sym_eq_kpoints_hexagonal_cartesian(self):
+        # Non-orthogonal cell: Cartesian input must describe the same M star as fractional input
+        lattice = Lattice.hexagonal(3.1, 5.2)
+        structure = Structure(lattice, ["Si"], [[0, 0, 0]])
+        bs = BandStructure(
+            [[0.5, 0, 0]],
+            {Spin.up: np.array([[0.0]])},
+            lattice.reciprocal_lattice,
+            efermi=1.0,
+            structure=structure,
+        )
+        expected_frac = np.array([[0.5, 0, 0], [0, 0.5, 0], [0.5, 0.5, 0]])
+
+        def assert_full_star(orbit_frac) -> None:
+            # Each star member is matched exactly once; ordering and reciprocal lattice shifts are irrelevant
+            matched = set()
+            for point in orbit_frac:
+                dist = np.max(np.abs(pbc_diff(expected_frac, point)), axis=1)
+                closest = int(np.argmin(dist))
+                assert dist[closest] < 1e-5, f"{point} is not an M point"
+                matched.add(closest)
+            assert matched == {0, 1, 2}, f"incomplete M star: {orbit_frac}"
+
+        frac_orbit = bs.get_sym_eq_kpoints([0.5, 0, 0])
+        assert len(frac_orbit) == 3
+        assert_full_star(frac_orbit)
+
+        cart_orbit = bs.get_sym_eq_kpoints(lattice.reciprocal_lattice.get_cartesian_coords([0.5, 0, 0]), cartesian=True)
+        assert len(cart_orbit) == 3
+        assert_full_star(bs.lattice_rec.get_fractional_coords(cart_orbit))
 
     def test_as_dict(self):
         expected_keys = {
