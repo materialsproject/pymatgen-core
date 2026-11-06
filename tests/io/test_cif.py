@@ -10,7 +10,7 @@ from pytest import approx
 from pymatgen.core import Composition, DummySpecies, Element, Lattice, Species, Structure, SymmOp
 from pymatgen.core.structure_matcher import StructureMatcher
 from pymatgen.electronic_structure.core import Magmom
-from pymatgen.io.cif import CifBlock, CifParser, CifWriter
+from pymatgen.io.cif import CifBlock, CifFile, CifParser, CifWriter
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.symmetry.structure import SymmetrizedStructure
 from pymatgen.util.testing import TEST_FILES_DIR, VASP_IN_DIR, MatSciTest
@@ -170,6 +170,32 @@ loop_
         # 8 values for 3 columns used to slip past the check and fail in zip()
         with pytest.raises(ValueError, match=r"len\(items\)=8 is not a multiple of len\(columns\)=3"):
             CifBlock.from_str("data_test\nloop_\n_a\n_b\n_c\n1 2 3 4 5 6 7 8")
+
+
+class TestCifFile:
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            ("same", "same"),
+            ("same", "same", "same", "same"),
+            ("same", "same_pmg0", "same", "same"),
+            ("same", "same", "same_pmg0", "same"),
+            ("first", "second"),
+        ],
+    )
+    def test_from_str_preserves_blocks_with_duplicate_headers(self, headers):
+        cif_str = "".join(f"data_{header}\n_test_value {idx}\n" for idx, header in enumerate(headers))
+        cif_file = CifFile.from_str(cif_str)
+
+        assert cif_file.orig_string == cif_str
+        for parsed in (cif_file, CifFile.from_str(str(cif_file))):
+            assert len(parsed.data) == len(headers)
+            assert next(iter(parsed.data)) == headers[0]
+            assert [block.header for block in parsed.data.values()] == list(headers)
+            assert [block["_test_value"] for block in parsed.data.values()] == [str(idx) for idx in range(len(headers))]
+
+        if len(set(headers)) == len(headers):
+            assert list(cif_file.data) == list(headers)
 
 
 class TestCifIO(MatSciTest):

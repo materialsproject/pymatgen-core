@@ -266,6 +266,9 @@ class CifFile:
     def from_str(cls, string: str) -> Self:
         """Read CifFile from a string.
 
+        Blocks with duplicate headers receive unique dictionary keys while their
+        original headers are preserved.
+
         Args:
             string: String representation.
 
@@ -283,9 +286,12 @@ class CifFile:
             if "powder_pattern" in re.split(r"\n", block_str, maxsplit=1)[0]:
                 continue
             block = CifBlock.from_str(f"data_{block_str}")
-            # TODO (@janosh, 2023-10-11) multiple CIF blocks with equal header will overwrite each other,
-            # latest taking precedence. maybe something to fix and test e.g. in test_cif_writer_write_file
-            dct[block.header] = block
+            key = block.header
+            idx = 0
+            while key in dct:
+                key = f"{block.header}_pmg{idx}"
+                idx += 1
+            dct[key] = block
 
         return cls(dct, string)
 
