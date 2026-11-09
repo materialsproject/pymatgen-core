@@ -266,8 +266,9 @@ class CifFile:
     def from_str(cls, string: str) -> Self:
         """Read CifFile from a string.
 
-        Blocks with duplicate headers receive unique dictionary keys while their
-        original headers are preserved.
+        Blocks whose headers collide with existing dictionary keys receive keys
+        of the form <header>_pmg<N>, with N starting at 0 and skipping existing
+        keys. Their original headers are preserved.
 
         Args:
             string: String representation.

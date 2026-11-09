@@ -199,6 +199,25 @@ class TestCifFile:
 
 
 class TestCifIO(MatSciTest):
+    def test_cif_parser_duplicate_headers(self):
+        lengths = [3, 4]
+        cif_str = "\n".join(str(CifWriter(Structure(Lattice.cubic(length), ["Si"], [[0, 0, 0]]))) for length in lengths)
+        parser = CifParser.from_str(cif_str)
+
+        structures = parser.parse_structures(primitive=False, on_error="raise")
+        assert len(structures) == 2
+        assert [struct.formula for struct in structures] == ["Si1", "Si1"]
+        assert [struct.lattice.a for struct in structures] == approx(lengths)
+
+        data = parser.as_dict()
+        assert list(data) == ["Si", "Si_pmg0"]
+        assert [float(block["_cell_length_a"]) for block in data.values()] == approx(lengths)
+
+        bibtex = parser.get_bibtex_string()
+        assert bibtex.count("@article{") == 2
+        assert "@article{cifref0," in bibtex
+        assert "@article{cifref1," in bibtex
+
     def test_cif_parser(self):
         parser = CifParser(f"{TEST_FILES_DIR}/cif/LiFePO4.cif")
         for struct in parser.parse_structures():
