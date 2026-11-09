@@ -635,6 +635,11 @@ class TestSquareTensor(MatSciTest):
         assert_allclose(self.rotation, new.refine_rotation())
         new[1] *= 1.05
         assert_allclose(self.rotation, new.refine_rotation())
+        # Test refinement when row 0 and row 1 are not strictly perpendicular
+        non_ortho = SquareTensor([[1.0, 0.0, 0.0], [0.1, 0.99, 0.0], [0.0, 0.0, 1.0]])
+        refined = non_ortho.refine_rotation()
+        assert refined.is_rotation()
+        assert_allclose(refined, np.eye(3))
 
     def test_get_scaled(self):
         assert self.non_symm.get_scaled(10) == approx(SquareTensor([[1, 2, 3], [4, 5, 6], [2, 5, 5]]))

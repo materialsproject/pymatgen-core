@@ -1051,7 +1051,7 @@ class SquareTensor(Tensor):
         """
         new_x, y = get_uvec(self[0]), get_uvec(self[1])
         # Get a projection on y
-        new_y = y - np.dot(new_x, y) * new_x
+        new_y = get_uvec(y - np.dot(new_x, y) * new_x)
         new_z = np.cross(new_x, new_y)
         return type(self)(np.array([new_x, new_y, new_z]))
 
