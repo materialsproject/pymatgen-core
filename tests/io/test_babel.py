@@ -87,33 +87,63 @@ class TestBabelMolAdaptor:
         adaptor.add_hydrogen()
         assert len(adaptor.pymatgen_mol) == 14
 
-    def test_rotor_search_wrs(self):
-        mol = copy.deepcopy(self.mol)
-        mol[1] = "H", [0, 0, 1.05]
-        adaptor = BabelMolAdaptor(mol)
-        rotor_args = (250, 50)
-        adaptor.rotor_conformer(*rotor_args, algo="WeightedRotorSearch")
-        opt_mol = adaptor.pymatgen_mol
-        for site in opt_mol[1:]:
-            assert site.distance(opt_mol[0]) == approx(1.09216, abs=1e-1)
+    @staticmethod
+    def _eclipsed_butane():
+        """3D n-butane with the C-C-C-C dihedral forced to 0 deg (eclipsed, high energy)."""
+        mol = pybel.readstring("smi", "CCCC")
+        mol.make3D()
+        ob_mol = mol.OBMol
+        ob_mol.SetTorsion(*(ob_mol.GetAtom(idx) for idx in (1, 2, 3, 4)), 0.0)
+        assert ob_mol.GetTorsion(1, 2, 3, 4) == approx(0, abs=1e-6)
+        return ob_mol
 
-    def test_rotor_search_srs(self):
-        mol = copy.deepcopy(self.mol)
-        mol[1] = "H", [0, 0, 1.05]
-        adaptor = BabelMolAdaptor(mol)
-        adaptor.rotor_conformer(200, algo="SystematicRotorSearch")
-        opt_mol = adaptor.pymatgen_mol
-        for site in opt_mol[1:]:
-            assert site.distance(opt_mol[0]) == approx(1.09216, abs=1e-1)
+    @pytest.mark.parametrize(
+        ("algo", "rotor_args"),
+        [
+            ("WeightedRotorSearch", (250, 50)),
+            ("SystematicRotorSearch", (200,)),
+            ("RandomRotorSearch", (250, 50)),
+        ],
+    )
+    def test_rotor_conformer(self, algo, rotor_args):
+        adaptor = BabelMolAdaptor(self._eclipsed_butane())
+        # Leave the process-global forcefield set up on an unrelated molecule. Without
+        # ff.Setup(self._ob_mol) in rotor_conformer, the search would run on this one.
+        pybel.readstring("smi", "CCO").make3D()
 
-    def test_rotor_search_rrs(self):
+        adaptor.rotor_conformer(*rotor_args, algo=algo)
+        ob_mol = adaptor.openbabel_mol
+        assert ob_mol.NumAtoms() == 14
+        # The search must relax the eclipsed rotor to the anti conformer.
+        assert abs(ob_mol.GetTorsion(1, 2, 3, 4)) == approx(180, abs=5)
+
+    def test_rotor_conformer_methane(self):
         mol = copy.deepcopy(self.mol)
         mol[1] = "H", [0, 0, 1.05]
         adaptor = BabelMolAdaptor(mol)
-        adaptor.rotor_conformer(250, 50, algo="RandomRotorSearch")
+        adaptor.rotor_conformer(250, 50, algo="WeightedRotorSearch")
         opt_mol = adaptor.pymatgen_mol
-        for site in opt_mol[1:]:
-            assert site.distance(opt_mol[0]) == approx(1.09216, abs=1e-1)
+        assert opt_mol.formula == "H4 C1"
+
+    def test_rotor_conformer_invalid_forcefield(self):
+        adaptor = BabelMolAdaptor(self._eclipsed_butane())
+        pybel.readstring("smi", "CCO").make3D()
+        with pytest.warns(UserWarning, match="not supported in openbabel"):
+            adaptor.rotor_conformer(50, 10, forcefield="not_a_forcefield")
+        assert abs(adaptor.openbabel_mol.GetTorsion(1, 2, 3, 4)) == approx(180, abs=5)
+
+    def test_confab_conformers_freeze_atoms(self):
+        adaptor = BabelMolAdaptor(self._eclipsed_butane())
+        conformers = adaptor.confab_conformers(freeze_atoms=[1, 2, 3, 4])
+        assert len(conformers) >= 1
+        assert all(len(conf) == 14 for conf in conformers)
+
+        # Constraints must not leak into later calls via the process-global forcefield.
+        mol = pybel.readstring("smi", "CCCC").OBMol
+        adaptor = BabelMolAdaptor(mol)
+        adaptor.make3d()
+        n_free = len(adaptor.confab_conformers())
+        assert n_free > 1
 
     @pytest.mark.xfail(platform.system() == "Windows", reason="Tests for openbabel failing on Win")
     def test_confab_conformers(self):
