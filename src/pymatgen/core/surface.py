@@ -808,6 +808,72 @@ def center_slab(slab: Structure) -> Structure:
     return slab
 
 
+def _constrained_lll_reduce(struct: Structure) -> Structure:
+    """Reduce a slab lattice while keeping a and b in the surface plane.
+
+    The unconstrained LLL basis is ordered by vector length, so for
+    high-index facets the stacking vector can land in the a or b slot and
+    the resulting Slab reports the wrong surface normal and area. Instead,
+    Lagrange-Gauss reduce the in-plane pair (a, b), keeping the sign of
+    a x b, then shorten c by the in-plane lattice vector nearest to its
+    in-plane projection. Subtracting in-plane vectors leaves the normal
+    component of c unchanged, so the slab keeps exposing the same plane.
+
+    Args:
+        struct (Structure): Slab structure with a and b in the surface
+            plane and c along the stacking direction.
+
+    Returns:
+        Structure: Same structure re-expressed on the reduced lattice,
+            with sites remapped and sorted as in Structure.copy(sanitize=True).
+    """
+    a, b, c = (vec.copy() for vec in struct.lattice.matrix)
+    # Lagrange-Gauss reduction of the in-plane pair (a, b). Shears
+    # (b -= mu * a) leave a x b fixed; only swaps flip its sign, so count
+    # them and restore the sign at the end to keep the normal direction.
+    n_swaps = 0
+    while True:
+        if b @ b < a @ a:
+            a, b = b.copy(), a.copy()
+            n_swaps += 1
+        mu = round(a @ b / (a @ a))
+        if mu == 0:
+            break
+        b -= mu * a
+    if n_swaps % 2 == 1:
+        b = -b
+    # Shorten c by the in-plane lattice vector nearest to its in-plane
+    # projection. The normal component of c is unchanged by this.
+    normal = np.cross(a, b)
+    normal /= np.linalg.norm(normal)
+    proj = c - float(c @ normal) * normal
+    gram = np.array([[a @ a, a @ b], [a @ b, b @ b]])
+    coeffs = np.linalg.solve(gram, [a @ proj, b @ proj])
+    m, n = (round(float(x)) for x in coeffs)
+    c -= m * a + n * b
+    reduced_lattice = Lattice(np.array([a, b, c]))
+    # Re-express the sites on the reduced lattice, mirroring
+    # Structure.copy(sanitize=True): map fractional coords into the unit
+    # cell and sort sites by electronegativity.
+    new_site_props = struct.site_properties
+    new_sites: list[PeriodicSite] = []
+    for idx, site in enumerate(struct):
+        frac_coords = reduced_lattice.get_fractional_coords(site.coords)
+        site_props = {prop: val[idx] for prop, val in new_site_props.items()}
+        new_sites.append(
+            PeriodicSite(
+                site.species,
+                frac_coords,
+                reduced_lattice,
+                to_unit_cell=True,
+                properties=site_props,
+                label=site.label,
+                skip_checks=True,
+            )
+        )
+    return type(struct).from_sites(sorted(new_sites), charge=struct.charge, properties=dict(struct.properties))
+
+
 def get_slab_regions(
     slab: Slab,
     blength: float = 3.5,
@@ -930,7 +996,9 @@ class SlabGenerator:
             min_slab_size (float): In Angstroms or number of hkl planes
             min_vacuum_size (float): In Angstroms or number of hkl planes
             lll_reduce (bool): Whether to perform an LLL reduction on the
-                final structure.
+                final structure. The reduction keeps the a and b lattice
+                vectors in the surface plane, so the slab still exposes
+                the same plane as without the reduction.
             center_slab (bool): Whether to center the slab in the cell with
                 equal vacuum spacing from the top and bottom.
             in_unit_planes (bool): Whether to set min_slab_size and min_vac_size
@@ -1163,11 +1231,23 @@ class SlabGenerator:
         scale_factor = self.slab_scale_factor
         if self.lll_reduce:
             # Sanitize Slab (LLL reduction + site sorting + map frac_coords)
+            orig_lattice = struct.lattice
             lll_slab = struct.copy(sanitize=True)
+            # The LLL basis is ordered by vector length, so for high-index
+            # facets the stacking vector can end up in the a or b slot and
+            # the Slab would report the wrong normal and surface area. Keep
+            # the LLL basis only if its a x b is still parallel to the slab
+            # normal; otherwise fall back to a reduction that keeps a and b
+            # in the surface plane.
+            lll_normal = np.cross(lll_slab.lattice.matrix[0], lll_slab.lattice.matrix[1])
+            slab_normal = np.cross(struct.lattice.matrix[0], struct.lattice.matrix[1])
+            cos_angle = abs(float(lll_normal @ slab_normal)) / (
+                float(np.linalg.norm(lll_normal)) * float(np.linalg.norm(slab_normal))
+            )
+            struct = lll_slab if np.isclose(cos_angle, 1.0) else _constrained_lll_reduce(struct)
 
             # Apply reduction on the scaling factor
-            mapping = lll_slab.lattice.find_mapping(struct.lattice)
-            struct = lll_slab
+            mapping = struct.lattice.find_mapping(orig_lattice)
             if mapping is None:
                 raise RuntimeError("LLL reduction has failed")
             scale_factor = np.dot(mapping[2], scale_factor)

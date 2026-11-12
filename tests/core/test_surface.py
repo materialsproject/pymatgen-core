@@ -843,6 +843,42 @@ class TestSlabGenerator(MatSciTest):
         with pytest.raises(RuntimeError, match="LLL reduction has failed"):
             slab_gen.get_slab()
 
+    def test_get_slab_lll_reduce_keeps_surface_plane(self):
+        # Regression test for https://github.com/materialsproject/pymatgen/issues/4720
+        # The unconstrained LLL basis is ordered by vector length, so for
+        # high-index facets the stacking vector can land in the a or b slot
+        # and the Slab reports the wrong surface normal and area.
+        cu = Structure.from_spacegroup("Fm-3m", Lattice.cubic(3.615), ["Cu"], [[0, 0, 0]])
+        miller_index = (5, 2, 1)
+        normal = np.array(miller_index) / np.linalg.norm(miller_index)
+        a_prim = 3.615**2 * np.sqrt(30) / 2  # area of primitive fcc (521) surface cell
+        slabs = {
+            lll: SlabGenerator(
+                cu, miller_index, 6, 6, lll_reduce=lll, primitive=False, reorient_lattice=False
+            ).get_slab()
+            for lll in (False, True)
+        }
+        # Both slabs expose the same (521) plane with the same area
+        for slab in slabs.values():
+            assert abs(slab.normal @ normal) == approx(1.0)
+            assert slab.surface_area / a_prim == approx(10.0)
+            # a and b lie in the surface plane
+            assert slab.normal @ slab.lattice.matrix[0] == approx(0.0, abs=1e-8)
+            assert slab.normal @ slab.lattice.matrix[1] == approx(0.0, abs=1e-8)
+        assert slabs[True].surface_area == approx(slabs[False].surface_area)
+        assert slabs[True].volume == approx(slabs[False].volume)
+        assert len(slabs[True]) == len(slabs[False]) == 200
+
+    def test_get_slab_lll_reduce_keeps_valid_basis(self):
+        # When the full LLL basis already has a x b parallel to the slab
+        # normal, lll_reduce=True keeps it unchanged (issue #4720).
+        slab = SlabGenerator(
+            self.MgO, (1, 1, 1), 10, 10, lll_reduce=True, primitive=False, reorient_lattice=False
+        ).get_slab()
+        assert slab.surface_area == approx(15.692553521654782)
+        assert slab.lattice.abc == approx((4.256783, 4.256783, 20.853892), abs=1e-5)
+        assert slab.lattice.angles == approx((90.0, 90.0, 60.0), abs=1e-5)
+
     def test_gen_possible_terminations_empty(self):
         slab_gen = SlabGenerator(self.MgO, (1, 0, 0), 10, 10)
         slab_gen.oriented_unit_cell = Structure(slab_gen.oriented_unit_cell.lattice, [], [])
