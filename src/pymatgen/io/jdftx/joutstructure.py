@@ -85,7 +85,6 @@ class JOutStructure(Structure):
 
     opt_type: str | None = None
     etype: str | None = None
-    backup_etype: str = "Etot"
     eopt_type: str | None = None
     ecomponents: dict | None = None
     elecmindata: JElSteps | None = None
@@ -400,13 +399,13 @@ class JOutStructure(Structure):
         line_collections = instance._gather_line_collections(line_collections, text_slice)
         if len(line_collections["posns"]["lines"]) == 0 and req_new_geom:
             raise ValueError("No posns lines found in slice, but req_new_geom is True")
-        # ecomponents needs to be parsed before emin and opt to set etype
+        # ecomponents needs to be parsed before emin and opt to set etype, and emin before opt, as it corrects etype
         instance._parse_ecomp_lines(line_collections["ecomp"]["lines"])
+        instance._parse_emin_lines(line_collections["emin"]["lines"], skim_levels=skim_levels)
         if instance.is_md:
             instance._parse_md_opt_lines(line_collections["opt"]["lines"])
         else:
             instance._parse_opt_lines(line_collections["opt"]["lines"])
-        instance._parse_emin_lines(line_collections["emin"]["lines"], skim_levels=skim_levels)
         if "struct" not in skip_props:
             # Lattice must be parsed before posns/forces in case of direct coordinates
             instance._parse_lattice_lines(line_collections["lattice"]["lines"])
@@ -589,18 +588,14 @@ class JOutStructure(Structure):
                 raise ValueError("eopt_type is not set")
             if self.etype is None:
                 raise ValueError("etype is not set")
-            emindata = None
             try:
-                emindata = JElSteps._from_text_slice(
+                self.elecmindata = JElSteps._from_text_slice(
                     emin_lines, opt_type=self.eopt_type, etype=self.etype, skim_levels=skim_levels
                 )
-            except RuntimeError:  # Wrong etype detected by assertion error
-                pass
-            if emindata is not None:
-                self.elecmindata = emindata
-            else:
+            except RuntimeError:  # The lines name another energy (e.g. an echo pymatgen couldn't read): use theirs
+                self.etype = self._get_etype_from_emin_lines(emin_lines)
                 self.elecmindata = JElSteps._from_text_slice(
-                    emin_lines, opt_type=self.eopt_type, etype=self.backup_etype, skim_levels=skim_levels
+                    emin_lines, opt_type=self.eopt_type, etype=str(self.etype), skim_levels=skim_levels
                 )
         else:
             if self.eopt_type is None:
@@ -953,8 +948,6 @@ class JOutStructure(Structure):
                         raise ValueError("Could not convert Iter to int")
                     self.nstep = int(_nstep)
                     en = get_colon_val(line, f"{self.etype}:")
-                    if en is None:
-                        en = get_colon_val(line, f"{self.backup_etype}:")
                     self.e = en * Ha_to_eV
                     self.grad_k = get_colon_val(line, "|grad|_K: ")
                     self.alpha = get_colon_val(line, "alpha: ")

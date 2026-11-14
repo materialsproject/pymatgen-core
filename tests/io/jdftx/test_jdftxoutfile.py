@@ -424,6 +424,8 @@ def test_unavailable_eigstats(tmp_path: Path, smearing: bool):
         # Without smearing the fillings don't depend on the band energies
         assert outfile.lumo_filling == 0
         assert outfile.is_metal is False
+        # The edited echo implies Etot, but the minimization lines (from a smearing run) print F, which wins
+        assert outfile.etype == "F"
 
 
 def _printed_final_ions(text: str) -> tuple[str, list[list[str]]] | None:

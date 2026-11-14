@@ -315,6 +315,7 @@ etot_etype_outfile_path = ex_out_files_dir / Path("etot_etype.out")
 etot_etype_outfile_known_simple = {
     "e": -17.265553748795949 * Ha_to_eV,
     "elec_grad_k": 2.991e-07,
+    "etype": "Etot",  # No smearing
 }
 
 # Minimal H2 runs (10 bohr isolated box, 10 Ha) made with each electronic optimizer: electronic-minimize and

@@ -910,9 +910,14 @@ class JDFTXOutfileSlice(_OutputMSONable):
         # In the case where no ion optimization updates are printed, JOutStructures
         if self.geom_opt_type is None:
             raise ValueError("geom_opt_type not set yet.")
-        expected_etype = "F"
-        if "target-mu" in self.infile:
-            expected_etype = "G"
+        # The energy JDFTx minimizes, as relevantFreeEnergyName (electronic/Energies.cpp) names it from the input:
+        # only elec-smearing makes the fillings vary, and target-mu requires it
+        if "fix-electron-density" in self.infile or "fix-electron-potential" in self.infile:
+            expected_etype = "Eband"
+        elif "elec-smearing" not in self.infile:
+            expected_etype = "Etot"
+        else:
+            expected_etype = "G" if "target-mu" in self.infile else "F"
         self.jstrucs = JOutStructures._from_out_slice(
             text,
             opt_type=self.geom_opt_label,
