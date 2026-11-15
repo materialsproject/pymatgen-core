@@ -140,6 +140,10 @@ class TestIon:
         assert ion.oxi_state_guesses()[0].get("S") == 6
         assert ion.oxi_state_guesses()[0].get("O") == -2
 
+    def test_oxi_state_guesses_neutral_element(self):
+        assert Ion.from_formula("Br").oxi_state_guesses() == ({"Br": 0.0},)
+        assert Ion.from_formula("Br(aq)").oxi_state_guesses() == ({"Br": 0.0},)
+
     def test_alphabetical_formula(self):
         correct_formulas = [
             "Li1 +1",

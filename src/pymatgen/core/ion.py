@@ -368,7 +368,9 @@ class Ion(Composition, MSONable, Stringify):
                 oxidation state across all sites in that composition. If the
                 composition is not charge balanced, an empty list is returned.
         """
-        return self._get_oxi_state_guesses(all_oxi_states, max_sites, oxi_states_override, self.charge)[0]  # type: ignore[return-value]
+        if len(self.elements) == 1 and self.charge == 0:
+            return ({self.elements[0].symbol: 0.0},)
+        return self._get_oxi_state_guesses(all_oxi_states, max_sites, oxi_states_override, self.charge)[0]
 
     def to_pretty_string(self) -> str:
         """Pretty string with proper superscripts."""
