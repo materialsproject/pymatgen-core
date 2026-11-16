@@ -436,7 +436,7 @@ class QCInput(InputFile):
         elif isinstance(molecule, Molecule):
             mol_list.append(f" {int(molecule.charge)} {molecule.spin_multiplicity}")
             mol_list.extend(
-                f" {site.species_string}     {site.x: .10f}     {site.y: .10f}     {site.z: .10f}" for site in molecule
+                f" {site.specie.symbol}     {site.x: .10f}     {site.y: .10f}     {site.z: .10f}" for site in molecule
             )
         else:
             overall_charge = sum(x.charge for x in molecule)
@@ -448,7 +448,7 @@ class QCInput(InputFile):
             for fragment in molecule:
                 mol_list.extend(("--", f" {int(fragment.charge)} {fragment.spin_multiplicity}"))
                 mol_list.extend(
-                    f" {site.species_string}     {site.x: .10f}     {site.y: .10f}     {site.z: .10f}"
+                    f" {site.specie.symbol}     {site.x: .10f}     {site.y: .10f}     {site.z: .10f}"
                     for site in fragment
                 )
 

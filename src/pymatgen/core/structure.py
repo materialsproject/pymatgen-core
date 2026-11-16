@@ -3658,7 +3658,7 @@ class IMolecule(SiteCollection[Site], MSONable):
         output = []
         output_var = []
         for idx, site in enumerate(self):
-            sp = site.specie
+            sp = site.specie.symbol
             if idx == 0:
                 output.append(f"{sp}")
             elif idx == 1:
@@ -3670,7 +3670,7 @@ class IMolecule(SiteCollection[Site], MSONable):
                 nn = find_nn_pos_before_site(idx)
                 bond_length = self.get_distance(idx, nn[0])
                 angle = self.get_angle(idx, nn[0], nn[1])
-                output.append(f"{site.specie} {nn[0] + 1} B{idx} {nn[1] + 1} A{idx}")
+                output.append(f"{sp} {nn[0] + 1} B{idx} {nn[1] + 1} A{idx}")
                 output_var.extend((f"B{idx}={bond_length:.6f}", f"A{idx}={angle:.6f}"))
             else:
                 nn = find_nn_pos_before_site(idx)

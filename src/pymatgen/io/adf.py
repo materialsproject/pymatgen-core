@@ -535,7 +535,8 @@ class AdfInput:
         mol_blocks = []
         atom_block = AdfKey("Atoms", options=["cartesian"])
         for site in molecule:
-            atom_block.add_subkey(AdfKey(str(site.specie), list(site.coords)))
+            # An ADF atom type is an element symbol; the charge goes in the Charge block
+            atom_block.add_subkey(AdfKey(site.specie.symbol, list(site.coords)))
         mol_blocks.append(atom_block)
 
         if molecule.charge != 0:

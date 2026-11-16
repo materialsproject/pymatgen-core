@@ -377,7 +377,7 @@ class GaussianInput:
 
     def get_cart_coords(self) -> str:
         """Return the Cartesian coordinates of the molecule."""
-        outs = [f"{site.species_string} {' '.join(f'{x:0.6f}' for x in site.coords)}" for site in self._mol]
+        outs = [f"{site.specie.symbol} {' '.join(f'{x:0.6f}' for x in site.coords)}" for site in self._mol]
         return "\n".join(outs)
 
     def __str__(self):
