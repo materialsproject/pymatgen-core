@@ -1739,13 +1739,15 @@ class CifWriter:
             ["_symmetry_equiv_pos_site_id", "_symmetry_equiv_pos_as_xyz"],
         ]
 
-        try:
-            symbol_to_oxi_num = {_clean_species(el): float(el.oxi_state or 0) for el in sorted(comp.elements)}
+        # Write oxidation states if any species has one. Plain elements in the same
+        # structure get 0, rather than dropping the oxidation states of all species.
+        if any(hasattr(el, "oxi_state") for el in comp.elements):
+            symbol_to_oxi_num = {
+                _clean_species(el): float(getattr(el, "oxi_state", None) or 0) for el in sorted(comp.elements)
+            }
             blocks["_atom_type_symbol"] = list(symbol_to_oxi_num.keys())
             blocks["_atom_type_oxidation_number"] = list(symbol_to_oxi_num.values())
             loops.append(["_atom_type_symbol", "_atom_type_oxidation_number"])
-        except (TypeError, AttributeError):
-            symbol_to_oxi_num = {el.symbol: 0 for el in sorted(comp.elements)}
 
         atom_site_type_symbol = []
         atom_site_symmetry_multiplicity = []
