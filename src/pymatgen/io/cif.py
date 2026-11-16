@@ -1741,7 +1741,7 @@ class CifWriter:
 
         # Write oxidation states if any species has one. Plain elements in the same
         # structure get 0, rather than dropping the oxidation states of all species.
-        if any(hasattr(el, "oxi_state") for el in comp.elements):
+        if any(isinstance(el, Species | DummySpecies) for el in comp.elements):
             symbol_to_oxi_num = {
                 _clean_species(el): float(getattr(el, "oxi_state", None) or 0) for el in sorted(comp.elements)
             }
