@@ -364,9 +364,13 @@ class Ion(Composition, MSONable, Stringify):
                 formula is greater than abs(max_sites).
 
         Returns:
-            A list of dicts - each dict reports an element symbol and average
-                oxidation state across all sites in that composition. If the
-                composition is not charge balanced, an empty list is returned.
+            A tuple of dicts - each dict reports an element symbol and average
+            oxidation state across all sites in that composition. If the
+            composition is not charge balanced, an empty tuple is returned.
+
+        Note:
+            For neutral single-element compositions, the oxidation state is
+            assumed to be zero, and oxi_states_override is not applied.
         """
         return super().oxi_state_guesses(
             oxi_states_override=oxi_states_override,
