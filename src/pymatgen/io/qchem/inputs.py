@@ -433,6 +433,8 @@ class QCInput(InputFile):
                 mol_list.append(" read")
             else:
                 raise ValueError('The only acceptable text value for molecule is "read"')
+        elif not all(mol.is_ordered for mol in (molecule if isinstance(molecule, list) else [molecule])):
+            raise ValueError("Q-Chem input can only be written from ordered molecules")
         elif isinstance(molecule, Molecule):
             mol_list.append(f" {int(molecule.charge)} {molecule.spin_multiplicity}")
             mol_list.extend(

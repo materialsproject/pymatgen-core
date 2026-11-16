@@ -430,6 +430,8 @@ class GaussianInput:
         output.append(f"{charge_str}{multip_str}")
 
         if isinstance(self._mol, Molecule):
+            if not self._mol.is_ordered:
+                raise ValueError("Gaussian input can only be written from an ordered molecule")
             if cart_coords is True:
                 output.append(self.get_cart_coords())
             else:

@@ -1,8 +1,8 @@
 """Writing a structure or molecule and reading it back must not silently lose sites or species.
 
-A writer may refuse what its format can't represent with ValueError or NotImplementedError, and a
-reader with NotImplementedError. Otherwise the elements and occupancies must come back, and so must
-the oxidation states in formats that store them.
+Inputs a format can't represent (listed in REFUSED) must raise ValueError or NotImplementedError.
+All others must come back with the same elements and occupancies, and with the same oxidation
+states in formats that store them.
 """
 
 from __future__ import annotations
@@ -42,14 +42,23 @@ MOLECULES = {
     ),
     "mixed": Molecule([Species("Fe", 2), Element("Fe"), Element("O")], [[0, 0, 0], [1.9, 0, 0], [0, 1.9, 0]]),
     "dummy": Molecule([DummySpecies("X"), Element("O"), Element("H")], [[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+    "disordered": Molecule([{"Fe": 0.5, "Ni": 0.5}, Element("O")], [[0, 0, 0], [1.9, 0, 0]]),
 }
 
 STRUCTURE_FORMATS = ["cif", "mcif", "poscar", "cssr", "xsf", "mcsqs", "res", "pwmat", "json", "yaml"]
-MOLECULE_FORMATS = ["xyz", "gjf", "json", "yaml", "mol", "sdf", "pdb", "cml"]
+MOLECULE_FORMATS = ["xyz", "gjf", "qchem", "json", "yaml", "mol", "sdf", "pdb", "cml"]
 OPENBABEL_FORMATS = {"mol", "sdf", "pdb", "cml"}
 # Formats that store oxidation states
 STRUCTURE_FORMATS_WITH_OXI = {"cif", "mcif", "cssr", "mcsqs", "json", "yaml"}
 MOLECULE_FORMATS_WITH_OXI = {"json", "yaml"}
+# Inputs a format can't represent, which must raise ValueError or NotImplementedError
+# (when writing, or for mcif when reading)
+REFUSED = {
+    *((fmt, "disordered") for fmt in ("mcif", "poscar", "cssr", "xsf", "res", "pwmat")),
+    ("pwmat", "dummy"),
+    *((fmt, "disordered") for fmt in ("xyz", "gjf", "qchem", *OPENBABEL_FORMATS)),
+    *((fmt, "dummy") for fmt in OPENBABEL_FORMATS),
+}
 
 
 def _elements(site):
@@ -61,18 +70,21 @@ def _oxi_states(site):
     return sorted((sp.symbol, getattr(sp, "oxi_state", None) or 0) for sp in site.species)
 
 
+def _write_and_read(obj, fmt):
+    if fmt == "qchem":  # not a registered format
+        return QCInput.from_str(str(QCInput(obj, rem={"job_type": "sp", "method": "hf", "basis": "sto-3g"}))).molecule
+    return type(obj).from_str(obj.to(fmt=fmt), fmt=fmt)
+
+
 @pytest.mark.parametrize("case", STRUCTURES)
 @pytest.mark.parametrize("fmt", STRUCTURE_FORMATS)
 def test_structure_round_trip(fmt, case):
     struct = STRUCTURES[case]
-    try:
-        text = struct.to(fmt=fmt)
-    except (ValueError, NotImplementedError):
+    if (fmt, case) in REFUSED:
+        with pytest.raises((ValueError, NotImplementedError)):
+            _write_and_read(struct, fmt)
         return
-    try:
-        read = Structure.from_str(text, fmt=fmt)
-    except NotImplementedError:
-        return
+    read = _write_and_read(struct, fmt)
     assert sorted(map(_elements, read)) == sorted(map(_elements, struct))
     if fmt in STRUCTURE_FORMATS_WITH_OXI:
         assert sorted(map(_oxi_states, read)) == sorted(map(_oxi_states, struct))
@@ -84,25 +96,14 @@ def test_molecule_round_trip(fmt, case):
     if fmt in OPENBABEL_FORMATS:
         pytest.importorskip("openbabel")
     mol = MOLECULES[case]
-    try:
-        text = mol.to(fmt=fmt)
-    except (ValueError, NotImplementedError):
+    if (fmt, case) in REFUSED:
+        with pytest.raises((ValueError, NotImplementedError)):
+            _write_and_read(mol, fmt)
         return
-    read = Molecule.from_str(text, fmt=fmt)
-    assert [site.specie.symbol for site in read] == [site.specie.symbol for site in mol]
+    read = _write_and_read(mol, fmt)
+    assert list(map(_elements, read)) == list(map(_elements, mol))
     if fmt in MOLECULE_FORMATS_WITH_OXI:
         assert list(map(_oxi_states, read)) == list(map(_oxi_states, mol))
-
-
-@pytest.mark.parametrize("case", MOLECULES)
-def test_qchem_round_trip(case):
-    mol = MOLECULES[case]
-    try:
-        text = str(QCInput(mol, rem={"job_type": "sp", "method": "hf", "basis": "sto-3g"}))
-    except (ValueError, NotImplementedError):
-        return
-    read = QCInput.from_str(text).molecule
-    assert [site.specie.symbol for site in read] == [site.specie.symbol for site in mol]
 
 
 @pytest.mark.parametrize("case", ["charged", "mixed"])
