@@ -1033,7 +1033,6 @@ class CifParser:
             return num_h.get(symbol[:3], 0)
 
         def get_matching_coord(
-            coord_to_species: dict[tuple[float, float, float], Composition],
             coord: tuple[float, float, float],
         ) -> tuple[float, float, float] | Literal[False]:
             """Find an existing site that is symmetry-equivalent to coord.
@@ -1041,14 +1040,14 @@ class CifParser:
             Returns the first match for the first symmetry operation (in order) that maps
             coord onto any existing site, or False if there is none.
             """
-            if not coord_to_species:
+            n_sites = len(coord_keys)
+            if not n_sites:
                 return False
-            coords: list[tuple[float, float, float]] = list(coord_to_species)
-            matches = _pbc_match_matrix(_apply_affine(affine, coord), np.array(coords), self._site_tolerance)
+            matches = _pbc_match_matrix(_apply_affine(affine, coord), coord_array[:n_sites], self._site_tolerance)
             op_has_match = matches.any(axis=1)
             if not op_has_match.any():
                 return False
-            return coords[int(np.argmax(matches[np.argmax(op_has_match)]))]
+            return coord_keys[int(np.argmax(matches[np.argmax(op_has_match)]))]
 
         lattice = self.get_lattice(data)
 
@@ -1079,6 +1078,11 @@ class CifParser:
         coord_to_species: dict[tuple[float, float, float], Composition] = {}
         coord_to_magmoms: dict[tuple[float, float, float], NDArray] = {}
         labels: dict[tuple[float, float, float], str] = {}
+        # coord_keys mirrors the insertion order of coord_to_species, and row i of coord_array
+        # holds coord_keys[i]. Matching against this preallocated array avoids rebuilding a
+        # numpy array from the whole dict for every site, which is quadratic in the site count.
+        coord_keys: list[tuple[float, float, float]] = []
+        coord_array = np.empty((len(data["_atom_site_label"]), 3))
 
         for idx, label in enumerate(data["_atom_site_label"]):
             # If site type symbol exists, use it. Otherwise use the label
@@ -1133,8 +1137,10 @@ class CifParser:
                 comp = Composition(comp_dict)
 
                 # Find matching site by coordinate
-                match: tuple[float, float, float] | Literal[False] = get_matching_coord(coord_to_species, coord)
+                match: tuple[float, float, float] | Literal[False] = get_matching_coord(coord)
                 if match is False:
+                    coord_array[len(coord_keys)] = coord
+                    coord_keys.append(coord)
                     coord_to_species[coord] = comp
                     coord_to_magmoms[coord] = magmoms.get(label, np.array([0, 0, 0]))
                     labels[coord] = label
