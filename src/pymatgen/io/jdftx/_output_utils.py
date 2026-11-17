@@ -249,8 +249,6 @@ def is_lowdin_start_line(line_text: str) -> bool:
     return "#--- Lowdin population analysis ---" in line_text
 
 
-# TODO: Figure out if this ever actually gets called, (I think I added it to make JOutStructure user friendly
-# but JOutStructure is not intended to be a user-initialized class)
 def correct_geom_opt_type(opt_type: str | None) -> str:
     """Return recognizable opt_type string.
 

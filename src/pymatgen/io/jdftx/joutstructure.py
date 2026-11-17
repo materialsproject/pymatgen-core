@@ -553,8 +553,7 @@ class JOutStructure(Structure):
                 if "Etot:" in line:
                     etype = "Etot"
                     break
-        # Used as last-case scenario as the ordering of <etype> after <Iter> needs
-        # to be checked by reading through the source code (TODO)
+        # Last resort: JDFTx prints the energy label right after the step number (core/Minimize.h, core/Pulay.h)
         if etype is None:
             for line in emin_lines:
                 if step_key in line:
@@ -643,9 +642,7 @@ class JOutStructure(Structure):
             stress_lines (list[str]): A list of lines of text from a JDFTx out file containing the
             stress tensor.
         """
-        # TODO: Lattice optimizations dump stress in cartesian coordinates in units
-        # "[Eh/a0^3]" (Hartree per bohr cubed). Check if this changes for direct
-        # coordinates.
+        # JDFTx always prints the stress in Cartesian coordinates, in Eh/a0^3
         st = None
         if len(stress_lines) == 4:
             st = _brkt_list_of_3x3_to_nparray(stress_lines, i_start=1)
@@ -663,9 +660,7 @@ class JOutStructure(Structure):
             stress_lines (list[str]): A list of lines of text from a JDFTx out file containing the
             stress tensor.
         """
-        # TODO: Lattice optimizations dump stress in cartesian coordinates in units
-        # "[Eh/a0^3]" (Hartree per bohr cubed). Check if this changes for direct
-        # coordinates.
+        # JDFTx always prints the stress in Cartesian coordinates, in Eh/a0^3
         st = None
         if len(stress_lines) == 4:
             st = _brkt_list_of_3x3_to_nparray(stress_lines, i_start=1)

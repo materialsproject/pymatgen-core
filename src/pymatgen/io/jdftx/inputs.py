@@ -119,9 +119,6 @@ def get_species_names(structure: Structure) -> list[str]:
 
 
 # TODO: Add check for whether all ions have or lack velocities.
-# TODO: Add default value filling like JDFTx does.
-# TODO: Add more robust checking for if two repeatable tag values represent the
-# same information. This is likely fixed by implementing filling of default values.
 # TODO: Incorporate something to collapse repeated dump tags of the same frequency
 # into a single value.
 # TODO: Add a method to strip all tags that contain their default values for simpler
@@ -545,9 +542,6 @@ class JDFTXInfile(dict, MSONable):
                 text.append("")
         return text
 
-    # TODO: JDFTXInfile can accept nan for values, as this is occasionally what is stored
-    # for unused variables, but JDFTx has no way read nan for an input value. All subtags
-    # with nan values should be removed before writing to file.
     # TODO: Detect for and warn for tags that can be used together but likely shouldn't be,
     # ie (ion-width being 0 while fluid is not None)
     def write_file(self, filename: PathLike, strip_nan: bool = False) -> None:

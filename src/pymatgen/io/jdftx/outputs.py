@@ -777,7 +777,6 @@ class JDFTXOutfile(_OutputMSONable):
             slices = [s for s in slices if s is not None]
         return cls(slices=slices, skim_levels=skim_levels)
 
-    # TODO: Write testing for this function
     def to_jdftxinfile(self) -> JDFTXInfile:
         """
         Convert the JDFTXOutfile object to a JDFTXInfile object with the most recent structure.

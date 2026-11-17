@@ -1344,10 +1344,6 @@ class TagContainer(AbstractTag):
         return False
 
 
-# TODO: Write StructureDefferedTagContainer back in (commented out code block removed
-# on 11/4/24)
-
-
 @dataclass
 class MultiformatTag(AbstractTag):
     """Class for tags with multiple format options.
