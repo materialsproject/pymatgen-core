@@ -702,9 +702,8 @@ class AdfOutput:
                             self.structures.append(mol)
                             parse_cycle = False
                             sites = []
-                    elif parse_final:
-                        if match := final_energy_patt.search(line):
-                            self.final_energy = float(match[1])
+                    elif parse_final and (match := final_energy_patt.search(line)):
+                        self.final_energy = float(match[1])
 
                 elif self.run_type == "NumericalFreq":
                     break

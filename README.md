@@ -11,7 +11,7 @@ height="70">
 [![CI Status](https://github.com/materialsproject/pymatgen-core/actions/workflows/test.yml/badge.svg)](https://github.com/materialsproject/pymatgen-core/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/materialsproject/pymatgen-core/graph/badge.svg?token=x90ckyuciB)](https://codecov.io/gh/materialsproject/pymatgen-core)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/pymatgen-core?logo=pypi&logoColor=white&color=blue&label=PyPI)](https://pypi.org/project/pymatgen-core)
-[![Requires Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg?logo=python&logoColor=white)](https://python.org/downloads)
+[![Requires Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg?logo=python&logoColor=white)](https://python.org/downloads)
 [![Paper](https://img.shields.io/badge/J.ComMatSci-2012.10.028-blue?logo=elsevier&logoColor=white)](https://doi.org/10.1016/j.commatsci.2012.10.028)
 
 </h4>

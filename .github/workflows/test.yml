@@ -53,7 +53,7 @@ jobs:
             resolution: lowest-direct
             extras: optional
           - os: ubuntu-latest
-            python: "3.11"  # Test highest supported Python version
+            python: "3.12"  # Test lowest supported Python version
             resolution: lowest-direct
           - os: ubuntu-latest
             python: "3.14"  # Test highest supported Python version
@@ -163,7 +163,7 @@ jobs:
           pytest $COV_ARGS tests --color=yes
       - name: Codecov
         # Upload from the ubuntu shard that installs `extras: optional` so
-        # codecov reflects the full test surface. The python 3.11 shard runs
+        # codecov reflects the full test surface. The python 3.12 shard runs
         # without extras and was previously uploading misleadingly low numbers
         # for any file gated on ase/seekpath/phonopy/etc.
         # Uses GitHub OIDC (no shared secret); requires "Tokenless Upload"

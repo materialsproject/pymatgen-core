@@ -157,6 +157,41 @@ class BabelMolAdaptor:
             ):
                 self._ob_mol.DeleteBond(obbond)
 
+    def _setup_forcefield(self, forcefield: str, constraints: openbabel.OBFFConstraints | None = None):
+        """Get an openbabel forcefield and set it up for this molecule.
+
+        openbabel.OBForceField.FindType returns a process-global forcefield instance. Unless Setup is
+        called on the current molecule, subsequent conformer searches operate on whichever molecule was
+        last set up in the process (possibly one that has since been freed). Constraints are likewise retained
+        by the instance, so they are always reset here.
+
+        Args:
+            forcefield: Name of the forcefield. Falls back to 'mmff94' if not found.
+            constraints: Optional openbabel.OBFFConstraints to apply. None means no constraints.
+
+        Raises:
+            ValueError: If the forcefield cannot be set up for the molecule (e.g., missing atom types).
+
+        Returns:
+            openbabel.OBForceField: The forcefield, set up for self._ob_mol.
+        """
+        ff = openbabel.OBForceField.FindType(forcefield)
+        if ff is None or ff == 0:
+            warnings.warn(
+                f"This input {forcefield=} is not supported in openbabel. "
+                "The forcefield will be reset as default 'mmff94' for now.",
+                stacklevel=3,
+            )
+            forcefield = "mmff94"
+            ff = openbabel.OBForceField.FindType(forcefield)
+
+        # Always pass constraints explicitly: the forcefield instance retains constraints from previous calls.
+        if constraints is None:
+            constraints = openbabel.OBFFConstraints()
+        if not ff.Setup(self._ob_mol, constraints):
+            raise ValueError(f"Could not set up {forcefield=} for {self._ob_mol.GetFormula()}.")
+        return ff
+
     def rotor_conformer(self, *rotor_args, algo: str = "WeightedRotorSearch", forcefield: str = "mmff94") -> None:
         """
         Conformer search based on several Rotor Search algorithms of openbabel.
@@ -183,15 +218,7 @@ class BabelMolAdaptor:
         else:
             self.add_hydrogen()
 
-        ff = openbabel.OBForceField.FindType(forcefield)
-        if ff == 0:
-            warnings.warn(
-                f"This input {forcefield=} is not supported "
-                "in openbabel. The forcefield will be reset as "
-                "default 'mmff94' for now.",
-                stacklevel=2,
-            )
-            ff = openbabel.OBForceField.FindType("mmff94")
+        ff = self._setup_forcefield(forcefield)
 
         try:
             rotor_search = getattr(ff, algo)
@@ -267,22 +294,16 @@ class BabelMolAdaptor:
         else:
             self.add_hydrogen()
 
-        ff = openbabel.OBForceField.FindType(forcefield)
-        if ff == 0:
-            logger.warning(
-                f"Could not find {forcefield=} in openbabel, the forcefield will be reset as default 'mmff94'"
-            )
-            ff = openbabel.OBForceField.FindType("mmff94")
-
+        constraints = None
         if freeze_atoms:
-            logger.info(f"{len(freeze_atoms)} atoms will be freezed")
+            logger.info(f"{len(freeze_atoms)} atoms will be frozen")
             constraints = openbabel.OBFFConstraints()
-
             for atom in openbabel.OBMolAtomIter(self._ob_mol):
                 atom_id = atom.GetIndex() + 1
-                if id in freeze_atoms:
+                if atom_id in freeze_atoms:
                     constraints.AddAtomConstraint(atom_id)
-            ff.SetConstraints(constraints)
+
+        ff = self._setup_forcefield(forcefield, constraints)
 
         # Confab conformer generation
         ff.DiverseConfGen(rmsd_cutoff, conf_cutoff, energy_cutoff, verbose)
