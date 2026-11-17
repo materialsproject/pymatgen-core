@@ -443,7 +443,8 @@ class StrTag(AbstractTag):
     # For a keyword subtag of a TagContainer that JDFTx echoes with an empty value when unset (e.g. "cavityFile " in
     # pcm-params): the keyword followed by another keyword of the TagContainer, or by nothing, is read as unset
     empty_means_unset: bool = False
-    # For a species name (the species-id of ion), which must be one element_from_species_name can get the element of
+    # Mark this True if it represents a species name to trigger some functionality to allow specie names that aren't
+    # the exact elements (ie Fe1 instead of Fe) without breaking anything.
     species_name: bool = False
 
     def validate_value_type(

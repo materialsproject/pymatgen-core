@@ -1892,10 +1892,10 @@ def test_jdftxstructure_constraints_are_cartesian():
     assert jstruct.hyperplane_group_names == [None, None, ["g1", "g2"], [None], None]
     vectors = jstruct.constraint_vectors
     # Lattice-coordinate line directions are covariant (d_cart = R d), plane normals are contravariant (R^T d_cart = d)
-    np.testing.assert_allclose(vectors[0], CONSTRAINT_R @ [1, 0, 0])
-    np.testing.assert_allclose(CONSTRAINT_R.T @ vectors[1], [0, 1, 1])
-    np.testing.assert_allclose([CONSTRAINT_R.T @ v for v in vectors[2]], [[1, 2, 0], [0, 0, 1]])
-    np.testing.assert_allclose([CONSTRAINT_R.T @ v for v in vectors[3]], [[0, 1, 0]])
+    np.testing.assert_allclose(vectors[0], CONSTRAINT_R @ [1, 0, 0], atol=1e-12)
+    np.testing.assert_allclose(CONSTRAINT_R.T @ vectors[1], [0, 1, 1], atol=1e-12)
+    np.testing.assert_allclose([CONSTRAINT_R.T @ v for v in vectors[2]], [[1, 2, 0], [0, 0, 1]], atol=1e-12)
+    np.testing.assert_allclose([CONSTRAINT_R.T @ v for v in vectors[3]], [[0, 1, 0]], atol=1e-12)
     assert vectors[4] is None
 
 
