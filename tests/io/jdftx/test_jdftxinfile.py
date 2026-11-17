@@ -19,9 +19,6 @@ from pymatgen.io.jdftx.inputs import (
     _remove_at_path,
     clean_infile_of_nans,
     get_nanmaps,
-    get_popmaps,
-    hasnan,
-    movescale_array_to_selective_dynamics_site_prop,
     selective_dynamics_site_prop_to_jdftx_interpretable,
 )
 from pymatgen.io.jdftx.jdftxinfile_default_inputs import antoinePvap, default_inputs
@@ -1742,18 +1739,40 @@ def test_get_nanmaps():
     assert get_nanmaps(jif) == [["fluid-solvent", 0, "epsBulk"]]
 
 
-def test_deprecated_helpers():
-    # The removed public helpers still work, matching their original behavior, but warn
-    jif = JDFTXInfile.from_str("fluid-solvent H2O 55.338 ScalarEOS epsBulk nan\n", dont_require_structure=True)
-    with pytest.warns(FutureWarning, match="hasnan is deprecated"):
-        assert hasnan({"a": [1.0, [np.nan]]})
-    with pytest.warns(FutureWarning, match="hasnan is deprecated"):
-        assert not hasnan({"a": [1.0, "nan", None, True]})
-    with pytest.warns(FutureWarning, match="get_popmaps is deprecated"):
-        assert get_popmaps(jif) == [["fluid-solvent", 0, "epsBulk"]]
-    with pytest.warns(FutureWarning, match="movescale_array_to_selective_dynamics_site_prop is deprecated"):
-        sd = movescale_array_to_selective_dynamics_site_prop(np.array([0, 1, 0.5]))
-    assert sd == [[False] * 3, [True] * 3, [True] * 3]
+def test_jdftxstructure_sort_structure():
+    """Sites are sorted into JDFTx's order: grouped by species name (ignoring case) in the order the species first
+    appear. Each site's moveScale, velocity and constraint move with it, however they were given.
+    """
+    infile = JDFTXInfile.from_str(
+        "lattice \\\n 10 0 0 \\\n 0 10 0 \\\n 0 0 10\n"
+        "ion O 0.5 0.5 0.5 v 0.1 0.0 0.0 0\n"
+        "ion Fe2 0.1 0.0 0.0 v 0.0 0.2 0.0 1 Linear 0 0 1\n"
+        "ion Fe1 0.3 0.0 0.0 v 0.0 0.0 0.3 1\n"
+        "ion o 0.2 0.2 0.2 v 0.4 0.0 0.0 1\n"
+        "ion Fe2 0.7 0.0 0.0 v 0.0 0.5 0.0 0\n"
+    )
+    unsorted = JDFTXInfile.to_jdftxstructure(infile)
+    ions = JDFTXInfile.from_str(unsorted.get_str())["ion"]
+    expected = [ions[i] for i in (0, 3, 1, 4, 2)]
+    assert [ion["species-id"] for ion in expected] == ["O", "o", "Fe2", "Fe2", "Fe1"]
+    # From an input file (data given both as arguments and as site properties), from arguments only, and from site
+    # properties only
+    species_names = {"jdftx_species": unsorted.structure.site_properties["jdftx_species"]}
+    for jstruct in (
+        JDFTXInfile.to_jdftxstructure(infile, sort_structure=True),
+        JDFTXStructure(
+            unsorted.structure.copy(site_properties=species_names),
+            selective_dynamics=unsorted.selective_dynamics,
+            velocities=unsorted.velocities,
+            constraint_types=unsorted.constraint_types,
+            constraint_vectors=unsorted.constraint_vectors,
+            sort_structure=True,
+        ),
+        JDFTXStructure(unsorted.structure, sort_structure=True),
+    ):
+        assert_same_value(JDFTXInfile.from_str(jstruct.get_str())["ion"], expected)
+    sorted_structure = JDFTXInfile.to_pmg_structure(infile, sort_structure=True)
+    assert sorted_structure.site_properties["jdftx_species"] == ["O", "o", "Fe2", "Fe2", "Fe1"]
 
 
 def test_jdftxstructure_label_fallbacks():

@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-from monty.dev import deprecated
 from monty.json import MSONable
 
 from pymatgen.core import Lattice, Structure
@@ -575,8 +574,9 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             jdftxinfile (JDFTXInfile): JDFTXInfile object to convert.
-            sort_structure (bool, optional): Whether to sort the structure. Useful if species are not grouped properly
-                together. Defaults to False.
+            sort_structure (bool, optional): Whether to sort the sites into the order JDFTx prints them in (see
+                JDFTXStructure.sort_structure, also for when that order can differ from JDFTx's). Useful if species
+                are not grouped properly together. Defaults to False.
         """
         # use dict representation so it's easy to get the right column for moveScale,
         # rather than checking for velocities
@@ -595,8 +595,9 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             jdftxinfile (JDFTXInfile): JDFTXInfile object to convert.
-            sort_structure (bool, optional): Whether to sort the structure. Useful if species are not grouped properly
-                together. Defaults to False.
+            sort_structure (bool, optional): Whether to sort the sites into the order JDFTx prints them in (see
+                JDFTXStructure.sort_structure, also for when that order can differ from JDFTx's). Useful if species
+                are not grouped properly together. Defaults to False.
 
         Returns:
             Structure: The created pymatgen Structure object.
@@ -1224,24 +1225,6 @@ def get_nanmaps(val: Any) -> list[list[str | int]]:
     return [[key, *nanmap] for key, v in items for nanmap in get_nanmaps(v)]
 
 
-@deprecated(get_nanmaps, "Use bool(get_nanmaps(val)) to check for nans.", deadline=(2027, 10, 20))
-def hasnan(val: Any) -> bool:
-    """Deprecated. Check if a value is or contains a nan."""
-    return bool(get_nanmaps(val))
-
-
-@deprecated(get_nanmaps, "get_nanmaps gives the same paths when called on a JDFTXInfile.", deadline=(2027, 10, 20))
-def get_popmaps(infile: JDFTXInfile) -> list[list[str | int]]:
-    """Deprecated. Get the path to each nan in a JDFTXInfile."""
-    return get_nanmaps(infile)
-
-
-@deprecated(message="Use [[bool(s)] * 3 for s in movescale] instead.", deadline=(2027, 10, 20))
-def movescale_array_to_selective_dynamics_site_prop(movescale: Sequence[float] | np.ndarray) -> list[list[bool]]:
-    """Deprecated. Convert a JDFTx moveScale array to the selective dynamics site property format."""
-    return [[bool(s)] * 3 for s in movescale]
-
-
 def apply_popmaps(edit_infile: JDFTXInfile, popmaps: list[list[str | int]]) -> None:
     """Remove the value at the end of each path from a JDFTXInfile, in place.
 
@@ -1338,8 +1321,11 @@ class JDFTXStructure(MSONable):
     Attributes:
         structure (Structure): Associated Structure.
         selective_dynamics (ArrayLike): Selective dynamics attribute for each site if available. Shape Nx1.
-        sort_structure (bool): Whether to sort the structure. Useful if species are not grouped properly together.
-            Defaults to False.
+        sort_structure (bool): Whether to sort the sites into the order JDFTx prints them in (grouped by species, in
+            the order the species first appear), along with the per-site data below. Useful if species are not
+            grouped properly together. Defaults to False. The order may not match JDFTx's if the input file names
+            pseudopotential files with ion-species commands (instead of a $ID wildcard): JDFTx then orders the
+            species as those commands do, wherever they are in the file, which is not known here.
         write_cart_coords (bool): Whether to write cartesian coordinates. Defaults to False.
         velocities (list[np.ndarray | list[float] | None]): Velocities for each site if available, in Cartesian
             angstrom/fs. Kept separate from structure.site_properties["velocities"] to allow inhomogeneous shaping.
@@ -1373,11 +1359,6 @@ class JDFTXStructure(MSONable):
         # This does not check for ordering of species.
         if not self.structure.is_ordered:
             raise ValueError("Disordered structure with partial occupancies cannot be converted into JDFTXStructure!")
-        if self.selective_dynamics is not None:
-            # Convert provided selective dynamics into JDFTX interpretable format
-            self.selective_dynamics = selective_dynamics_site_prop_to_jdftx_interpretable(self.selective_dynamics)
-        # For the optional properties, if they are all None, set to None to avoid writing them out, but check for
-        # data in structure.site_properties to populate them if available.
         optional_properties = [
             "selective_dynamics",
             "velocities",
@@ -1385,6 +1366,24 @@ class JDFTXStructure(MSONable):
             "constraint_vectors",
             "hyperplane_group_names",
         ]
+        if self.sort_structure:
+            # JDFTx's order: it adds a species at its first ion line and prints the ions species by species, so sites
+            # are grouped by species name (which JDFTx reads ignoring case) in the order the species first appear,
+            # keeping the order within each species. The per-site data given for the sites is sorted the same way.
+            structure = cast("Structure", self.structure)
+            names = [name.lower() for name in get_species_names(structure)]
+            order = sorted(range(len(names)), key=lambda i: names.index(names[i]))
+            self.structure = type(structure).from_sites(
+                [structure[i] for i in order], charge=structure._charge, properties=structure.properties
+            )
+            for x in optional_properties:
+                if getattr(self, x) is not None:
+                    setattr(self, x, [getattr(self, x)[i] for i in order])
+        if self.selective_dynamics is not None:
+            # Convert provided selective dynamics into JDFTX interpretable format
+            self.selective_dynamics = selective_dynamics_site_prop_to_jdftx_interpretable(self.selective_dynamics)
+        # For the optional properties, if they are all None, set to None to avoid writing them out, but check for
+        # data in structure.site_properties to populate them if available.
         for x in optional_properties:
             if _allnone(getattr(self, x)):
                 setattr(self, x, None)
@@ -1457,8 +1456,9 @@ class JDFTXStructure(MSONable):
 
         Args:
             jdftxinfile (JDFTXInfile): JDFTXInfile object.
-            sort_structure (bool, optional): Whether to sort the structure. Useful if species are not grouped properly
-                together as JDFTx output will have species sorted.
+            sort_structure (bool, optional): Whether to sort the sites into the order JDFTx prints them in (see
+                JDFTXStructure.sort_structure, also for when that order can differ from JDFTx's). Useful if species
+                are not grouped properly together.
             fill_site_properties (bool, optional): Whether to fill in site properties for
                 `JDFTXStructure.structure: Structure` from the JDFTXInfile tags. Species names that aren't their
                 element symbol (e.g. Fe1) are always kept, as the jdftx_species site property.
@@ -1466,10 +1466,6 @@ class JDFTXStructure(MSONable):
         Returns:
             JDFTXStructure: The created JDFTXStructure object.
         """
-        if sort_structure:
-            raise UserWarning(
-                "Structure sorting requested but is not currently implemented! Site ordering will not be changed."
-            )
         lattice = _infile_to_pmg_lattice(jdftxinfile)
         elements, species_names = get_species_elements([x["species-id"] for x in jdftxinfile["ion"]])
         coords = np.array([[x["x0"], x["x1"], x["x2"]] for x in jdftxinfile["ion"]])
