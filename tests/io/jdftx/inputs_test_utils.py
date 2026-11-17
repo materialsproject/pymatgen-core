@@ -14,8 +14,7 @@ from pymatgen.util.testing import TEST_FILES_DIR
 from .shared_test_utils import assert_same_value
 
 
-# TODO: This function named should be called "assert_identical_jif" but I can't change it now without breaking things
-def assert_idential_jif(jif1: JDFTXInfile | dict, jif2: JDFTXInfile | dict):
+def assert_identical_jif(jif1: JDFTXInfile | dict, jif2: JDFTXInfile | dict):
     djif1 = jif1.as_dict() if isinstance(jif1, JDFTXInfile) else jif1
     djif2 = jif2.as_dict() if isinstance(jif2, JDFTXInfile) else jif2
     assert_same_value(djif1, djif2)
@@ -35,7 +34,7 @@ def assert_equiv_jdftxstructure(struc1: JDFTXStructure, struc2: JDFTXStructure) 
     """
     d1 = struc1.as_dict()
     d2 = struc2.as_dict()
-    assert_idential_jif(d1, d2)
+    assert_identical_jif(d1, d2)
 
 
 ex_in_files_dir = Path(TEST_FILES_DIR) / "io" / "jdftx" / "test_jdftx_in_files"

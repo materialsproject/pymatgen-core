@@ -27,7 +27,7 @@ from pymatgen.io.jdftx.outputs import JDFTXOutfile
 
 from .inputs_test_utils import (
     assert_equiv_jdftxstructure,
-    assert_idential_jif,
+    assert_identical_jif,
     ex_in_files_dir,
     ex_infile1_fname,
     ex_infile1_knowns,
@@ -64,7 +64,7 @@ def test_JDFTXInfile_known_lambda(infile_fname: str, bool_func: Callable[[JDFTXI
 
 def JDFTXInfile_self_consistency_tester(jif: JDFTXInfile, tmp_path: PathLike):
     """Create an assortment of JDFTXinfile created from the same data but through different methods, and test that
-    they are all equivalent through "assert_idential_jif" """
+    they are all equivalent through "assert_identical_jif" """
     dict_jif = jif.as_dict()
     # # Commenting out tests with jif2 due to the list representation asserted
     jif2 = JDFTXInfile.get_dict_representation(JDFTXInfile._from_dict(dict_jif))
@@ -77,7 +77,7 @@ def JDFTXInfile_self_consistency_tester(jif: JDFTXInfile, tmp_path: PathLike):
     jifs = [jif, jif2, jif3, jif4]
     for i in range(len(jifs)):
         for j in range(i + 1, len(jifs)):
-            assert_idential_jif(jifs[i], jifs[j])
+            assert_identical_jif(jifs[i], jifs[j])
 
 
 def test_JDFTXInfile_from_dict(tmp_path) -> None:
@@ -278,7 +278,7 @@ def test_JDFTXInfile_add_method():
     jif2 = jif.copy()
     assert jif2 is not jif  # Testing robustness of copy method while we are at it
     jif3 = jif + jif2
-    assert_idential_jif(jif, jif3)
+    assert_identical_jif(jif, jif3)
     # If a tag is repeated, the values must be the same since choice of value is ambiguous
     key = "elec-ex-corr"
     val_old = deepcopy(jif[key])
@@ -381,7 +381,7 @@ def test_jdftxstructure_infile_site_properties_conversion():
     )
     for jif2 in [jif_from_jstruc, jif_from_struc, jif_from_struc_2, jif_from_struc_3]:
         assert isinstance(jif2, JDFTXInfile)
-        assert_idential_jif(jif["ion"], jif2["ion"])
+        assert_identical_jif(jif["ion"], jif2["ion"])
 
 
 def test_pmg_struc():
@@ -390,7 +390,7 @@ def test_pmg_struc():
     struc2 = jif.structure
     for s in [struc1, struc2]:
         assert isinstance(s, Structure)
-    assert_idential_jif(struc1.as_dict(), struc2.as_dict())
+    assert_identical_jif(struc1.as_dict(), struc2.as_dict())
 
 
 def test_jdftxtructure_naming():
