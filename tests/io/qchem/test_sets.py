@@ -1,20 +1,33 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
+import warnings
 
 import pytest
+from monty.json import MontyDecoder, MontyEncoder
 
+from pymatgen.core import Molecule
+from pymatgen.io.core import InputGenerator, InputSet
 from pymatgen.io.qchem.sets import (
     CMIRS_SETTINGS,
     ForceSet,
+    ForceSetGenerator,
     FreqSet,
+    FreqSetGenerator,
     OptSet,
+    OptSetGenerator,
     PESScanSet,
+    PESScanSetGenerator,
     QChemDictSet,
     QCInput,
+    QCInputGenerator,
+    QCInputSet,
     SinglePointSet,
+    SinglePointSetGenerator,
     TransitionStateSet,
+    TransitionStateSetGenerator,
 )
 from pymatgen.util.testing import TEST_FILES_DIR, MatSciTest
 
@@ -1210,3 +1223,334 @@ def test_dict_set_does_not_mutate_user_inputs():
     # reusing the same geom_opt dict with a different number of cycles must not raise
     opt_set = OptSet(mol, qchem_version=6, geom_opt=geom_opt, geom_opt_max_cycles=50)
     assert opt_set.geom_opt["maxiter"] == "50"
+
+
+LEGACY_SETS_AND_GENERATORS = [
+    (SinglePointSet, SinglePointSetGenerator),
+    (OptSet, OptSetGenerator),
+    (TransitionStateSet, TransitionStateSetGenerator),
+    (ForceSet, ForceSetGenerator),
+    (FreqSet, FreqSetGenerator),
+    (PESScanSet, PESScanSetGenerator),
+]
+
+# settings accepted by all of the legacy input sets
+COMMON_SETTINGS = {
+    "default": {},
+    "pcm_rung_2": {"dft_rung": 2, "pcm_dielectric": 78.39},
+    "smd": {"smd_solvent": "water"},
+    "isosvp": {"isosvp_dielectric": 62, "overwrite_inputs": {"svp": {"ipnrf": 1}}},
+    "cmirs": {"cmirs_solvent": "water", "overwrite_inputs": {"svp": {"rhoiso": "0.0005"}}},
+    "nbo7": {"nbo_params": {"version": 7, "plots": "PLOT"}},
+    "qchem6": {"qchem_version": 6, "max_scf_cycles": 35, "basis_set": "6-31g*", "scf_algorithm": "gdm"},
+    "overwrite": {
+        "pcm_dielectric": 10.0,
+        "plot_cubes": True,
+        "output_wavefunction": True,
+        "overwrite_inputs": {
+            "rem": {"METHOD": "b3lyp", "symmetry": "true"},
+            "pcm": {"theory": "ssvpe"},
+            "van_der_waals": {"16": 3.14159},
+            "plots": {"grid_spacing": "0.1"},
+        },
+    },
+}
+
+
+@pytest.fixture(scope="module")
+def pcm_molecule() -> Molecule:
+    return QCInput.from_file(f"{TEST_DIR}/pcm.qin").molecule
+
+
+@pytest.fixture(scope="module")
+def water() -> Molecule:
+    return Molecule(["O", "H", "H"], [[0.0, 0.0, 0.121], [-0.783, 0.0, -0.485], [0.783, 0.0, -0.485]])
+
+
+class TestQCInputGenerator:
+    @pytest.mark.parametrize(("legacy_cls", "generator_cls"), LEGACY_SETS_AND_GENERATORS)
+    @pytest.mark.parametrize("settings", COMMON_SETTINGS.values(), ids=COMMON_SETTINGS)
+    def test_same_input_as_legacy_sets(self, legacy_cls, generator_cls, settings, pcm_molecule):
+        settings = copy.deepcopy(settings)
+        if legacy_cls is PESScanSet:
+            settings["scan_variables"] = {"stre": ["3 6 1.5 1.9 0.1"]}
+
+        legacy_set = legacy_cls(pcm_molecule, **copy.deepcopy(settings))
+        input_set = generator_cls(**settings).get_input_set(pcm_molecule)
+
+        assert isinstance(input_set, QCInputSet)
+        assert type(input_set.qcinput) is QCInput
+        assert str(input_set.qcinput) == str(legacy_set)
+        assert input_set.qcinput.molecule == pcm_molecule
+
+    @pytest.mark.parametrize(
+        ("legacy_cls", "generator_cls", "job_type", "basis_set"),
+        [
+            (SinglePointSet, SinglePointSetGenerator, "sp", "def2-tzvpd"),
+            (OptSet, OptSetGenerator, "opt", "def2-svpd"),
+            (TransitionStateSet, TransitionStateSetGenerator, "ts", "def2-svpd"),
+            (ForceSet, ForceSetGenerator, "force", "def2-tzvpd"),
+            (FreqSet, FreqSetGenerator, "freq", "def2-svpd"),
+            (PESScanSet, PESScanSetGenerator, "pes_scan", "def2-svpd"),
+        ],
+    )
+    def test_defaults(self, legacy_cls, generator_cls, job_type, basis_set, pcm_molecule):
+        generator = generator_cls()
+        assert isinstance(generator, QCInputGenerator)
+        assert isinstance(generator, InputGenerator)
+        assert generator.job_type == job_type
+        assert generator.basis_set == basis_set
+        assert generator.scf_algorithm == "diis"
+        assert generator.qchem_version == 5
+        assert generator.dft_rung == 4
+
+        scan = {"scan_variables": {"stre": ["3 6 1.5 1.9 0.1"]}} if legacy_cls is PESScanSet else {}
+        legacy_set = legacy_cls(pcm_molecule, **scan)
+        assert legacy_set.rem["job_type"] == job_type
+        assert legacy_set.rem["basis"] == basis_set
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {"job_type": "opt", "qchem_version": 6, "geom_opt": {"coordinates": "delocalized"}},
+            {"job_type": "opt", "geom_opt": {"maxiter": "50"}, "geom_opt_max_cycles": 50},
+            {"job_type": "ts", "opt_variables": {"CONSTRAINT": ["tors 2 3 4 5 25.0"], "FIXED": ["2 XY"]}},
+            {"job_type": "pes_scan", "scan_variables": {"stre": ["3 6 1.5 1.9 0.1"]}, "vdw_mode": "sequential"},
+            {"job_type": "sp", "smd_solvent": "custom", "custom_smd": "90.00,1.415,0.00,0.735,20.2,0.00,0.00"},
+            {
+                "job_type": "sp",
+                "qchem_version": 6,
+                "smd_solvent": "custom",
+                "custom_smd": "90.00,1.415,0.00,0.735,20.2,0.00,0.00",
+            },
+            {
+                "job_type": "sp",
+                "extra_scf_print": True,
+                "cdft_constraints": [
+                    [{"value": 1.0, "coefficients": [1.0], "first_atoms": [1], "last_atoms": [2], "types": [None]}]
+                ],
+            },
+            {"job_type": "sp", "almo_coupling_states": [[(1, 2), (0, 1)], [(0, 1), (1, 2)]]},
+        ],
+    )
+    def test_same_input_as_dict_set(self, settings, pcm_molecule):
+        settings = {"basis_set": "6-31g*", "scf_algorithm": "diis", **settings}
+        legacy_set = QChemDictSet(pcm_molecule, **copy.deepcopy(settings))
+        input_set = QCInputGenerator(**settings).get_input_set(pcm_molecule)
+        assert str(input_set.qcinput) == str(legacy_set)
+
+    def test_get_input_set_is_repeatable(self, pcm_molecule, water):
+        settings = {
+            "pcm_dielectric": 10.0,
+            "qchem_version": 6,
+            "geom_opt": {"coordinates": "delocalized"},
+            "opt_variables": {"CONSTRAINT": ["tors 2 3 4 5 25.0"]},
+            "nbo_params": {"version": 7},
+            "overwrite_inputs": {
+                "rem": {"symmetry": "true"},
+                "pcm": {"theory": "ssvpe"},
+                "opt": {"FIXED": ["2 XY"]},
+                "van_der_waals": {"16": 3.14159},
+            },
+        }
+        reference = copy.deepcopy(settings)
+        generator = OptSetGenerator(**settings)
+        as_dict = generator.as_dict()
+
+        first = str(generator.get_input_set(pcm_molecule).qcinput)
+        second = str(generator.get_input_set(pcm_molecule).qcinput)
+        assert first == second
+        # neither the generator nor the user-supplied dicts are modified
+        assert settings == reference
+        assert generator.as_dict() == as_dict
+        assert generator == OptSetGenerator(**reference)
+
+        # one generator can be used for any number of molecules
+        water_input = generator.get_input_set(water).qcinput
+        assert water_input.molecule == water
+        assert water_input.rem == generator.get_input_set(pcm_molecule).qcinput.rem
+
+    def test_settings_can_be_changed_after_init(self, water):
+        generator = SinglePointSetGenerator()
+        assert "solvent_method" not in generator.get_input_set(water).qcinput.rem
+
+        generator.overwrite_inputs = {"rem": {"solvent_method": "smd"}, "smx": {"solvent": "water"}}
+        qcinput = generator.get_input_set(water).qcinput
+        assert qcinput.rem["solvent_method"] == "smd"
+        assert qcinput.smx == {"solvent": "water"}
+
+        generator.overwrite_inputs = None
+        assert "solvent_method" not in generator.get_input_set(water).qcinput.rem
+
+    def test_cmirs_settings_not_mutated(self, water):
+        reference = copy.deepcopy(CMIRS_SETTINGS)
+        generator = SinglePointSetGenerator(
+            cmirs_solvent="water", overwrite_inputs={"svp": {"rhoiso": "0.0005"}, "pcm_nonels": {"a": "-0.1"}}
+        )
+        generator.get_input_set(water)
+        generator.get_input_set(water)
+        assert reference == CMIRS_SETTINGS
+
+    def test_invalid_settings(self):
+        with pytest.raises(ValueError, match="dft_rung should be between 1 and 5"):
+            SinglePointSetGenerator(dft_rung=6)
+        with pytest.raises(ValueError, match="Only one of PCM, ISOSVP, SMD, and CMIRS"):
+            SinglePointSetGenerator(pcm_dielectric=10.0, smd_solvent="water")
+        with pytest.raises(ValueError, match="A user-defined SMD requires passing custom_smd"):
+            SinglePointSetGenerator(smd_solvent="custom")
+        with pytest.raises(RuntimeError, match="nbo params version should only be set to 7"):
+            SinglePointSetGenerator(nbo_params={"version": 6})
+        with pytest.raises(RuntimeError, match="Max # of optimization cycles must be the same"):
+            OptSetGenerator(geom_opt={"maxiter": "100"})
+        with pytest.raises(RuntimeError, match="Set nbo parameters directly with nbo_params input"):
+            SinglePointSetGenerator(overwrite_inputs={"nbo": {"plots": "PLOT"}})
+        with pytest.raises(RuntimeError, match="Set geom_opt params directly with geom_opt input"):
+            OptSetGenerator(overwrite_inputs={"geom_opt": {"maxiter": "100"}})
+        with pytest.raises(TypeError, match="missing 3 required positional arguments"):
+            QCInputGenerator()
+
+    def test_warnings_only_when_generating(self, water):
+        overwrite_inputs = {"solvent": {"dielectric": "78.39"}}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            generator = SinglePointSetGenerator(smd_solvent="water", overwrite_inputs=overwrite_inputs)
+        with pytest.warns(UserWarning, match="The solvent section will be ignored unless solvent_method=pcm"):
+            generator.get_input_set(water)
+
+        # also when no solvent method is set at all
+        with pytest.warns(UserWarning, match="The solvent section will be ignored unless solvent_method=pcm"):
+            SinglePointSetGenerator(overwrite_inputs=overwrite_inputs).get_input_set(water)
+        with pytest.warns(UserWarning, match="Setting DIELST will have no effect"):
+            SinglePointSetGenerator(overwrite_inputs={"svp": {"dielst": "10"}}).get_input_set(water)
+
+    def test_pes_scan_needs_scan_variables(self, water):
+        generator = PESScanSetGenerator()
+        with pytest.raises(ValueError, match="Cannot run a pes_scan job without some variable to scan over"):
+            generator.get_input_set(water)
+
+        scan_variables = {"stre": ["1 2 0.95 1.35 0.1"]}
+        assert PESScanSetGenerator(scan_variables=scan_variables).get_input_set(water).qcinput.scan == scan_variables
+        generator.overwrite_inputs = {"scan": scan_variables}
+        assert generator.get_input_set(water).qcinput.scan == scan_variables
+
+    def test_msonable(self, water):
+        generator = OptSetGenerator(
+            qchem_version=6,
+            pcm_dielectric=10.0,
+            geom_opt={"coordinates": "delocalized"},
+            overwrite_inputs={"rem": {"symmetry": "true"}},
+        )
+        for from_dict in (
+            OptSetGenerator.from_dict(generator.as_dict()),
+            json.loads(json.dumps(generator, cls=MontyEncoder), cls=MontyDecoder),
+        ):
+            assert type(from_dict) is OptSetGenerator
+            assert from_dict == generator
+            assert str(from_dict.get_input_set(water).qcinput) == str(generator.get_input_set(water).qcinput)
+
+
+class TestQCInputSet:
+    def test_is_input_set(self, water):
+        input_set = SinglePointSetGenerator(pcm_dielectric=78.39).get_input_set(water)
+        assert isinstance(input_set, InputSet)
+        assert list(input_set) == ["mol.qin"]
+        assert len(input_set) == 1
+        assert input_set["mol.qin"] is input_set.qcinput
+        assert input_set.optional_files == {}
+        assert input_set.qcinput.solvent == {"dielectric": "78.39"}
+
+        # the dict-like interface and the attributes are views of the same data
+        input_set["extra.txt"] = "some text"
+        assert input_set.optional_files == {"extra.txt": "some text"}
+        new_input = QCInput(water, rem={"job_type": "sp", "basis": "6-31g*", "method": "b3lyp"})
+        input_set["mol.qin"] = new_input
+        assert input_set.qcinput is new_input
+
+    def test_write_input_and_from_directory(self, water, tmp_path):
+        input_set = OptSetGenerator(smd_solvent="water").get_input_set(water)
+        input_set.write_input(tmp_path / "calc")
+        assert os.listdir(tmp_path / "calc") == ["mol.qin"]
+
+        from_file = QCInput.from_file(tmp_path / "calc" / "mol.qin")
+        assert str(from_file) == str(input_set.qcinput)
+
+        from_directory = QCInputSet.from_directory(tmp_path / "calc")
+        assert isinstance(from_directory, QCInputSet)
+        assert isinstance(from_directory.qcinput, QCInput)
+        assert str(from_directory.qcinput) == str(input_set.qcinput)
+        assert from_directory.optional_files == {}
+
+        with pytest.raises(FileExistsError):
+            input_set.write_input(tmp_path / "calc", overwrite=False)
+        input_set.write_input(tmp_path / "calc", overwrite=True)
+
+        with pytest.raises(FileNotFoundError):
+            input_set.write_input(tmp_path / "does_not_exist", make_dir=False)
+        with pytest.raises(FileNotFoundError):
+            QCInputSet.from_directory(tmp_path / "does_not_exist")
+
+    def test_from_directory_gzipped(self, water, tmp_path):
+        import gzip
+
+        input_set = SinglePointSetGenerator().get_input_set(water)
+        with gzip.open(tmp_path / "mol.qin.gz", mode="wt", encoding="utf-8") as file:
+            file.write(str(input_set.qcinput))
+        assert str(QCInputSet.from_directory(tmp_path).qcinput) == str(input_set.qcinput)
+
+    def test_custom_smd(self, water, tmp_path):
+        custom_smd = "90.00,1.415,0.00,0.735,20.2,0.00,0.00"
+
+        # Q-Chem 5 reads the solvent parameters from a separate file
+        input_set = SinglePointSetGenerator(smd_solvent="custom", custom_smd=custom_smd).get_input_set(water)
+        assert input_set.optional_files == {"solvent_data": custom_smd}
+        assert input_set.qcinput.smx == {"solvent": "other"}
+
+        input_set.write_input(tmp_path)
+        assert sorted(os.listdir(tmp_path)) == ["mol.qin", "solvent_data"]
+        with open(tmp_path / "solvent_data", encoding="utf-8") as file:
+            assert file.read() == custom_smd
+
+        # the legacy input sets write the same two files
+        SinglePointSet(water, smd_solvent="custom", custom_smd=custom_smd).write(f"{tmp_path}/legacy.qin")
+        with open(tmp_path / "legacy.qin", encoding="utf-8") as legacy, open(tmp_path / "mol.qin") as new:
+            assert legacy.read() == new.read()
+
+        assert QCInputSet.from_directory(tmp_path).optional_files == {}
+        from_directory = QCInputSet.from_directory(tmp_path, optional_files={"solvent_data": None})
+        assert from_directory.optional_files == {"solvent_data": custom_smd}
+        assert str(from_directory.qcinput) == str(input_set.qcinput)
+
+        # Q-Chem 6 reads the solvent parameters from the $smx section
+        input_set = SinglePointSetGenerator(qchem_version=6, smd_solvent="custom", custom_smd=custom_smd).get_input_set(
+            water
+        )
+        assert input_set.optional_files == {}
+        assert input_set.qcinput.smx["epsilon"] == "90.00"
+
+    def test_from_directory_optional_file_class(self, water, tmp_path):
+        input_set = SinglePointSetGenerator().get_input_set(water)
+        input_set["other.qin"] = OptSetGenerator().get_input_set(water).qcinput
+        input_set.write_input(tmp_path)
+
+        from_directory = QCInputSet.from_directory(tmp_path, optional_files={"other.qin": QCInput})
+        assert from_directory.qcinput.rem["job_type"] == "sp"
+        assert from_directory.optional_files["other.qin"].rem["job_type"] == "opt"
+
+    def test_msonable(self, water):
+        input_set = SinglePointSetGenerator(
+            smd_solvent="custom", custom_smd="90.00,1.415,0.00,0.735,20.2,0.00,0.00"
+        ).get_input_set(water)
+        for from_dict in (
+            QCInputSet.from_dict(input_set.as_dict()),
+            json.loads(json.dumps(input_set, cls=MontyEncoder), cls=MontyDecoder),
+        ):
+            assert type(from_dict) is QCInputSet
+            assert str(from_dict.qcinput) == str(input_set.qcinput)
+            assert from_dict.optional_files == input_set.optional_files
+
+    def test_copy(self, water):
+        input_set = SinglePointSetGenerator().get_input_set(water)
+        deep = copy.deepcopy(input_set)
+        deep.qcinput.rem["basis"] = "sto-3g"
+        assert input_set.qcinput.rem["basis"] == "def2-tzvpd"
+        assert copy.copy(input_set).qcinput is input_set.qcinput
