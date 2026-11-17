@@ -592,7 +592,7 @@ ex_jstruc_slice2_known = {
     "mag-1": 0.100,
 }
 
-# JESteps test knowns
+# JElSteps test knowns
 
 
 ex_fillings_line1 = "FillingsUpdate:  mu: +0.714406772  \

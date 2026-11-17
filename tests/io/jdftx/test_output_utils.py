@@ -1,4 +1,4 @@
-"""Tests for the output_utils module."""
+"""Tests for the _output_utils module."""
 
 from __future__ import annotations
 

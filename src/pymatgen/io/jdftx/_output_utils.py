@@ -114,7 +114,7 @@ def read_file(file_name: str) -> list[str]:
 
     Parameters
     ----------
-    filename: Path or str
+    file_name: Path or str
         name of file to read
 
     Returns
@@ -152,14 +152,12 @@ def _read_bandfile_header(bandfile_filepath: str | Path) -> list[str]:
 
 def read_outfile_slices(file_name: str) -> list[list[str]]:
     """
-    Read slice of out file into a list of str.
+    Read an out file into a list of slices, each a list of str.
 
     Parameters
     ----------
-    filename: Path or str
+    file_name: Path or str
         name of file to read
-    out_slice_idx: int
-        index of slice to read from file
 
     Returns
     -------
@@ -177,9 +175,9 @@ def read_outfile_slices(file_name: str) -> list[list[str]]:
 
 
 def _brkt_list_of_3_to_nparray(line: str) -> NDArray[np.float64]:
-    """Return 3x1 numpy array.
+    """Return length-3 numpy array.
 
-    Convert a string of the form "[ x y z ]" to a 3x1 numpy array
+    Convert a string of the form "[ x y z ]" to a length-3 numpy array
 
     Parameters
     ----------
@@ -212,8 +210,6 @@ def _brkt_list_of_3x3_to_nparray(lines: list[str], i_start: int = 0) -> NDArray[
     return out
 
 
-# Named "t1" in unmet anticipation of multiple ways that a float would be needed
-# to be read following the variable string with a colon.
 def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     """Return float val from '...lkey: val...' in linetext.
 
@@ -227,6 +223,11 @@ def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     lkey: str
         A string that appears before the float value in linetext. Must include
         the colon.
+
+    Returns
+    -------
+    val: float | None
+        The value (nan if it is printed as "nan"), or None if lkey is not in linetext
     """
     colon_var = None
     if lkey in linetext:
@@ -235,7 +236,8 @@ def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     return colon_var
 
 
-# Temporary alias until the outside modules are merged with the renaming
+# Temporary alias for the old name until the outside modules are merged with the renaming. (It was named "t1" in unmet
+# anticipation of multiple ways that a float would be needed to be read following the variable string with a colon.)
 get_colon_var_t1 = get_colon_val
 
 
@@ -256,13 +258,19 @@ def correct_geom_opt_type(opt_type: str | None) -> str:
 
     Parameters
     ----------
-    opt_type:
-        The type of optimization step
+    opt_type: str | None
+        The type of optimization step (any string containing "lattice" or "ionic", ignoring case), or None
 
     Returns
     -------
-    opt_type: str | None
-        The corrected type of optimization step
+    opt_type: str
+        The corrected type of optimization step ("LatticeMinimize", "IonicMinimize" or "IonicDynamics"), or an
+        empty string if opt_type is None
+
+    Raises
+    ------
+    ValueError
+        If opt_type is not recognized
     """
     opt_type_return = ""
     if opt_type is not None:
@@ -606,6 +614,8 @@ def _is_complex_bandfile_filepath(bandfile_filepath: str | Path) -> bool:
 
 
 # TODO: This is very likely redundant to something in pymatgen - replace with that if possible.
+# The real spherical harmonics of each l in the order JDFTx writes them in a bandProjections file (m = -l ... l, as
+# defined in JDFTx's core/SphericalHarmonics.h), which is also the order of pymatgen's Orbital enum.
 orb_ref_list = [
     ["s"],
     ["py", "pz", "px"],
@@ -622,7 +632,8 @@ orb_ref_to_o_dict = {
     "dz2": int(Orbital.dz2),
     "dxz": int(Orbital.dxz),
     "dx2-y2": int(Orbital.dx2_y2),
-    # Keep the f-orbitals arbitrary-ish until they get designated names in pymatgen.
+    # pymatgen names the f orbitals by m (f_3 for m = -3, ..., f3 for m = 3), in the same order as VASP's (fy3x2,
+    # fxyz, fyz2, fz3, fxz2, fzx2, fx3) and JDFTx's.
     orb_ref_list[-1][0]: int(Orbital.f_3),
     orb_ref_list[-1][1]: int(Orbital.f_2),
     orb_ref_list[-1][2]: int(Orbital.f_1),
@@ -690,9 +701,9 @@ def _get_atom_orb_labels_ref_dict(bandfile_filepath: Path) -> dict[str, list[str
     For example:
     {
         "H": ["s"],
-        "O": ["s", "px", "py", "pz", "dxy", "dxz", "dyz", "dx2y2", "dz2"],
-        "Pt": ["0s", "1s", "0px", "0py", "0pz", "1px", "1py", "1pz", "dxy", "dxz", "dyz", "dx2y2", "dz2",
-               "fx3-3xy2", "fyx2-yz2", "fxz2", "fz3", "fyz2", "fxyz", "f3yx2-y3"]
+        "O": ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"],
+        "Pt": ["0s", "1s", "0py", "0pz", "0px", "1py", "1pz", "1px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
+               "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
     }
     where the numbers are needed when using pseudopotentials with multiple valence shells of the same angular momentum
     and are NOT REPRESENTATIVE OF THE TRUE PRINCIPAL QUANTUM NUMBER.
@@ -800,7 +811,7 @@ def _get_orb_label_list(bandfile_filepath: Path) -> tuple[str, ...]:
         bandfile_filepath (str | Path): The path to the bandfile.
 
     Returns:
-        tuple[str]: A list of all atomic orbital projection string representations.
+        tuple[str, ...]: A tuple of all atomic orbital projection string representations.
     """
     labels_dict = _get_atom_orb_labels_ref_dict(bandfile_filepath)
     atom_count_list = _get_atom_count_list(bandfile_filepath)
@@ -832,11 +843,11 @@ def _get_eigstats_varsdict(text: list[str]) -> tuple[bool, dict[str, float | Non
 
     Args:
         text (list[str]): Output of read_file for out file.
-        prefix (str): Prefix for the eigStats section in the out file.
 
     Returns:
-        dict[str, float | None]: Dictionary of eigenvalue statistics. A statistic JDFTx printed as "unavailable"
-            (e.g. LUMO and mu when there are no empty bands) is None.
+        tuple[bool, dict[str, float | None]]: Whether the out file has an eigStats dump listing every statistic, and
+            the dictionary of eigenvalue statistics (in eV). A statistic JDFTx printed as "unavailable" (e.g. LUMO and
+            mu when there are no empty bands) is None.
     """
     has_eigstats = False
     varsdict: dict[str, float | None] = {}

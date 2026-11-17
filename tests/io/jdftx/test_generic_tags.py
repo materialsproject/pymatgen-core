@@ -149,7 +149,7 @@ def test_float_tag():
         float_tag.read(tag, value)
     with pytest.raises(TypeError):
         float_tag.read(tag, {})
-    value = "ken"  # (ken is not an number)
+    value = "ken"  # (ken is not a number)
     with pytest.raises(ValueError, match=f"Could not set value '{value}' to a float for tag '{tag}'!"):
         float_tag.read(tag, value)
     value = "1.2.3"  # (1.2.3 cannot be a float)

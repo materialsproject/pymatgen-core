@@ -1,6 +1,6 @@
 """Class object for storing a single JDFTx geometric optimization step.
 
-A mutant of the pymatgen Structure class for flexibility in holding JDFTx.
+A mutant of the pymatgen Structure class for flexibility in holding JDFTx optimization data.
 """
 
 from __future__ import annotations
@@ -53,22 +53,33 @@ class JOutStructure(Structure):
         eopt_type (str | None): The type of electronic minimization step.
         ecomponents (dict | None): The energy components of the system.
         elecmindata (JElSteps | None): The electronic minimization data.
-        stress (np.ndarray | None): The stress tensor.
+        stress (np.ndarray | None): The stress tensor in eV/Angstrom^3.
+        kinetic_stress (np.ndarray | None): The stress tensor including the kinetic contribution in eV/Angstrom^3,
+            if printed.
         strain (np.ndarray | None): The strain tensor.
+        forces (np.ndarray | None): The forces on the atoms in Cartesian eV/Angstrom.
+        igp_forces (np.ndarray | None): The first block of forces JDFTx prints for the step when
+            ionic-gaussian-potential is set (before the block read as forces), in Cartesian eV/Angstrom.
         thermostat_velocity (np.ndarray | None): The Nose-Hoover chain thermostat velocities (one per chain element,
             chainLengthT in ionic-dynamics), in JDFTx units (inverse Hartree atomic units of time) so they can be
             written back unchanged as the thermostat-velocity tag of a restart input. None if not printed.
+        pe (float | None): The potential energy of a molecular dynamics step in eV.
+        ke (float | None): The kinetic energy of a molecular dynamics step in eV.
+        t_k (float | None): The temperature of a molecular dynamics step in K.
+        p_bar (float | None): The pressure of a molecular dynamics step in bar.
+        tmd_fs (float | None): The simulation time of a molecular dynamics step in fs.
         nstep (int | None): The most recent step number.
-        e (float | None): The total energy of the system.
-        grad_k (float | None): The gradient of the electronic density along the most recent line minimization.
-        alpha (float | None): The step size of the most recent SCF step along the line minimization.
-        linmin (float | None): The normalized alignment projection of the electronic energy gradient to the line
-                                minimization direction.
-        t_s (float | None): The time in seconds for the optimization step.
+        e (float | None): The total energy of the system in eV.
+        grad_k (float | None): The norm of the preconditioned gradient of the geometric optimization step (written as
+            "|grad|_K" in JDFTx output).
+        alpha (float | None): The step size of the geometric optimization step.
+        linmin (float | None): The normalized projection of the gradient onto the step direction of the geometric
+            optimization step.
+        t_s (float | None): The time in seconds from the start of the JDFTx call to the end of the optimization step.
         geom_converged (bool): Whether the geometry optimization has converged.
         geom_converged_reason (str | None): The reason for geometry optimization convergence.
-        line_types (ClassVar[list[str]]): The types of lines in a JDFTx out file.
-        selective_dynamics (list[int] | None): The selective dynamics flags for the atoms in the system.
+        selective_dynamics (list[list[int]] | None): The selective dynamics flags for the atoms in the system (three
+            0/1 values per atom, all from the atom's moveScale).
         mu (float | None): The chemical potential (Fermi level) in eV.
         nelectrons (float | None): The total number of electrons in the electron density.
         abs_magneticmoment (float | None): The absolute magnetic moment of the electron density.
@@ -262,7 +273,7 @@ class JOutStructure(Structure):
 
     @property
     def constraint_vectors(self) -> Sequence | list[np.ndarray | list[np.ndarray] | None] | None:
-        """Return the velocities.
+        """Return the constraint_vectors.
 
         Returns:
             list[np.ndarray | list[np.ndarray] | None] | None: The constraint_vectors of the atoms in the system.
@@ -342,7 +353,7 @@ class JOutStructure(Structure):
         """
         Return JOutStructure object.
 
-        Create a JAtoms object from a slice of an out file's text corresponding
+        Create a JOutStructure object from a slice of an out file's text corresponding
         to a single step of a native JDFTx optimization.
 
         Args:
@@ -357,6 +368,7 @@ class JOutStructure(Structure):
             skim_levels (list[str] | None): The levels of electronic minimization data to skim.
             skip_props (list[str] | None): The properties to skip parsing. Options are "struct", "forces", and
                 "charges".
+            req_new_geom (bool): Whether to raise a ValueError if the slice prints no ionic positions.
 
         Returns:
             JOutStructure: The created JOutStructure object.
@@ -714,10 +726,14 @@ class JOutStructure(Structure):
         Args:
             posns_lines (list[str]): A list of lines of text from a JDFTx out file.
             Collected lines will start with the string "# Ionic positions in ..."
-            (specifying either cartesian or direct coordinates), followed by a line
-            for each ion (atom) in the format "ion_name x y z sd", where ion_name is
-            the species name (e.g. Fe, or Fe1 for a species named after its pseudopotential file), and sd is a
-            flag indicating whether the ion is excluded from optimization (1) or not (0).
+            (specifying either cartesian or lattice coordinates), followed by a line
+            for each ion (atom) in the format "ion ion_name x y z [v vx vy vz] sd [constraint]", where ion_name is
+            the species name (e.g. Fe, or Fe1 for a species named after its pseudopotential file), and sd is
+            the moveScale: 0 for an ion that is held fixed, and non-zero (usually 1) for an ion that is optimized.
+            cur_species (Sequence[Element | Species]): The species of the sites before these lines are parsed.
+
+        Returns:
+            Sequence[Element | Species]: The species of the sites after these lines are parsed.
         """
         new_species: list[Element | Species] | None = None
         if len(posns_lines):
@@ -914,13 +930,13 @@ class JOutStructure(Structure):
     def _is_opt_conv_line(self, line_text: str) -> bool:
         """Return True if line_text is geom opt convergence line.
 
-        Return True if the line_text is the end of a JDFTx optimization step.
+        Return True if the line_text is the log message that the JDFTx geometric optimization converged.
 
         Args:
             line_text (str): A line of text from a JDFTx out file.
 
         Returns:
-            bool: True if the line_text is the end of a JDFTx optimization step.
+            bool: True if the line_text is the convergence message of the geometric optimization.
         """
         return f"{self.opt_type}: Converged" in line_text
 
@@ -1008,17 +1024,20 @@ class JOutStructure(Structure):
         """Collect generic log line.
 
         Collect a line of text into a list of lines if the line is not empty,
-        and otherwise updates the collecting and collected flags.
+        and otherwise updates the collecting and collected flags. Collecting also ends with a line
+        that is followed by the start line of any line type.
 
         Args:
             line_text (str): A line of text from a JDFTx out file.
             generic_lines (list[str]): A list of lines of text of the same type.
+            next_line (str | None): The line of text after line_text.
+            line_collections (dict): The line collections of every line type being gathered.
 
         Returns:
             tuple: A tuple containing:
             - generic_lines (list[str]): A list of lines of text of the same type.
-            - collecting (bool): True if the line_text is not empty.
-            - collected (bool): True if the line_text is empty (end of section).
+            - collecting (bool): True if the section continues after line_text.
+            - collected (bool): True if the section ended (line_text is empty, or the next line starts a section).
         """
         collecting = True
         collected = False

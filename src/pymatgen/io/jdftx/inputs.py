@@ -124,9 +124,9 @@ def get_species_names(structure: Structure) -> list[str]:
 # TODO: Add a method to strip all tags that contain their default values for simpler
 # files written (especially when a `JDFTXInfile` is created from `JDFTXOutfileSlice`)
 class JDFTXInfile(dict, MSONable):
-    """Class for reading/writing JDFtx input files.
+    """Class for reading/writing JDFTx input files.
 
-    JDFTxInfile object for reading and writing JDFTx input files.
+    JDFTXInfile object for reading and writing JDFTx input files.
     Essentially a dictionary with some helper functions.
     """
 
@@ -234,6 +234,7 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             d (dict): Dictionary to create JDFTXInfile from.
+            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -260,10 +261,12 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             filename (PathLike): Filename to read from.
-            dont_require_structure (bool, optional): Whether to require structure tags. Defaults to False.
+            dont_require_structure (bool, optional): Whether to accept an input without any of the structure tags
+                (lattice, ion, ion-species) instead of raising an error. Defaults to False.
             sort_tags (bool, optional): Whether to sort the tags. Defaults to True.
             assign_path_parent (bool, optional): Whether to assign the parent directory of the input file for include
                 tags. Defaults to True.
+            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -303,8 +306,10 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             structure (Structure): Structure to convert.
-            selective_dynamics (ArrayLike, optional): Selective dynamics attribute for each site if available.
-                Shape Nx1, by default None. If None, will check structure.site_properties for "selective_dynamics".
+            selective_dynamics (ArrayLike, optional): Selective dynamics attribute for each site if available: one
+                value per site, or one per direction for each site as in structure.site_properties (a site is then
+                mobile only if it can move in every direction). By default None. If None, will check
+                structure.site_properties for "selective_dynamics".
             velocities (list, optional): Velocities for each site if available, in Cartesian angstrom/fs (the
                 same units as structure.site_properties["velocities"]), regardless of write_cart_coords. Converted
                 to JDFTx units on writing. Shape Nx3, by default None. If None, will check
@@ -322,10 +327,10 @@ class JDFTXInfile(dict, MSONable):
             write_cart_coords (bool, optional): Whether to write Cartesian coordinates instead of fractional.
                 Defaults to False.
             ignore_site_properties (bool, optional): Whether to ignore site properties in the structure.
-                Defaults to False. If False, arguments selective_dynamics and velocities will changed from
-                values in site_properties if provided as None. If True, arguments selective_dynamics and velocities
-                will be left as provided, and the duplicated structure used for JDFTXStructure initialization will
-                have its site_properties cleared, except for the species names ("jdftx_species").
+                Defaults to False. If False, the per-site arguments above are taken from site_properties when they
+                are provided as None. If True, they are left as provided, and the duplicated structure used for
+                JDFTXStructure initialization has its site_properties cleared, except for the species names
+                ("jdftx_species").
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -375,6 +380,10 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             line (str): Line to read.
+            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            autofix (bool, optional): Whether to try to fix the types of the stored values. Defaults to True.
+            overwrite_nonrepeatable (bool, optional): Whether a tag that can't repeat replaces the value this object
+                already has for it. If False, such a line raises an error. Defaults to True.
         """
         line = line.strip()
         tag_object, tag, value = self._preprocess_line(line)
@@ -402,11 +411,14 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             string (str): String to read from.
-            dont_require_structure (bool, optional): Whether to require structure tags. Defaults to False.
+            dont_require_structure (bool, optional): Whether to accept an input without any of the structure tags
+                (lattice, ion, ion-species) instead of raising an error. Defaults to False.
             sort_tags (bool, optional): Whether to sort the tags. Defaults to True.
             path_parent (Path, optional): Path to the parent directory of the input file for include tags.
                                           Defaults to None.
             validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            skip_invalid_tags (bool, optional): Whether to skip lines that can't be read (with a warning) instead of
+                raising an error. Defaults to False.
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -549,8 +561,8 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             filename (PathLike): Filename to write to.
-            strip_nan (bool, optional): Whether to strip all subtags with nan values before writing.
-                                         Defaults to False. WARNING - VERY JANKY RIGHT NOW
+            strip_nan (bool, optional): Whether to strip all subtags with nan values before writing (see
+                                         clean_infile_of_nans). Defaults to False.
         """
         write_infile = self
         if strip_nan:
@@ -564,13 +576,18 @@ class JDFTXInfile(dict, MSONable):
     ) -> JDFTXStructure:
         """Convert JDFTXInfile to JDFTXStructure object.
 
-        Converts JDFTx lattice, lattice-scale, ion tags into JDFTXStructure, with Pymatgen structure as attribute.
+        Converts JDFTx lattice, latt-scale, ion tags into JDFTXStructure, with Pymatgen structure as attribute.
 
         Args:
             jdftxinfile (JDFTXInfile): JDFTXInfile object to convert.
             sort_structure (bool, optional): Whether to sort the sites into the order JDFTx prints them in (see
                 JDFTXStructure.sort_structure, also for when that order can differ from JDFTx's). Useful if species
                 are not grouped properly together. Defaults to False.
+            fill_site_properties (bool, optional): Whether to fill in the structure's site properties from the ion
+                tags (see JDFTXStructure.from_jdftxinfile). Defaults to True.
+
+        Returns:
+            JDFTXStructure: The created JDFTXStructure object.
         """
         # use dict representation so it's easy to get the right column for moveScale,
         # rather than checking for velocities
@@ -585,13 +602,15 @@ class JDFTXInfile(dict, MSONable):
     ) -> Structure | None:
         """Convert JDFTXInfile to pymatgen Structure object.
 
-        Converts JDFTx lattice, lattice-scale, ion tags into pymatgen Structure.
+        Converts JDFTx lattice, latt-scale, ion tags into pymatgen Structure.
 
         Args:
             jdftxinfile (JDFTXInfile): JDFTXInfile object to convert.
             sort_structure (bool, optional): Whether to sort the sites into the order JDFTx prints them in (see
                 JDFTXStructure.sort_structure, also for when that order can differ from JDFTx's). Useful if species
                 are not grouped properly together. Defaults to False.
+            fill_site_properties (bool, optional): Whether to fill in the structure's site properties from the ion
+                tags (see JDFTXStructure.from_jdftxinfile). Defaults to True.
 
         Returns:
             Structure: The created pymatgen Structure object.
@@ -655,14 +674,15 @@ class JDFTXInfile(dict, MSONable):
         """Validate the tags in the JDFTXInfile.
 
         Validate the tags in the JDFTXInfile. If try_auto_type_fix is True, will attempt to fix the tags. If
-        error_on_failed_fix is True, will raise an error if the tags cannot be fixed. If return_list_rep is True, will
-        return the tags in list representation.
+        error_on_failed_fix is True, will raise an error if the tags cannot be fixed. If return_list_rep is True, the
+        fixed tags are stored in list representation.
 
         Args:
             try_auto_type_fix (bool, optional): Whether to attempt to fix the tags. Defaults to False.
             error_on_failed_fix (bool, optional): Whether to raise an error if the tags cannot be fixed.
                                                   Defaults to True.
-            return_list_rep (bool, optional): Whether to return the tags in list representation. Defaults to False.
+            return_list_rep (bool, optional): Whether to store the fixed tags that allow it in list representation
+                (only with try_auto_type_fix; nothing is returned). Defaults to False.
         """
         for tag in self:
             tag_object = get_tag_object(tag)
@@ -685,7 +705,10 @@ class JDFTXInfile(dict, MSONable):
     def validate_boundaries(self) -> None:
         """Validate the boundaries of the JDFTXInfile.
 
-        Validate the boundaries of the JDFTXInfile. This is a placeholder for future functionality.
+        Check every numeric value that has bounds (see AbstractNumericTag) against them.
+
+        Raises:
+            ValueError: If any value is out of bounds, listing all of them.
         """
         error_strs: list[str] = []
         for tag in self:
@@ -740,7 +763,7 @@ class JDFTXInfile(dict, MSONable):
                     f"but there are {n_ions} ions of this species in the ion tags!"
                 )
 
-    # TODO: Add examples in the docustring on how to use this function
+    # TODO: Add examples in the docstring on how to use this function
     def is_comparable_to(
         self,
         other: JDFTXInfile,
@@ -757,9 +780,9 @@ class JDFTXInfile(dict, MSONable):
             exclude_tag_categories (list[str], optional): Tag categories to exclude from comparison. Defaults to None.
                 If left as None, will exclude all tags in the "export", "restart", and "structure" categories.
                 Add all tags of specified tag categories to be excluded in the comparison.
-            ensure_include_tags (list[str], optional): Tags to ensure are included in the comparison. Defaults to None.
-                If left as None, will make sure 'ion-species' is included in comparison.
-                Helpful for tags in categories you want to exclude but want to ensure are included in the comparison.
+            ensure_include_tags (list[str], optional): Tags to ensure are included in the comparison. Defaults to None
+                (no tags). Helpful for tags in categories you want to exclude but want to ensure are included in the
+                comparison (e.g. 'ion-species', which is in the "structure" category).
 
         Returns:
             bool: Whether the two JDFTXInfile objects are comparable.
@@ -797,6 +820,7 @@ class JDFTXInfile(dict, MSONable):
                 Add all tags of specified tag categories to be excluded in the comparison.
             ensure_include_tags (list[str], optional): Tags to ensure are included in the comparison. Defaults to None.
                 Helpful for tags in categories you want to exclude but want to ensure are included in the comparison.
+
         Returns:
             list[str]: Tags that differ between the two JDFTXInfile objects.
         """
@@ -964,7 +988,8 @@ class JDFTXInfile(dict, MSONable):
         Args:
             params (dict): Dictionary to store the value in.
             tag_object (AbstractTag): Tag object for holding tag/value pair. This tag object should be the tag object
-                which the "tag" string maps to in MASTER_TAG_LIST.
+                which the "tag" string maps to in MASTER_TAG_LIST (for a MultiformatTag, the format option the value
+                was read with).
             tag (str): Tag name.
             value (Any): Value to store.
 
@@ -984,7 +1009,7 @@ class JDFTXInfile(dict, MSONable):
             params[tag] = value
         return params
 
-    # Replaced by a regex in `from_str`; kept in case the regex is not accepted.
+    # Replaced by a regex in `_get_lines`; kept in case the regex is not accepted.
     # @staticmethod
     # def _gather_tags(lines: list[str]) -> list[str]:
     #     """Gather broken lines into single string for processing later.
@@ -1185,8 +1210,8 @@ def selective_dynamics_site_prop_to_jdftx_interpretable(
 def clean_infile_of_nans(infile: JDFTXInfile) -> JDFTXInfile:
     """Return a copy of a JDFTXInfile with all nan values removed.
 
-    JDFTx out files dump unset values as nan (e.g. "epsBulk nan"). A nan in a non-optional subtag removes the entry
-    that contains it instead, since the subtag can't be dropped on its own.
+    JDFTx out files dump unset values as nan (e.g. "P0 nan" in ionic-dynamics), which JDFTx can't read back. A nan in
+    a non-optional subtag removes the entry that contains it instead, since the subtag can't be dropped on its own.
 
     Args:
         infile (JDFTXInfile): JDFTXInfile to clean.
@@ -1306,7 +1331,7 @@ def _remove_at_path(edit_infile: JDFTXInfile, removal_path: list[str | int]) -> 
 
 @dataclass
 class JDFTXStructure(MSONable):
-    """Object for representing the data in JDFTXStructure tags.
+    """Object for representing the data in the structure tags of a JDFTx input file (lattice, ion, coords-type).
 
     Species not named after their element (e.g. Fe1 and Fe2, from pseudopotential files Fe1.upf and Fe2.upf) are kept
     as the structure's "jdftx_species" site property, and written back from it (see JDFTXInfile.from_structure). The
@@ -1314,7 +1339,10 @@ class JDFTXStructure(MSONable):
 
     Attributes:
         structure (Structure): Associated Structure.
-        selective_dynamics (ArrayLike): Selective dynamics attribute for each site if available. Shape Nx1.
+        selective_dynamics (ArrayLike): Selective dynamics attribute for each site if available. Given as one value
+            per site, or one per direction for each site (as in structure.site_properties["selective_dynamics"], from
+            which it is read if not given); stored as one 0/1 value per site (JDFTx's moveScale), 1 only for a site
+            that can move in every direction.
         sort_structure (bool): Whether to sort the sites into the order JDFTx prints them in (grouped by species, in
             the order the species first appear), along with the per-site data below. Useful if species are not
             grouped properly together. Defaults to False. The order may not match JDFTx's if the input file names
@@ -1347,7 +1375,9 @@ class JDFTXStructure(MSONable):
     def __post_init__(self) -> None:
         """Post init function for JDFTXStructure.
 
-        Asserts self.structure is ordered, and adds selective dynamics if needed.
+        Checks that self.structure is ordered, sorts the sites if sort_structure is set, converts the selective
+        dynamics to one value per site, and fills the per-site data that isn't given from the structure's site
+        properties.
         """
         # `Structure.is_ordered` checks for partial occupancies, which JDFTx cannot handle.
         # This does not check for ordering of species.
@@ -1384,7 +1414,7 @@ class JDFTXStructure(MSONable):
                 self._sync_site_property(x)
 
     def _sync_site_property(self, x: str) -> None:
-        """Update a single JDFTXStructure class variable from structure site properties."""
+        """Update a single JDFTXStructure attribute from the structure's site properties."""
         site_property = "group_names" if x == "hyperplane_group_names" else x
         if self.structure is None or site_property not in self.structure.site_properties:
             return
@@ -1540,7 +1570,8 @@ class JDFTXStructure(MSONable):
         Allows extra options as compared to calling str(JDFTXStructure) directly.
 
         Args:
-            in_cart_coords (bool, optional): Whether coordinates are output in direct or Cartesian.
+            in_cart_coords (bool, optional): Whether coordinates are output in Cartesian (True) or lattice (False)
+                coordinates. Defaults to None, which uses write_cart_coords.
 
         Returns:
             str: Representation of JDFTXInfile structure tags.
@@ -1786,10 +1817,13 @@ def _jdftx_named_lattice_vectors(a: float, b: float, c: float, alpha: float, bet
 
 
 def _infile_matrix_format_to_pmg_lattice(jdftxinfile: JDFTXInfile) -> Lattice:
-    """Convert JDFTX lattice tag to pymatgen Lattice object.
+    """Convert JDFTX matrix-format lattice tag to pymatgen Lattice object.
+
+    Handles the matrix format (R00 ... R22, lattice vectors as columns), converting lengths from bohr to angstrom and
+    applying the latt-scale tag if present.
 
     Args:
-        jl (dict[str, Any]): JDFTX lattice tag.
+        jdftxinfile (JDFTXInfile): JDFTXInfile containing a matrix-format lattice tag.
 
     Returns:
         Lattice: Pymatgen Lattice object.

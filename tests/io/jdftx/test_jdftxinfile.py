@@ -66,7 +66,6 @@ def JDFTXInfile_self_consistency_tester(jif: JDFTXInfile, tmp_path: PathLike):
     """Create an assortment of JDFTXinfile created from the same data but through different methods, and test that
     they are all equivalent through "assert_identical_jif" """
     dict_jif = jif.as_dict()
-    # # Commenting out tests with jif2 due to the list representation asserted
     jif2 = JDFTXInfile.get_dict_representation(JDFTXInfile._from_dict(dict_jif))
     str_list_jif = jif.get_text_list()
     str_jif = "\n".join(str_list_jif)
@@ -165,14 +164,12 @@ def test_JDFTXInfile_expected_exceptions():
     err_str = f"The include file {_filename} ({_filename}) does not exist!"
     with pytest.warns(UserWarning, match=re.escape(err_str)):
         JDFTXInfile.from_str(f"include {_filename}\n", dont_require_structure=True)
-    # If it does exist, no error should be raised
+    # With a path_parent, the file is also looked for there, and the warning names that path
     filename = ex_in_files_dir / "barbie"
     err_str = f"The include file {_filename} ({filename}) does not exist!"
-    # str(err_str) # What does this do?
-    # If the wrong parent_path is given for a file that does exist, error
     with pytest.warns(UserWarning, match=re.escape(err_str)):
         JDFTXInfile.from_str(f"include {_filename}\n", path_parent=ex_in_files_dir, dont_require_structure=True)
-    # JDFTXInfile cannot be constructed without lattice and ion tags
+    # JDFTXInfile cannot be constructed without any structure tags (lattice, ion, ion-species)
     with pytest.raises(ValueError, match="This input file is missing required structure tags"):
         JDFTXInfile.from_str("dump End DOS\n")
     # "barbie" here is supposed to be "list-to-dict" or "dict-to-list"
@@ -273,13 +270,13 @@ def test_JDFTXInfile_add_method():
     """Test the __add__ method"""
     # No new values are being assigned in jif2, so jif + jif2 should be the same as jif
     # Since the convenience of this method would be lost if the user has to pay special attention to duplicating
-    # repeatable values, repeatable tags are not append to each other
+    # repeatable values, entries of a repeatable tag that both objects have are not added a second time
     jif = JDFTXInfile.from_file(ex_infile1_fname)
     jif2 = jif.copy()
     assert jif2 is not jif  # Testing robustness of copy method while we are at it
     jif3 = jif + jif2
     assert_identical_jif(jif, jif3)
-    # If a tag is repeated, the values must be the same since choice of value is ambiguous
+    # If a non-repeatable tag is in both objects, the value of the second one is used
     key = "elec-ex-corr"
     val_old = deepcopy(jif[key])
     val_new = "lda"

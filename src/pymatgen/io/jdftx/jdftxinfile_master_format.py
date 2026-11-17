@@ -5,6 +5,8 @@ This module contains;
     tag names to AbstractTag-type objects.
 - get_tag_object: a function that returns an AbstractTag-type object from
     MASTER_TAG_LIST given a tag name.
+- get_tag_object_on_val: the same, but for a tag with several formats (MultiformatTag)
+    it returns the format option that fits a given value.
 """
 
 from __future__ import annotations
@@ -124,7 +126,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     subtags={
                         "modification": StrTag(
                             options=["Base-Centered"],  # Single-option modification could be a boolean tag, but keeping
-                            # as a string tagfor consistency with the other modified lattice tags
+                            # as a string tag for consistency with the other modified lattice tags
                             optional=False,
                             write_tagname=False,
                             write_value=True,
@@ -1580,13 +1582,14 @@ def get_tag_object(tag: str) -> AbstractTag:
 
 
 def get_tag_object_on_val(tag: str, val: Any) -> AbstractTag:
-    """Get the tag object for a given tag name.
+    """Get the tag object for a given tag name and value.
 
     Args:
         tag (str): The tag name.
+        val (Any): A value of the tag, as a string to read or as a parsed value.
 
     Returns:
-        AbstractTag: The tag object.
+        AbstractTag: The tag object. For a MultiformatTag, this is the format option that fits the value.
     """
     tag_object = get_tag_object(tag)
     if isinstance(tag_object, MultiformatTag):

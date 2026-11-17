@@ -21,7 +21,9 @@ class JdftxInputSet(InputSet):
     Parameters
     ----------
     jdftxinput
-        A JdftxInput object
+        A JDFTXInfile object
+    structure
+        The structure to write with the inputs (it replaces any structure tags of jdftxinput)
     """
 
     def __init__(self, jdftxinput: JDFTXInfile, structure: Structure) -> None:
@@ -41,6 +43,8 @@ class JdftxInputSet(InputSet):
         ----------
         directory
             Directory to write input files to.
+        infile
+            Name of the input file to write.
         make_dir
             Whether to create the directory if it does not already exist.
         overwrite
@@ -65,7 +69,7 @@ class JdftxInputSet(InputSet):
 
         Parameters
         ----------
-        directory
+        file
             Input file to read JDFTx inputs from.
         """
         jdftxinput = JDFTXInfile.from_file(file)
@@ -77,10 +81,10 @@ class JdftxInputSet(InputSet):
 
 def condense_jdftxinputs(jdftxinput: JDFTXInfile, jdftxstructure: JDFTXStructure) -> JDFTXInfile:
     """
-    Combine JDFTXInfile and JDFTxStructure into complete JDFTXInfile.
+    Combine JDFTXInfile and JDFTXStructure into complete JDFTXInfile.
 
     Function combines a JDFTXInfile class with calculation
-    settings and a JDFTxStructure that defines the structure
+    settings and a JDFTXStructure that defines the structure
     into one JDFTXInfile instance.
 
     Parameters

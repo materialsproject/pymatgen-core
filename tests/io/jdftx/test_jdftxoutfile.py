@@ -112,7 +112,7 @@ def _parse_time(filename: Path, skim_levels: tuple[str, ...] | None = None) -> f
 def test_JDFTXOutfile_skimming(filename: Path, known: dict, known_simple: dict):
     jof_full = JDFTXOutfile.from_file(filename)
     time_full = _parse_time(filename)
-    # Count how minimum fewer objects can be read at each depth level
+    # Count how many fewer objects are read at each depth level
     nless_outslices = len(jof_full.slices) - 1
     nless_last_geom = len(jof_full.slices[-1].jstrucs.slices) - 1
     nless_last_elec = len(jof_full.slices[-1].jstrucs.slices[-1].elecmindata.slices) - 1
@@ -196,7 +196,8 @@ def test_JDFTXOutfile_default_struc_inheritance(filename: Path, latknown: dict):
             assert pytest.approx(lattice[i][j]) == latknown[f"{i}{j}"]
 
 
-# Make sure all possible exceptions are caught when none_on_error is True
+# Ensure that a None slice (one that failed to parse) that occurs after the others leaves
+# the values of the last parsed slice
 @pytest.mark.parametrize(("ex_outfile_path"), [(partial_lattice_init_outfile_path)])
 def test_none_on_partial(ex_outfile_path: Path):
     texts = read_outfile_slices(str(ex_outfile_path))
@@ -278,7 +279,7 @@ def test_aimd_velocity_units():
 )
 def test_outfile_to_infile(outfile_path: Path, infile_path: Path, outfile_known: dict):
     """
-    Test that the JDFTXOutfileSlice.to_infile() method works correctly.
+    Test that the JDFTXOutfile.to_jdftxinfile() method works correctly.
     """
     jdftxoutfile: JDFTXOutfile = JDFTXOutfile.from_file(outfile_path)
     JDFTXInfile.from_file(infile_path)
