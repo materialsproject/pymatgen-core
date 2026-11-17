@@ -31,6 +31,7 @@ from typing import (
     cast,
     get_args,
     overload,
+    override,
 )
 
 import numpy as np
@@ -58,11 +59,6 @@ from pymatgen.core.units import Length, Mass
 from pymatgen.util.coord import all_distances, get_angle, lattice_points_in_supercell
 from pymatgen.util.due import Doi, due
 from pymatgen.util.misc import is_np_dict_equal
-
-try:
-    from typing import override  # Python 3.12+
-except ImportError:
-    from typing_extensions import override  # Python 3.11
 
 if TYPE_CHECKING:
     import moyopy
