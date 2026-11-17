@@ -13,6 +13,7 @@ import pytest
 
 from pymatgen.core import DummySpecies, Element, Lattice, Molecule, Species, Structure
 from pymatgen.io.adf import AdfInput, AdfTask
+from pymatgen.io.gaussian import GaussianInput
 from pymatgen.io.qchem.inputs import QCInput
 
 LATTICE = Lattice.cubic(5)
@@ -104,6 +105,13 @@ def test_molecule_round_trip(fmt, case):
     assert list(map(_elements, read)) == list(map(_elements, mol))
     if fmt in MOLECULE_FORMATS_WITH_OXI:
         assert list(map(_oxi_states, read)) == list(map(_oxi_states, mol))
+
+
+def test_gaussian_coordinates_refuse_disordered_molecules():
+    gau = GaussianInput(MOLECULES["disordered"])
+    for get_coords in (gau.get_cart_coords, gau.get_zmatrix):
+        with pytest.raises(ValueError, match="ordered molecule"):
+            get_coords()
 
 
 @pytest.mark.parametrize("case", ["charged", "mixed"])

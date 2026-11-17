@@ -371,12 +371,18 @@ class GaussianInput:
         with zopen(filename, mode="rt", encoding="utf-8") as file:
             return cls.from_str(file.read())  # type:ignore[arg-type]
 
+    def _check_ordered(self) -> None:
+        if not self._mol.is_ordered:
+            raise ValueError("Gaussian input can only be written from an ordered molecule")
+
     def get_zmatrix(self):
         """Get a z-matrix representation of the molecule."""
+        self._check_ordered()
         return self._mol.get_zmatrix()
 
     def get_cart_coords(self) -> str:
         """Return the Cartesian coordinates of the molecule."""
+        self._check_ordered()
         outs = [f"{site.specie.symbol} {' '.join(f'{x:0.6f}' for x in site.coords)}" for site in self._mol]
         return "\n".join(outs)
 
@@ -430,8 +436,6 @@ class GaussianInput:
         output.append(f"{charge_str}{multip_str}")
 
         if isinstance(self._mol, Molecule):
-            if not self._mol.is_ordered:
-                raise ValueError("Gaussian input can only be written from an ordered molecule")
             if cart_coords is True:
                 output.append(self.get_cart_coords())
             else:
