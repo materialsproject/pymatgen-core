@@ -431,7 +431,7 @@ class OxideType:
 
         Returns:
             tuple[str, int]: Type of oxide (ozonide/peroxide/superoxide/hydroxide/None) and number of
-                peroxide/superoxide/hydroxide bonds in structure.
+                O atoms involved in peroxide/superoxide/hydroxide bonds in structure.
         """
         structure = self.structure
         relative_cutoff = self.relative_cutoff
@@ -462,8 +462,10 @@ class OxideType:
 
         if h_sites_frac_coords:
             dist_matrix = lattice.get_all_distances(o_sites_frac_coords, h_sites_frac_coords)
-            if np.any(dist_matrix < relative_cutoff * 0.93):
-                return "hydroxide", len(np.where(dist_matrix < relative_cutoff * 0.93)[0]) // 2
+            oh_mask = dist_matrix < relative_cutoff * 0.93
+            if np.any(oh_mask):
+                # dist_matrix is O x H, so count the distinct O atoms that have an H neighbor
+                return "hydroxide", len(set(np.where(oh_mask)[0]))
         dist_matrix = lattice.get_all_distances(o_sites_frac_coords, o_sites_frac_coords)
         np.fill_diagonal(dist_matrix, 1000)
         is_superoxide = is_peroxide = is_ozonide = False
@@ -503,7 +505,8 @@ def oxide_type(
         structure (Structure): Input structure.
         relative_cutoff (float): Relative_cutoff * act. cutoff stipulates the
             max distance two O atoms must be from each other.
-        return_nbonds (bool): Should number of bonds be requested?
+        return_nbonds (bool): Whether to also return the number of O atoms involved in
+            peroxide/superoxide/hydroxide bonds (or the number of O atoms for a normal oxide).
     """
     ox_obj = OxideType(structure, relative_cutoff)
     if return_nbonds:

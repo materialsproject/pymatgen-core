@@ -197,6 +197,43 @@ class TestMiscFunction(MatSciTest):
         struct = Structure(lattice, elems, coords)
         assert oxide_type(struct, 1.1) == "None"
 
+    @pytest.mark.parametrize("n_hydroxide", [1, 2, 3])
+    def test_oxide_type_hydroxide_nbonds(self, n_hydroxide):
+        # Regression test for https://github.com/materialsproject/pymatgen/issues/4757:
+        # each isolated OH group was counted as half a bond.
+        species, coords = [], []
+        for idx in range(n_hydroxide):
+            offset = 0.25 * idx
+            species += ["O", "H", "Li"]
+            coords += [[offset, 0, 0], [offset + 0.05, 0, 0], [offset, 0.5, 0.5]]
+        struct = Structure(Lattice.cubic(20.0), species, coords)
+        assert oxide_type(struct, return_nbonds=True) == ("hydroxide", n_hydroxide)
+
+    def test_oxide_type_hydroxide_nbonds_counts_o_atoms(self):
+        # An O bonded to two H counts once, like the per-O count of the O-O branches
+        struct = Structure(
+            Lattice.cubic(20.0),
+            ["O", "H", "H"],
+            [[0, 0, 0], [0.048, 0, 0], [0, 0.048, 0]],
+        )
+        assert oxide_type(struct, return_nbonds=True) == ("hydroxide", 1)
+
+        # LiOH: two O atoms, each with one H neighbour
+        lattice = Lattice.from_parameters(3.565276, 3.565276, 4.384277, 90, 90, 90)
+        struct = Structure(
+            lattice,
+            ["H", "H", "Li", "Li", "O", "O"],
+            [
+                [0.000000, 0.500000, 0.413969],
+                [0.500000, 0.000000, 0.586031],
+                [0.000000, 0.000000, 0.000000],
+                [0.500000, 0.500000, 0.000000],
+                [0.000000, 0.500000, 0.192672],
+                [0.500000, 0.000000, 0.807328],
+            ],
+        )
+        assert oxide_type(struct, 1.1, return_nbonds=True) == ("hydroxide", 2)
+
     def test_sulfide_type(self):
         # NaS2 -> polysulfide
         lattice = Lattice.tetragonal(9.59650, 11.78850)
