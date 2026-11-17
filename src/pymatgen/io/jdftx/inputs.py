@@ -288,10 +288,10 @@ class JDFTXInfile(dict, MSONable):
         cls,
         structure: Structure,
         selective_dynamics: ArrayLike | None = None,
-        velocities: ArrayLike | None = None,
-        constraint_types: ArrayLike | None = None,
-        constraint_vectors: ArrayLike | None = None,
-        hyperplane_group_names: ArrayLike | None = None,
+        velocities: list | None = None,
+        constraint_types: list | None = None,
+        constraint_vectors: list | None = None,
+        hyperplane_group_names: list | None = None,
         write_cart_coords: bool = False,
         ignore_site_properties: bool = False,
     ) -> JDFTXInfile:
@@ -308,18 +308,18 @@ class JDFTXInfile(dict, MSONable):
             structure (Structure): Structure to convert.
             selective_dynamics (ArrayLike, optional): Selective dynamics attribute for each site if available.
                 Shape Nx1, by default None. If None, will check structure.site_properties for "selective_dynamics".
-            velocities (ArrayLike, optional): Velocities for each site if available, in Cartesian angstrom/fs (the
+            velocities (list, optional): Velocities for each site if available, in Cartesian angstrom/fs (the
                 same units as structure.site_properties["velocities"]), regardless of write_cart_coords. Converted
                 to JDFTx units on writing. Shape Nx3, by default None. If None, will check
                 structure.site_properties for "velocities".
-            constraint_types (ArrayLike, optional): Constraint type ("Linear", "Planar", "HyperPlane", or None) for
+            constraint_types (list, optional): Constraint type ("Linear", "Planar", "HyperPlane", or None) for
                 each site if available. By default None. If None, will check structure.site_properties for
                 "constraint_types".
-            constraint_vectors (ArrayLike, optional): Constraint vectors for each site if available, in Cartesian
+            constraint_vectors (list, optional): Constraint vectors for each site if available, in Cartesian
                 coordinates (see _constraint_vector_to_cartesian), regardless of write_cart_coords. A list of vectors
                 for a "HyperPlane" site, a single vector otherwise. By default None. If None, will check
                 structure.site_properties for "constraint_vectors".
-            hyperplane_group_names (ArrayLike, optional): Group names for each site if available (a list with one
+            hyperplane_group_names (list, optional): Group names for each site if available (a list with one
                 name per hyperplane for a "HyperPlane" site, None otherwise). By default None. If None, will check
                 structure.site_properties for "group_names".
             write_cart_coords (bool, optional): Whether to write Cartesian coordinates instead of fractional.
@@ -1174,7 +1174,7 @@ def _allnone(val) -> bool:
 
 
 def selective_dynamics_site_prop_to_jdftx_interpretable(
-    selective_dynamics: Sequence[Any] | ArrayLike[int | float | bool],
+    selective_dynamics: Sequence[Any] | ArrayLike,
 ) -> ArrayLike:
     """Convert selective dynamics site property to JDFTX interpretable format.
 
