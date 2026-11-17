@@ -1032,23 +1032,6 @@ class CifParser:
             num_h = {"Wat": 2, "wat": 2, "O-H": 1}
             return num_h.get(symbol[:3], 0)
 
-        def get_matching_coord(
-            coord: tuple[float, float, float],
-        ) -> tuple[float, float, float] | Literal[False]:
-            """Find an existing site that is symmetry-equivalent to coord.
-
-            Returns the first match for the first symmetry operation (in order) that maps
-            coord onto any existing site, or False if there is none.
-            """
-            n_sites = len(coord_keys)
-            if not n_sites:
-                return False
-            matches = _pbc_match_matrix(_apply_affine(affine, coord), coord_array[:n_sites], self._site_tolerance)
-            op_has_match = matches.any(axis=1)
-            if not op_has_match.any():
-                return False
-            return coord_keys[int(np.argmax(matches[np.argmax(op_has_match)]))]
-
         lattice = self.get_lattice(data)
 
         # Check minimal lattice thickness
@@ -1083,6 +1066,23 @@ class CifParser:
         # numpy array from the whole dict for every site, which is quadratic in the site count.
         coord_keys: list[tuple[float, float, float]] = []
         coord_array = np.empty((len(data["_atom_site_label"]), 3))
+
+        def get_matching_coord(
+            coord: tuple[float, float, float],
+        ) -> tuple[float, float, float] | Literal[False]:
+            """Find an existing site that is symmetry-equivalent to coord.
+
+            Returns the first match for the first symmetry operation (in order) that maps
+            coord onto any existing site, or False if there is none.
+            """
+            n_sites = len(coord_keys)
+            if not n_sites:
+                return False
+            matches = _pbc_match_matrix(_apply_affine(affine, coord), coord_array[:n_sites], self._site_tolerance)
+            op_has_match = matches.any(axis=1)
+            if not op_has_match.any():
+                return False
+            return coord_keys[int(np.argmax(matches[np.argmax(op_has_match)]))]
 
         for idx, label in enumerate(data["_atom_site_label"]):
             # If site type symbol exists, use it. Otherwise use the label
