@@ -837,7 +837,7 @@ def test_density_of_states_read_errors(line: str, error_match: str):
     ("line", "expected"),
     [
         ("elec-ex-corr hyb-HSE06", "hyb-HSE06"),
-        ("elec-ex-corr hyb-hse06", "hyb-hse06"),  # JDFTx's names are case-insensitive
+        ("elec-ex-corr hyb-hse06", "hyb-HSE06"),  # JDFTx's names are case-insensitive: stored as its spelling
         ("elec-ex-corr-compare hyb-HSE06", ["hyb-HSE06"]),  # repeatable, so stored as a list
     ],
 )
@@ -848,7 +848,7 @@ def test_hse06_is_accepted_with_a_warning(line: str, expected: str | list[str]):
         jif = JDFTXInfile.from_str(f"{line}\n", dont_require_structure=True)
     assert len([w for w in record if issubclass(w.category, JDFTXOptionWarning)]) == 1
     assert jif[tag] == expected
-    assert str(jif).split() == line.split()
+    assert str(jif).split() == [tag, "hyb-HSE06"]
     jif = JDFTXInfile.from_str("lattice Cubic 10\n", dont_require_structure=True)
     with pytest.warns(JDFTXOptionWarning, match="hyb-gga-hse06") as record:
         jif[tag] = expected

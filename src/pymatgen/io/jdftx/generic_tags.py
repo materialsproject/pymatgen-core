@@ -488,7 +488,7 @@ class StrTag(AbstractTag):
             value (str): The value string to read.
 
         Returns:
-            str: The parsed string value.
+            str: The parsed string value (corrected for case-sensitivity if StrTag's `options` is not None).
         """
         self._single_value_read_validate(tag, value)
         if self.species_name and element_from_species_name(value.strip()) is None:
@@ -503,7 +503,8 @@ class StrTag(AbstractTag):
             for option, message in self.option_warnings.items():
                 if compare_value == option.strip().lower():
                     warnings.warn(f"'{tag} {value}': {message}", JDFTXOptionWarning, stacklevel=3)
-            return value
+            # JDFTx matches options ignoring case: store its spelling, which code comparing values relies on
+            return value if compare_options is None else self.options[compare_options.index(compare_value)]
         raise ValueError(f"The string value '{value}' must be one of {self.options} for tag '{tag}'")
 
     def write(self, tag: str, value: Any) -> str:

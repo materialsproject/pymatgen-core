@@ -109,6 +109,8 @@ def test_str_tag():
         ValueError, match=re.escape(f"The string value '{value}' must be one of {str_tag.options} for tag '{tag}'")
     ):
         str_tag.read(tag, value)
+    # Options match ignoring case, as in JDFTx, and read as the option's own spelling
+    assert StrTag(options=["Ken"]).read(tag, "kEN") == "Ken"
     # If both the tagname and value are written, two tokens are to be written
     str_tag = StrTag(write_tagname=True, write_value=True)
     assert str_tag.get_token_len() == 2
