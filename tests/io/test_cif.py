@@ -1143,6 +1143,16 @@ Si1 Si 0 0 0 1 0.0
         block = CifBlock.from_str(cif_str)
         assert block.data["_atom_site_type_symbol"] == ["X"]
 
+    def test_write_oxi_states_with_plain_element(self):
+        """Test that oxidation states are kept when some species have none."""
+        for fe, expected in (
+            (Species("Fe", 2), {Species("Fe", 2): 1}),
+            ({"Fe2+": 0.5, "Fe3+": 0.5}, {Species("Fe", 2): 0.5, Species("Fe", 3): 0.5}),
+        ):
+            struct = Structure(Lattice.cubic(4), [fe, Element("O")], [[0, 0, 0], [0.5, 0.5, 0.5]])
+            parsed = CifParser.from_str(str(CifWriter(struct))).parse_structures(primitive=False)[0]
+            assert parsed.composition == Composition({**expected, Species("O", 0): 1})
+
     def test_cif_thirds(self):
         """Test cif sanitization idealizing sites at 1/3 and 2/3 with PBC."""
         # Initialize 21 hydrogen sites at [0, 1/3, 2/3] + PBC
