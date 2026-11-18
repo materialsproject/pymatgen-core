@@ -33,6 +33,10 @@ __version__ = "0.1"
 __maintainer__ = "Samuel Blau"
 __email__ = "samblau1@gmail.com"
 
+# Warnings are attributed to the first stack frame outside pymatgen.io.qchem, i.e. the user's
+# code, no matter how many layers (generator, QChemDictSet, legacy subclass) sit in between.
+_SKIP_FILE_PREFIXES = (os.path.dirname(os.path.abspath(__file__)) + os.sep,)
+
 # Note that in addition to the solvent-specific parameters, this dict contains
 # dielectric constants for use with each solvent. The dielectric constants
 # are used by the isodensity SS(V)PE electrostatic calculation part of CMIRS
@@ -138,6 +142,8 @@ CMIRS_SETTINGS: dict[str, Any] = {
 
 
 QCHEM_INPUT_FILE = "mol.qin"
+# Q-Chem 5 reads the parameters of a custom SMD solvent from this file
+SOLVENT_DATA_FILE = "solvent_data"
 
 
 class QCInputSet(InputSet):
@@ -180,13 +186,20 @@ class QCInputSet(InputSet):
                 must be named "mol.qin" (optionally compressed, e.g. "mol.qin.gz").
             optional_files (dict): Other files to read, as a dict of {filename: object class}.
                 The object class must have a from_file method. Use None instead of a
-                class to read the file as plain text.
+                class to read the file as plain text. A "solvent_data" file (custom SMD
+                solvent in Q-Chem 5) is always read as plain text if it exists, so that
+                write_input and from_directory round-trip; it does not need to be listed here.
         """
         directory = Path(directory)
         qcinput = QCInput.from_file(zpath(str(directory / QCHEM_INPUT_FILE)))
 
+        files_to_read: dict[str, Any] = {}
+        if os.path.isfile(zpath(str(directory / SOLVENT_DATA_FILE))):
+            files_to_read[SOLVENT_DATA_FILE] = None
+        files_to_read |= optional_files or {}
+
         optional_inputs: dict[str, Any] = {}
-        for name, obj in (optional_files or {}).items():
+        for name, obj in files_to_read.items():
             file_path = zpath(str(directory / name))
             if obj is None:
                 with zopen(file_path, mode="rt", encoding="utf-8") as file:
@@ -204,6 +217,10 @@ class QCInputGenerator(InputGenerator):
     A generator holds the "recipe" for a calculation and nothing that is specific to a
     particular molecule. Call get_input_set with a molecule to obtain a QCInputSet that
     can be written to disk. The same generator can be reused for any number of molecules.
+
+    Settings can be changed after construction. They are validated when the generator is
+    created and again every time get_input_set is called, so invalid edits made after
+    construction raise at get_input_set.
 
     Args:
         job_type (str): QChem job type to run. Valid options are "opt" for optimization,
@@ -538,7 +555,7 @@ class QCInputGenerator(InputGenerator):
                     if rem.get("solvent_method") != "pcm":
                         warnings.warn(
                             "The solvent section will be ignored unless solvent_method=pcm!",
-                            stacklevel=3,
+                            skip_file_prefixes=_SKIP_FILE_PREFIXES,
                         )
                 if sec == "smx":
                     smx |= lower_and_check_unique(sec_dict)
@@ -572,17 +589,17 @@ class QCInputGenerator(InputGenerator):
                             if self.cmirs_solvent is not None and v == "0":
                                 warnings.warn(
                                     "Setting IDEFESR=0 will disable the CMIRS calculation you requested!",
-                                    stacklevel=3,
+                                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
                                 )
                             if self.cmirs_solvent is None and v == "1":
                                 warnings.warn(
                                     "Setting IDEFESR=1 will have no effect unless you specify a cmirs_solvent!",
-                                    stacklevel=3,
+                                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
                                 )
                         if k == "dielst" and rem.get("solvent_method") != "isosvp":
                             warnings.warn(
                                 "Setting DIELST will have no effect unless you specify a solvent_method=isosvp!",
-                                stacklevel=3,
+                                skip_file_prefixes=_SKIP_FILE_PREFIXES,
                             )
 
                         svp[k] = v
@@ -631,7 +648,7 @@ class QCInputGenerator(InputGenerator):
         optional_files: dict[str, Any] = {}
         if self.smd_solvent in {"custom", "other"} and self.qchem_version == 5:
             # Q-Chem 5 reads the parameters of a custom SMD solvent from this file
-            optional_files["solvent_data"] = self.custom_smd
+            optional_files[SOLVENT_DATA_FILE] = self.custom_smd
 
         return QCInputSet(QCInput(molecule, **self._get_sections()), optional_files=optional_files)
 
@@ -769,7 +786,7 @@ class QChemDictSet(QCInput):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
 
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
@@ -834,7 +851,7 @@ class QChemDictSet(QCInput):
                 In 'atomic' mode (default), dict keys represent the atomic number associated with each
                 radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
                 position of a single specific atom in the input structure.
-                        cdft_constraints (list of lists of dicts):
+            cdft_constraints (list of lists of dicts):
                 A list of lists of dictionaries, where each dictionary represents a charge
                 constraint in the cdft section of the QChem input file.
 
@@ -992,6 +1009,8 @@ class QChemDictSet(QCInput):
             vdw_mode=self.vdw_mode,
             extra_scf_print=self.extra_scf_print,
         )
+        # _get_sections already ran once (silently) in QCInputGenerator.__post_init__ to validate
+        # the settings. This second call is the one that emits warnings; do not merge the two.
         super().__init__(self.molecule, **generator._get_sections())
 
     def write(self, input_file: PathLike) -> None:
@@ -1056,7 +1075,7 @@ class SinglePointSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1285,7 +1304,7 @@ class OptSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1496,7 +1515,7 @@ class TransitionStateSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1633,7 +1652,7 @@ class ForceSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1827,7 +1846,7 @@ class FreqSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1983,8 +2002,9 @@ class PESScanSet(QChemDictSet):
     geometries.
     Note: Because there are no defaults that can be used for a PES scan (the
     variables are completely dependent on the molecular structure), by default
-    scan_variables = None. However, a PES Scan job should not be run with less
-    than one variable (or more than two variables).
+    scan_variables = None. The scan must be supplied either with scan_variables or
+    with the "scan" section of overwrite_inputs, as for PESScanSetGenerator. A PES
+    Scan job should not be run with less than one variable (or more than two variables).
     """
 
     def __init__(
@@ -2042,7 +2062,7 @@ class PESScanSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -2103,9 +2123,6 @@ class PESScanSet(QChemDictSet):
         self.scf_algorithm = scf_algorithm
         self.max_scf_cycles = max_scf_cycles
 
-        if scan_variables is None:
-            raise ValueError("Cannot run a pes_scan job without some variable to scan over!")
-
         super().__init__(
             molecule=molecule,
             job_type="pes_scan",
@@ -2127,3 +2144,6 @@ class PESScanSet(QChemDictSet):
             overwrite_inputs=overwrite_inputs,
             vdw_mode=vdw_mode,
         )
+        # same check as PESScanSetGenerator.get_input_set, so both accept the same settings
+        if not self.scan:
+            raise ValueError("Cannot run a pes_scan job without some variable to scan over!")

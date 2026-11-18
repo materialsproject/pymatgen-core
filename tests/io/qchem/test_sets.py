@@ -1433,6 +1433,35 @@ class TestQCInputGenerator:
         generator.overwrite_inputs = {"scan": scan_variables}
         assert generator.get_input_set(water).qcinput.scan == scan_variables
 
+    def test_pes_scan_same_validation_as_legacy_set(self, water):
+        scan_variables = {"stre": ["1 2 0.95 1.35 0.1"]}
+        for kwargs in ({"scan_variables": scan_variables}, {"overwrite_inputs": {"scan": scan_variables}}):
+            legacy = PESScanSet(water, **kwargs)
+            assert legacy.scan == scan_variables
+            assert str(legacy) == str(PESScanSetGenerator(**kwargs).get_input_set(water).qcinput)
+
+        for kwargs in ({}, {"scan_variables": {}}):
+            with pytest.raises(ValueError, match="Cannot run a pes_scan job without some variable to scan over"):
+                PESScanSet(water, **kwargs)
+            with pytest.raises(ValueError, match="Cannot run a pes_scan job without some variable to scan over"):
+                PESScanSetGenerator(**kwargs).get_input_set(water)
+
+    def test_warnings_point_at_caller(self, water):
+        overwrite_inputs = {"solvent": {"dielectric": "78.39"}}
+        scan_variables = {"stre": ["1 2 0.95 1.35 0.1"]}
+        callers = {
+            "generator": lambda: SinglePointSetGenerator(overwrite_inputs=overwrite_inputs).get_input_set(water),
+            "pes_scan generator": lambda: PESScanSetGenerator(
+                scan_variables=scan_variables, overwrite_inputs=overwrite_inputs
+            ).get_input_set(water),
+            "QChemDictSet": lambda: QChemDictSet(water, "sp", "def2-svpd", "diis", overwrite_inputs=overwrite_inputs),
+            "legacy subclass": lambda: SinglePointSet(water, overwrite_inputs=overwrite_inputs),
+        }
+        for name, call in callers.items():
+            with pytest.warns(UserWarning, match="The solvent section will be ignored") as record:
+                call()
+            assert [warning.filename for warning in record] == [__file__], name
+
     def test_msonable(self, water):
         generator = OptSetGenerator(
             qchem_version=6,
@@ -1515,10 +1544,17 @@ class TestQCInputSet:
         with open(tmp_path / "legacy.qin", encoding="utf-8") as legacy, open(tmp_path / "mol.qin") as new:
             assert legacy.read() == new.read()
 
-        assert QCInputSet.from_directory(tmp_path).optional_files == {}
-        from_directory = QCInputSet.from_directory(tmp_path, optional_files={"solvent_data": None})
+        # solvent_data is read automatically, so write_input -> from_directory -> write_input round-trips
+        from_directory = QCInputSet.from_directory(tmp_path)
         assert from_directory.optional_files == {"solvent_data": custom_smd}
         assert str(from_directory.qcinput) == str(input_set.qcinput)
+        from_directory.write_input(tmp_path / "rewritten")
+        assert sorted(os.listdir(tmp_path / "rewritten")) == ["mol.qin", "solvent_data"]
+        with open(tmp_path / "rewritten" / "solvent_data", encoding="utf-8") as file:
+            assert file.read() == custom_smd
+        # listing it explicitly still works
+        from_directory = QCInputSet.from_directory(tmp_path, optional_files={"solvent_data": None})
+        assert from_directory.optional_files == {"solvent_data": custom_smd}
 
         # Q-Chem 6 reads the solvent parameters from the $smx section
         input_set = SinglePointSetGenerator(qchem_version=6, smd_solvent="custom", custom_smd=custom_smd).get_input_set(
