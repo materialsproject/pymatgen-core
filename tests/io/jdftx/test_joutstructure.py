@@ -10,6 +10,7 @@ from pytest import approx
 
 from pymatgen.core import Lattice, Structure
 from pymatgen.core.units import Ha_to_eV, bohr_to_ang
+from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.jdftx.inputs import JDFTXInfile, JDFTXStructure
 from pymatgen.io.jdftx.joutstructure import JOutStructure, _parse_posn_line
 from pymatgen.util.testing import TEST_FILES_DIR
@@ -139,9 +140,8 @@ def test_posns_constraints_to_infile():
     np.testing.assert_allclose(jstruct.constraint_vectors, jst.constraint_vectors)
 
 
-def test_partial_posns_constraints_to_infile():
-    # Constraints on only some sites (and HyperPlane sites with different numbers of planes) are kept as site
-    # properties too, so they survive a Structure copy and carry over to a new input file
+def _partially_constrained_jstruct() -> JOutStructure:
+    """A step with constraints on only some sites, and HyperPlane sites with different numbers of planes."""
     r = np.array([[10.0, 2.0, 1.0], [0.0, 9.0, 3.0], [0.0, 0.0, 8.0]])
     jst = JOutStructure(lattice=Lattice(r.T * bohr_to_ang), species=[], coords=[])
     posns_lines = [
@@ -152,18 +152,24 @@ def test_partial_posns_constraints_to_infile():
         "ion H 0.2 0.4 0.6 1",
     ]
     jst._parse_posns_lines(posns_lines, [])
-    for prop in ("constraint_types", "constraint_vectors", "group_names"):
-        assert prop in jst.site_properties
-    copied = Structure.from_dict(jst.structure.copy().as_dict())
-    jif = JDFTXInfile.from_structure(copied)
-    jstruct = JDFTXStructure.from_jdftxinfile(jif)
-    assert jstruct.constraint_types == ["Linear", "HyperPlane", "HyperPlane", None]
-    assert jstruct.hyperplane_group_names == [None, ["g1", "g2"], ["g1"], None]
-    for vectors, known in zip(jstruct.constraint_vectors, jst.constraint_vectors, strict=True):
-        if known is None:
-            assert vectors is None
-        else:
-            np.testing.assert_allclose(vectors, known)
+    return jst
+
+
+def test_partial_posns_constraints_kept_off_site_properties():
+    # Such constraints don't form regular arrays, so they are kept only as the step's attributes: as site properties
+    # they would break ASE conversion. They still serialize, and restarts write the ion lines JDFTx printed.
+    jst = _partially_constrained_jstruct()
+    assert not {"constraint_types", "constraint_vectors", "group_names"} & set(jst.site_properties)
+    assert jst.constraint_types == ["Linear", "HyperPlane", "HyperPlane", None]
+    assert jst.group_names == [None, ["g1", "g2"], ["g1"], None]
+    loaded = JOutStructure.from_dict(jst.as_dict())
+    assert loaded.constraint_types == jst.constraint_types
+    assert loaded.group_names == jst.group_names
+
+
+def test_partial_posns_constraints_reach_ase():
+    pytest.importorskip("ase")
+    assert len(AseAtomsAdaptor.get_atoms(_partially_constrained_jstruct())) == 4
 
 
 @pytest.mark.parametrize("coords_type", ["lattice", "cartesian"])

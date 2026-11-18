@@ -26,6 +26,7 @@ from pymatgen.io.jdftx.inputs import (
     JDFTX_SPECIES_SITE_PROPERTY,
     JDFTX_TIME_UNIT_TO_FS,
     _constraint_vector_to_cartesian,
+    _is_homogeneous,
     get_species_elements,
     get_species_names,
 )
@@ -242,7 +243,7 @@ class JOutStructure(Structure):
             velocities (list[np.ndarray | None] | None): The velocities of the atoms in the system.
         """
         self._velocities = velocities
-        if velocities is not None:
+        if velocities is not None and _is_homogeneous(velocities):
             self.add_site_property("velocities", list(velocities))
         elif "velocities" in self.site_properties:
             self.remove_site_property("velocities")
@@ -266,10 +267,7 @@ class JOutStructure(Structure):
             constraint_types (list[str | None] | None): The constraint_types of the atoms in the system.
         """
         self._constraint_types = constraint_types
-        if constraint_types is not None:
-            self.add_site_property("constraint_types", list(constraint_types))
-        elif "constraint_types" in self.site_properties:
-            self.remove_site_property("constraint_types")
+        self._sync_constraint_site_properties()
 
     @property
     def constraint_vectors(self) -> Sequence | list[np.ndarray | list[np.ndarray] | None] | None:
@@ -291,10 +289,7 @@ class JOutStructure(Structure):
             atoms in the system.
         """
         self._constraint_vectors = constraint_vectors
-        if constraint_vectors is not None:
-            self.add_site_property("constraint_vectors", list(constraint_vectors))
-        elif "constraint_vectors" in self.site_properties:
-            self.remove_site_property("constraint_vectors")
+        self._sync_constraint_site_properties()
 
     @property
     def group_names(self) -> Sequence | list[list[str | None] | None] | None:
@@ -315,10 +310,23 @@ class JOutStructure(Structure):
             group_names (list[list[str | None] | None] | None): The group_names of the atoms in the system.
         """
         self._group_names = group_names
-        if group_names is not None:
-            self.add_site_property("group_names", list(group_names))
-        elif "group_names" in self.site_properties:
-            self.remove_site_property("group_names")
+        self._sync_constraint_site_properties()
+
+    def _sync_constraint_site_properties(self) -> None:
+        """Set the constraints as site properties together, only if they all form regular arrays (see
+        _is_homogeneous); otherwise they are only kept as the private attributes.
+        """
+        constraints = {
+            "constraint_types": self._constraint_types,
+            "constraint_vectors": self._constraint_vectors,
+            "group_names": self._group_names,
+        }
+        homogeneous = _is_homogeneous(*constraints.values())
+        for prop, values in constraints.items():
+            if values is not None and homogeneous:
+                self.add_site_property(prop, list(values))
+            elif prop in self.site_properties:
+                self.remove_site_property(prop)
 
     def __init__(
         self,

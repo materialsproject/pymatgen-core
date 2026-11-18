@@ -288,11 +288,12 @@ class JDFTXInfile(dict, MSONable):
         cls,
         structure: Structure,
         selective_dynamics: ArrayLike | None = None,
+        write_cart_coords: bool = False,
+        movescale: list | None = None,
         velocities: list | None = None,
         constraint_types: list | None = None,
         constraint_vectors: list | None = None,
         hyperplane_group_names: list | None = None,
-        write_cart_coords: bool = False,
         ignore_site_properties: bool = False,
     ) -> JDFTXInfile:
         """Create a JDFTXInfile object from a pymatgen Structure.
@@ -306,10 +307,13 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             structure (Structure): Structure to convert.
-            selective_dynamics (ArrayLike, optional): Selective dynamics attribute for each site if available: one
-                value per site, or one per direction for each site as in structure.site_properties (a site is then
-                mobile only if it can move in every direction). By default None. If None, will check
-                structure.site_properties for "selective_dynamics".
+            selective_dynamics (ArrayLike, optional): Selective dynamics flags for each site (see
+                JDFTXStructure.selective_dynamics). By default None. If None, will check structure.site_properties for
+                "selective_dynamics".
+            write_cart_coords (bool, optional): Whether to write Cartesian coordinates instead of fractional.
+                Defaults to False.
+            movescale (list, optional): JDFTx's moveScale for each site (see JDFTXStructure.movescale). By default
+                None. If None, will check structure.site_properties for "movescale".
             velocities (list, optional): Velocities for each site if available, in Cartesian angstrom/fs (the
                 same units as structure.site_properties["velocities"]), regardless of write_cart_coords. Converted
                 to JDFTx units on writing. Shape Nx3, by default None. If None, will check
@@ -324,8 +328,6 @@ class JDFTXInfile(dict, MSONable):
             hyperplane_group_names (list, optional): Group names for each site if available (a list with one
                 name per hyperplane for a "HyperPlane" site, None otherwise). By default None. If None, will check
                 structure.site_properties for "group_names".
-            write_cart_coords (bool, optional): Whether to write Cartesian coordinates instead of fractional.
-                Defaults to False.
             ignore_site_properties (bool, optional): Whether to ignore site properties in the structure.
                 Defaults to False. If False, the per-site arguments above are taken from site_properties when they
                 are provided as None. If True, they are left as provided, and the duplicated structure used for
@@ -343,6 +345,7 @@ class JDFTXInfile(dict, MSONable):
         jdftxstructure = JDFTXStructure(
             _structure,
             selective_dynamics=selective_dynamics,
+            movescale=movescale,
             velocities=velocities,
             constraint_types=constraint_types,
             constraint_vectors=constraint_vectors,
@@ -1192,6 +1195,29 @@ def _allnone(val) -> bool:
     return False
 
 
+def _is_homogeneous(*vals: list | None) -> bool:
+    """Return whether per-site lists each form a regular array, as they must to be site properties.
+
+    pymatgen's AseAtomsAdaptor turns every site property into an array, so a ragged one (e.g. constraint vectors on
+    only some ions, or HyperPlane ions with different numbers of planes) breaks conversion to ASE Atoms. Ragged values
+    are kept as attributes instead (JDFTXStructure's, or JOutStructure's private ones). Constraint types, vectors and
+    group names are checked together, as they are only usable together.
+
+    Args:
+        *vals (list | None): Per-site values (None is skipped).
+
+    Returns:
+        bool: Whether np.array works on each.
+    """
+    try:
+        for val in vals:
+            if val is not None:
+                np.array(val)
+    except ValueError:
+        return False
+    return True
+
+
 def selective_dynamics_site_prop_to_jdftx_interpretable(
     selective_dynamics: Sequence[Any] | ArrayLike,
 ) -> ArrayLike:
@@ -1337,12 +1363,18 @@ class JDFTXStructure(MSONable):
     as the structure's "jdftx_species" site property, and written back from it (see JDFTXInfile.from_structure). The
     element of each species is the element symbol its name starts with (see element_from_species_name).
 
+    movescale and selective_dynamics are kept in sync with the structure's site properties of the same names (on a copy
+    of the given structure): each is read from its site property if not given, and written to it. A movescale given as
+    an argument replaces the selective_dynamics site property.
+
     Attributes:
         structure (Structure): Associated Structure.
-        selective_dynamics (ArrayLike): Selective dynamics attribute for each site if available. Given as one value
-            per site, or one per direction for each site (as in structure.site_properties["selective_dynamics"], from
-            which it is read if not given); stored as one 0/1 value per site (JDFTx's moveScale), 1 only for a site
-            that can move in every direction.
+        selective_dynamics (list[list[bool]]): Selective dynamics flags for each site (one per direction, as in
+            structure.site_properties["selective_dynamics"]; one per site is also accepted). A site free in every
+            direction goes with any non-zero moveScale, and a site fixed in every direction with moveScale 0, so they
+            give movescale for the sites it isn't given for. Once set, they match movescale ([True] * 3 for a non-zero
+            moveScale, [False] * 3 for 0): given flags that disagree with movescale, or that fix only some directions
+            of a site, are replaced with a warning.
         sort_structure (bool): Whether to sort the sites into the order JDFTx prints them in (grouped by species, in
             the order the species first appear), along with the per-site data below. Useful if species are not
             grouped properly together. Defaults to False. The order may not match JDFTx's if the input file names
@@ -1361,29 +1393,40 @@ class JDFTXStructure(MSONable):
             structure.site_properties["group_names"] if not given. i'th entry must be a list of group names (one per
             hyperplane, None for an unlabeled hyperplane) if the i'th constraint_type is "HyperPlane". Otherwise, None
             is expected.
+        movescale (list[float]): JDFTx's moveScale for each site: 0 holds the ion fixed, and a non-zero value also
+            scales the ion's steps in ionic and lattice minimizations (MD only uses whether it is 0). Must not be
+            negative (JDFTx rejects it). Filled from selective_dynamics for the sites it isn't given for (1 if free in
+            every direction, 0 otherwise), and 1 for sites with neither.
     """
 
     structure: Structure | None = None
-    selective_dynamics: ArrayLike | None = None
+    selective_dynamics: ArrayLike | list | None = None
     sort_structure: bool = False
     write_cart_coords: bool = False
     velocities: list | None = None
     constraint_types: list | None = None
     constraint_vectors: list | None = None
     hyperplane_group_names: list | None = None
+    movescale: list | None = None
 
     def __post_init__(self) -> None:
         """Post init function for JDFTXStructure.
 
-        Checks that self.structure is ordered, sorts the sites if sort_structure is set, converts the selective
-        dynamics to one value per site, and fills the per-site data that isn't given from the structure's site
-        properties.
+        Checks that self.structure is ordered, sorts the sites if sort_structure is set, fills the per-site data that
+        isn't given from the structure's site properties, and syncs movescale and selective_dynamics with each other
+        and with them.
         """
         # `Structure.is_ordered` checks for partial occupancies, which JDFTx cannot handle.
         # This does not check for ordering of species.
         if not self.structure.is_ordered:
             raise ValueError("Disordered structure with partial occupancies cannot be converted into JDFTXStructure!")
+        n_sites = len(cast("Structure", self.structure))
+        for x in ("movescale", "selective_dynamics"):
+            values = getattr(self, x)
+            if values is not None and len(values) != n_sites:
+                raise ValueError(f"{x} has {len(values)} values, but the structure has {n_sites} sites")
         optional_properties = [
+            "movescale",
             "selective_dynamics",
             "velocities",
             "constraint_types",
@@ -1403,25 +1446,68 @@ class JDFTXStructure(MSONable):
             for x in optional_properties:
                 if getattr(self, x) is not None:
                     setattr(self, x, [getattr(self, x)[i] for i in order])
-        if self.selective_dynamics is not None:
-            # Convert provided selective dynamics into JDFTX interpretable format
-            self.selective_dynamics = selective_dynamics_site_prop_to_jdftx_interpretable(self.selective_dynamics)
         # For the optional properties, if they are all None, set to None to avoid writing them out, but check for
         # data in structure.site_properties to populate them if available.
+        movescale_given = not _allnone(self.movescale)
         for x in optional_properties:
             if _allnone(getattr(self, x)):
                 setattr(self, x, None)
-                self._sync_site_property(x)
+                if not (x == "selective_dynamics" and movescale_given):  # Replaced, as an intentional change
+                    self._sync_site_property(x)
+        if self.movescale is not None or self.selective_dynamics is not None:
+            self._sync_movescale_and_selective_dynamics()
+
+    def _sync_movescale_and_selective_dynamics(self) -> None:
+        """Fill movescale from selective_dynamics for the sites without it, set selective_dynamics to match movescale
+        (warning for the sites where the given ones don't), and set both as the structure's site properties.
+        """
+        structure = cast("Structure", self.structure)
+        movescale = list(self.movescale) if self.movescale is not None else [None] * len(structure)
+        if self.selective_dynamics is None:
+            self.selective_dynamics = [None] * len(structure)
+        selective_dynamics: list[list[bool] | None] = [
+            sd if sd is None else [bool(x) for x in sd] if np.ndim(sd) else [bool(sd)] * 3
+            for sd in cast("list", self.selective_dynamics)
+        ]
+        # TODO: write a site fixed along only some directions with a Linear or Planar constraint instead
+        partial = [i for i, sd in enumerate(selective_dynamics) if sd is not None and any(sd) and not all(sd)]
+        if partial:
+            warnings.warn(
+                f"Selective dynamics that fix only some directions of a site are not supported yet (sites {partial}): "
+                "JDFTx's moveScale applies to every direction, so these sites are held fixed unless movescale is set, "
+                "and their selective dynamics are set to match",
+                stacklevel=4,
+            )
+        mismatched = [
+            i
+            for i, (scale, sd) in enumerate(zip(movescale, selective_dynamics, strict=True))
+            if scale is not None and sd is not None and (all(sd) or not any(sd)) and bool(scale) != all(sd)
+        ]
+        if mismatched:
+            warnings.warn(
+                f"movescale and selective_dynamics disagree for sites {mismatched} (a site free in every direction "
+                "has a non-zero moveScale, and a fixed one 0): movescale is used, and the selective dynamics are set "
+                "to match",
+                stacklevel=4,
+            )
+        # A site without either (e.g. one appended to a structure read from JDFTx) can move
+        filled_movescale = [
+            float(scale) if scale is not None else 1.0 if sd is None else float(all(sd))
+            for scale, sd in zip(movescale, selective_dynamics, strict=True)
+        ]
+        if negative := [i for i, scale in enumerate(filled_movescale) if scale < 0]:
+            raise ValueError(f"moveScale cannot be negative (sites {negative}), as JDFTx rejects it")
+        filled_selective_dynamics = [[bool(scale)] * 3 for scale in filled_movescale]
+        self.movescale, self.selective_dynamics = filled_movescale, filled_selective_dynamics
+        self.structure = structure.copy()  # Leave the given structure as it was
+        self.structure.add_site_property("movescale", filled_movescale)
+        self.structure.add_site_property("selective_dynamics", filled_selective_dynamics)
 
     def _sync_site_property(self, x: str) -> None:
         """Update a single JDFTXStructure attribute from the structure's site properties."""
         site_property = "group_names" if x == "hyperplane_group_names" else x
-        if self.structure is None or site_property not in self.structure.site_properties:
-            return
-        value = self.structure.site_properties[site_property]
-        setattr(
-            self, x, selective_dynamics_site_prop_to_jdftx_interpretable(value) if x == "selective_dynamics" else value
-        )
+        if self.structure is not None and site_property in self.structure.site_properties:
+            setattr(self, x, self.structure.site_properties[site_property])
 
     def __repr__(self) -> str:
         """Return representation of JDFTXStructure file.
@@ -1485,7 +1571,10 @@ class JDFTXStructure(MSONable):
                 are not grouped properly together.
             fill_site_properties (bool, optional): Whether to fill in site properties for
                 `JDFTXStructure.structure: Structure` from the JDFTXInfile tags. Species names that aren't their
-                element symbol (e.g. Fe1) are always kept, as the jdftx_species site property.
+                element symbol (e.g. Fe1) are always kept, as the jdftx_species site property, and so are the
+                movescale and selective_dynamics site properties (see JDFTXStructure). Velocities and constraints that
+                don't form a regular array (e.g. constraints on only some ions) are not set as site properties, so the
+                structure still converts to ASE Atoms; they are kept as the JDFTXStructure's attributes.
 
         Returns:
             JDFTXStructure: The created JDFTXStructure object.
@@ -1493,7 +1582,7 @@ class JDFTXStructure(MSONable):
         lattice = _infile_to_pmg_lattice(jdftxinfile)
         elements, species_names = get_species_elements([x["species-id"] for x in jdftxinfile["ion"]])
         coords = np.array([[x["x0"], x["x1"], x["x2"]] for x in jdftxinfile["ion"]])
-        selective_dynamics = np.array([x["moveScale"] for x in jdftxinfile["ion"]])
+        movescale = [x["moveScale"] for x in jdftxinfile["ion"]]
         # Gather optional tags
         velocities = [
             np.array([float(v) for v in [x["v"]["vx0"], x["v"]["vx1"], x["v"]["vx2"]]]) if "v" in x else None
@@ -1544,19 +1633,18 @@ class JDFTXStructure(MSONable):
             struct.add_site_property(JDFTX_SPECIES_SITE_PROPERTY, species_names)
         if fill_site_properties:
             site_properties: list[list] = [velocities, constraint_types, constraint_vectors, hyperplane_groups]
-            for prop, val in zip(
+            constraints_homogeneous = _is_homogeneous(constraint_types, constraint_vectors, hyperplane_groups)
+            for prop, val, homogeneous in zip(
                 ["velocities", "constraint_types", "constraint_vectors", "group_names"],
                 site_properties,
+                [_is_homogeneous(velocities)] + [constraints_homogeneous] * 3,
                 strict=True,
             ):
-                if (val is not None) and (not all(x is None for x in val)):
+                if (val is not None) and (not all(x is None for x in val)) and homogeneous:
                     struct.add_site_property(prop, val)
-            if (selective_dynamics is not None) and (not all(x is None for x in selective_dynamics)):
-                # A site's moveScale applies to all three directions
-                struct.add_site_property("selective_dynamics", [[bool(s)] * 3 for s in selective_dynamics])
         return cls(
             structure=struct,
-            selective_dynamics=selective_dynamics,
+            movescale=movescale,  # Added to the structure's site properties along with selective_dynamics
             sort_structure=sort_structure,
             velocities=velocities,
             constraint_types=constraint_types,
@@ -1598,7 +1686,7 @@ class JDFTXStructure(MSONable):
         for i, site in enumerate(self.structure):
             label = site.label
             coords = site.coords / bohr_to_ang if in_cart_coords else site.frac_coords
-            sd = int(bool(cast("np.ndarray", self.selective_dynamics)[i])) if self.selective_dynamics is not None else 1
+            movescale = self.movescale[i] if self.movescale is not None else 1.0
             name = species_names[i] if species_names is not None else None
             if isinstance(name, str) and element_from_species_name(name) == getattr(site.specie, "symbol", None):
                 label = name  # The site's JDFTx species name (e.g. Fe1)
@@ -1617,7 +1705,7 @@ class JDFTXStructure(MSONable):
                 "x0": coords[0],
                 "x1": coords[1],
                 "x2": coords[2],
-                "moveScale": sd,
+                "moveScale": movescale,
             }
             # Gather velocities if present
             if (self.velocities is not None) and (self.velocities[i] is not None):
@@ -1630,7 +1718,7 @@ class JDFTXStructure(MSONable):
                 ion_dict_rep["v"] = {"vx0": velocity[0], "vx1": velocity[1], "vx2": velocity[2]}
             # Gather constraints if present
             if self.constraint_types is not None and self.constraint_types[i] is not None:
-                ion_dict_rep.update(self._get_constraint_tags(i, sd, in_cart_coords))
+                ion_dict_rep.update(self._get_constraint_tags(i, movescale, in_cart_coords))
             jdftx_tag_dict["ion"].append(ion_dict_rep)
         if mismatched_sites:
             warnings.warn(
@@ -1640,12 +1728,12 @@ class JDFTXStructure(MSONable):
             )
         return str(JDFTXInfile.from_dict(jdftx_tag_dict))
 
-    def _get_constraint_tags(self, i: int, move_scale: int, in_cart_coords: bool) -> dict[str, Any]:
+    def _get_constraint_tags(self, i: int, move_scale: float, in_cart_coords: bool) -> dict[str, Any]:
         """Get the ion tag entries for the constraint on a site.
 
         Args:
             i (int): Site index.
-            move_scale (int): moveScale written for the site.
+            move_scale (float): moveScale written for the site.
             in_cart_coords (bool): Whether the ion tags are written in Cartesian coordinates.
 
         Returns:
@@ -1707,6 +1795,7 @@ class JDFTXStructure(MSONable):
             "constraint_types": self.constraint_types,
             "constraint_vectors": self.constraint_vectors,
             "hyperplane_group_names": self.hyperplane_group_names,
+            "movescale": self.movescale,
         }
 
     @classmethod
@@ -1726,6 +1815,7 @@ class JDFTXStructure(MSONable):
             constraint_types=params.get("constraint_types"),
             constraint_vectors=params.get("constraint_vectors"),
             hyperplane_group_names=params.get("hyperplane_group_names"),
+            movescale=params.get("movescale"),  # Older dicts only have selective_dynamics (one 0/1 value per site)
         )
 
 

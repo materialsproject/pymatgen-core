@@ -11,6 +11,7 @@ import pytest
 from pymatgen.core import DummySpecies, Lattice, Species
 from pymatgen.core.structure import Site, Structure
 from pymatgen.core.units import bohr_to_ang
+from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.jdftx.generic_tags import JDFTXOptionWarning, MultiformatTag
 from pymatgen.io.jdftx.inputs import (
     JDFTXInfile,
@@ -24,6 +25,7 @@ from pymatgen.io.jdftx.inputs import (
 from pymatgen.io.jdftx.jdftxinfile_default_inputs import antoinePvap, default_inputs
 from pymatgen.io.jdftx.jdftxinfile_master_format import MASTER_TAG_LIST, get_tag_object
 from pymatgen.io.jdftx.outputs import JDFTXOutfile
+from pymatgen.io.vasp import Poscar
 
 from .inputs_test_utils import (
     assert_equiv_jdftxstructure,
@@ -355,27 +357,21 @@ def test_jdftxstructure_infile_site_properties_conversion():
     jif["ion"][3]["v"] = {"vx0": 1.0, "vx1": 2.0, "vx2": 3.0}
     jstruct = jif.to_jdftxstructure(jif)
     struct = jif.structure
-    # moveScale is stored as a per-direction selective dynamics site property
+    # moveScale is stored as the movescale site property, and gives the selective dynamics (fixed only for 0)
+    assert struct.site_properties["movescale"][:2] == [0.0, 1.0]
     assert struct.site_properties["selective_dynamics"][:2] == [[False] * 3, [True] * 3]
     jif_from_jstruc = JDFTXInfile.from_jdftxstructure(jstruct)
     # Since velocities and moveScale are compatible to be stored as site properties, exporting to
     # `Structure` will save them in `Structure.site_properties`. Initializing a new JDFTXInfile
     # from this `Structure` should yield the same result as `jif_from_jstruc`.
     jif_from_struc = JDFTXInfile.from_structure(struct)
-    # Providing a site property as an argument will override the site property in the Structure, however
-    # the format for 'selective_dynamics' in `Structure.site_properties` is not the same as that expected
-    # by JDFTXInfile.
-    # Testing here that the wrong format can be properly mapped in the JDFTx 'moveScale' format.
-    jif_from_struc_2 = JDFTXInfile.from_structure(
-        struct, selective_dynamics=struct.site_properties["selective_dynamics"]
-    )
-    # Providing selective dynamics in the JDFTx expected format should also work
-    jif_from_struc_3 = JDFTXInfile.from_structure(
-        struct,
-        selective_dynamics=selective_dynamics_site_prop_to_jdftx_interpretable(
-            struct.site_properties["selective_dynamics"]
-        ),
-    )
+    # Without moveScale, selective dynamics give it (all 0 or 1 here), given per direction (as in
+    # Structure.site_properties) or per site
+    selective_dynamics = struct.site_properties["selective_dynamics"]
+    struct.remove_site_property("movescale")
+    jif_from_struc_2 = JDFTXInfile.from_structure(struct, selective_dynamics=selective_dynamics)
+    per_site = [int(all(sd)) for sd in selective_dynamics]
+    jif_from_struc_3 = JDFTXInfile.from_structure(struct, selective_dynamics=per_site)
     for jif2 in [jif_from_jstruc, jif_from_struc, jif_from_struc_2, jif_from_struc_3]:
         assert isinstance(jif2, JDFTXInfile)
         assert_identical_jif(jif["ion"], jif2["ion"])
@@ -585,10 +581,196 @@ def test_fractional_move_scale():
     # Integer values are accepted and stored as floats
     jif["ion"] = ["H 0 0 0 1", {"species-id": "O", "x0": 0.1, "x1": 0.1, "x2": 0.1, "moveScale": 0}]
     assert [ion["moveScale"] for ion in jif["ion"]] == [1.0, 0.0]
-    # The Structure path only keeps whether an ion can move (selective_dynamics is boolean)
+    # The values survive a trip through a pymatgen Structure (as the movescale site property)
     struct = JDFTXInfile.from_str("lattice Cubic 10.0\nion H 0 0 0 0.5\nion O 0.2 0.2 0.2 0\n").structure
-    assert struct.site_properties["selective_dynamics"] == [[True] * 3, [False] * 3]
-    assert [ion["moveScale"] for ion in JDFTXInfile.from_structure(struct)["ion"]] == [1.0, 0.0]
+    assert struct.site_properties["movescale"] == [0.5, 0.0]
+    assert [ion["moveScale"] for ion in JDFTXInfile.from_structure(struct)["ion"]] == [0.5, 0.0]
+
+
+def test_jdftxstructure_movescale_and_selective_dynamics():
+    """movescale and selective_dynamics fill each other and are synced with the site properties: a site free in every
+    direction goes with any non-zero moveScale, and a site fixed in every direction with 0.
+    """
+    structure = Structure(Lattice.cubic(5.0), ["H", "H", "O"], [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0]])
+    free_fixed_free = [[True] * 3, [False] * 3, [True] * 3]
+    jstruct = JDFTXStructure(structure, movescale=[0.5, 0, None])  # A site with neither can move
+    assert jstruct.structure.site_properties == {"movescale": [0.5, 0.0, 1.0], "selective_dynamics": free_fixed_free}
+    assert structure.site_properties == {}  # The given structure is left as it was
+    assert JDFTXStructure(jstruct.structure).movescale == [0.5, 0.0, 1.0]
+    assert JDFTXStructure(structure, selective_dynamics=free_fixed_free).movescale == [1.0, 0.0, 1.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        JDFTXStructure(structure, movescale=[0.5, 0, 2], selective_dynamics=free_fixed_free)
+    with pytest.warns(UserWarning, match=re.escape("disagree for sites [0, 1]")):
+        jstruct = JDFTXStructure(structure, movescale=[0, 1, 1], selective_dynamics=free_fixed_free)
+    assert jstruct.movescale == [0.0, 1.0, 1.0]
+    with pytest.warns(UserWarning, match=re.escape("not supported yet (sites [1])")):
+        jstruct = JDFTXStructure(structure, selective_dynamics=[[True] * 3, [True, False, True], [True] * 3])
+    assert jstruct.movescale == [1.0, 0.0, 1.0]
+
+
+@pytest.mark.parametrize("sd_as_site_property", [False, True], ids=["sd_arg", "sd_site_property"])
+@pytest.mark.parametrize("movescale_as_site_property", [False, True], ids=["movescale_arg", "movescale_site_property"])
+@pytest.mark.parametrize(
+    ("selective_dynamics", "movescale", "expected", "disagree"),
+    [
+        ([True] * 3, 0.5, 0.5, False),
+        ([True] * 3, 0.0, 0.0, True),
+        ([False] * 3, 0.5, 0.5, True),
+        ([True] * 3, None, 1.0, False),
+        ([False] * 3, None, 0.0, False),
+    ],
+    ids=["free_nonzero", "free_zero", "fixed_nonzero", "free_unset", "fixed_unset"],
+)
+def test_from_structure_movescale_and_selective_dynamics(
+    selective_dynamics: list[bool],
+    movescale: float | None,
+    expected: float,
+    disagree: bool,
+    movescale_as_site_property: bool,
+    sd_as_site_property: bool,
+):
+    """The written moveScale is movescale where given, and else 0 or 1 from the selective dynamics, whether each is
+    given as an argument or as a site property. Selective dynamics that disagree on fixed vs free warn, except a
+    selective_dynamics site property beside a movescale argument, which the argument replaces as an intentional change.
+    """
+    structure = Structure(Lattice.cubic(10.0), ["H"], [[0, 0, 0]])
+    kwargs = {}
+    for name, value, as_site_property in (
+        ("selective_dynamics", selective_dynamics, sd_as_site_property),
+        ("movescale", movescale, movescale_as_site_property),
+    ):
+        if value is not None and as_site_property:
+            structure.add_site_property(name, [value])
+        elif value is not None:
+            kwargs[name] = [value]
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        jif = JDFTXInfile.from_structure(structure, **kwargs)
+    replaced = movescale is not None and not movescale_as_site_property and sd_as_site_property
+    assert any("disagree" in str(w.message) for w in record) is (disagree and not replaced)
+    assert JDFTXInfile.from_str(str(jif))["ion"][0]["moveScale"] == expected
+
+
+@pytest.mark.parametrize(("movescale", "selective_dynamics"), [(0.5, [True] * 3), (0.0, [False] * 3)])
+def test_to_pmg_structure_selective_dynamics(movescale: float, selective_dynamics: list[bool]):
+    """Structures from JDFTx inputs keep moveScale, with selective dynamics fixed only for a moveScale of 0."""
+    structure = JDFTXInfile.to_pmg_structure(JDFTXInfile.from_str(f"lattice Cubic 10.0\nion H 0 0 0 {movescale}\n"))
+    assert structure.site_properties["movescale"] == [movescale]
+    assert structure.site_properties["selective_dynamics"] == [selective_dynamics]
+
+
+def _one_h_structure() -> Structure:
+    return Structure(Lattice.cubic(10.0), ["H"], [[0, 0, 0]])
+
+
+def test_movescale_argument_replaces_selective_dynamics_site_property():
+    """A movescale argument wins over the selective_dynamics site property, which is set to match without a warning,
+    as an intentional change (e.g. fixing an ion of a structure read from JDFTx).
+    """
+    structure = JDFTXInfile.from_str("lattice Cubic 10.0\nion H 0 0 0 1\n").structure
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        jstruct = JDFTXStructure(structure, movescale=[0])
+        jif = JDFTXInfile.from_structure(structure, movescale=[0])
+    assert jstruct.structure.site_properties["selective_dynamics"] == [[False] * 3]
+    assert jif["ion"][0]["moveScale"] == 0.0
+
+
+def test_appended_site_movescale():
+    """A site appended to a structure read from JDFTx (None for every site property) can move, unless its selective
+    dynamics fix it.
+    """
+    structure = JDFTXInfile.from_str("lattice Cubic 10.0\nion H 0 0 0 0.5\n").structure
+    structure.append("H", [0.5, 0.5, 0.5])
+    assert structure.site_properties["movescale"] == [0.5, None]
+    assert [ion["moveScale"] for ion in JDFTXInfile.from_structure(structure)["ion"]] == [0.5, 1.0]
+    structure[1].properties["selective_dynamics"] = [False] * 3
+    assert [ion["moveScale"] for ion in JDFTXInfile.from_structure(structure)["ion"]] == [0.5, 0.0]
+
+
+def test_jdftxstructure_dict_round_trip_does_not_warn_again():
+    """Selective dynamics that disagree with movescale, or fix only some directions, are replaced with a warning, so a
+    saved JDFTXStructure loads back the same without warning again.
+    """
+    structure = Structure(Lattice.cubic(10.0), ["H", "H"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+    with pytest.warns(UserWarning, match="disagree"):
+        jstruct = JDFTXStructure(
+            structure, movescale=[0.5, None], selective_dynamics=[[False] * 3, [True, False, True]]
+        )
+    assert jstruct.movescale == [0.5, 0.0]
+    assert jstruct.selective_dynamics == [[True] * 3, [False] * 3]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        loaded = JDFTXStructure.from_dict(jstruct.as_dict())
+    assert loaded.movescale == jstruct.movescale
+    assert loaded.selective_dynamics == jstruct.selective_dynamics
+
+
+def test_from_structure_ignore_site_properties_movescale():
+    """With ignore_site_properties, only a movescale argument counts."""
+    structure = JDFTXInfile.from_str("lattice Cubic 10.0\nion H 0 0 0 0.5\n").structure
+    assert JDFTXInfile.from_structure(structure, ignore_site_properties=True)["ion"][0]["moveScale"] == 1.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        jif = JDFTXInfile.from_structure(structure, movescale=[0], ignore_site_properties=True)
+    assert jif["ion"][0]["moveScale"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"selective_dynamics": np.array([[1, 1, 1]])}, 1.0),
+        ({"selective_dynamics": np.array([[0, 0, 0]])}, 0.0),
+        ({"selective_dynamics": [0]}, 0.0),  # One value per site
+        ({"selective_dynamics": [True]}, 1.0),
+        ({"selective_dynamics": np.array([1])}, 1.0),
+        ({"movescale": np.array([0.5])}, 0.5),
+        ({"movescale": [2]}, 2.0),
+        ({"movescale": [True]}, 1.0),
+        ({"movescale": [False]}, 0.0),
+    ],
+)
+def test_from_structure_movescale_input_forms(kwargs: dict, expected: float):
+    jif = JDFTXInfile.from_structure(_one_h_structure(), **kwargs)
+    assert JDFTXInfile.from_str(str(jif))["ion"][0]["moveScale"] == expected
+
+
+def test_constraint_on_site_fixed_by_selective_dynamics():
+    """A constraint on a site that selective dynamics fix (moveScale 0) is rejected, as JDFTx rejects it."""
+    structure = _one_h_structure()
+    for name, value in (("constraint_types", "Linear"), ("constraint_vectors", [0, 0, 1])):
+        structure.add_site_property(name, [value])
+    with pytest.raises(ValueError, match="moveScale of 0"):
+        JDFTXInfile.from_structure(structure, selective_dynamics=[[False] * 3])
+
+
+@pytest.mark.parametrize("name", ["movescale", "selective_dynamics"])
+def test_movescale_wrong_length(name: str):
+    with pytest.raises(ValueError, match=f"{name} has 2 values, but the structure has 1 sites"):
+        JDFTXInfile.from_structure(_one_h_structure(), **{name: [1, 1]})
+
+
+def test_negative_movescale_is_rejected():
+    with pytest.raises(ValueError, match=re.escape("moveScale cannot be negative (sites [0])")):
+        JDFTXInfile.from_structure(_one_h_structure(), movescale=[-1])
+    with pytest.raises(ValueError, match="moveScale cannot be negative"):
+        _ = JDFTXInfile.from_str("lattice Cubic 10.0\nion H 0 0 0 -1\n").structure
+
+
+FIXED_AND_FREE_TEXT = "lattice Cubic 10.0\nion H 0 0 0 0\nion H 0.5 0.5 0.5 0.5\n"
+
+
+def test_fixed_ions_reach_poscar():
+    """Structures read from JDFTx keep their fixed ions as selective dynamics, which other formats read."""
+    poscar = Poscar.from_str(Poscar(JDFTXInfile.from_str(FIXED_AND_FREE_TEXT).structure).get_str())
+    assert np.array(poscar.structure.site_properties["selective_dynamics"]).tolist() == [[False] * 3, [True] * 3]
+
+
+def test_fixed_ions_reach_ase():
+    pytest.importorskip("ase")
+    atoms = AseAtomsAdaptor.get_atoms(JDFTXInfile.from_str(FIXED_AND_FREE_TEXT).structure)
+    assert [constraint.get_indices().tolist() for constraint in atoms.constraints] == [[0]]
 
 
 @pytest.mark.parametrize(
@@ -1740,13 +1922,14 @@ def test_jdftxstructure_sort_structure():
     """Sites are sorted into JDFTx's order: grouped by species name (ignoring case) in the order the species first
     appear. Each site's moveScale, velocity and constraint move with it, however they were given.
     """
+    # Every ion has a velocity and a single-vector constraint, so these form regular arrays and are site properties too
     infile = JDFTXInfile.from_str(
         "lattice \\\n 10 0 0 \\\n 0 10 0 \\\n 0 0 10\n"
-        "ion O 0.5 0.5 0.5 v 0.1 0.0 0.0 0\n"
+        "ion O 0.5 0.5 0.5 v 0.1 0.0 0.0 0.5 Planar 1 0 0\n"
         "ion Fe2 0.1 0.0 0.0 v 0.0 0.2 0.0 1 Linear 0 0 1\n"
-        "ion Fe1 0.3 0.0 0.0 v 0.0 0.0 0.3 1\n"
-        "ion o 0.2 0.2 0.2 v 0.4 0.0 0.0 1\n"
-        "ion Fe2 0.7 0.0 0.0 v 0.0 0.5 0.0 0\n"
+        "ion Fe1 0.3 0.0 0.0 v 0.0 0.0 0.3 1 Linear 0 1 0\n"
+        "ion o 0.2 0.2 0.2 v 0.4 0.0 0.0 1 Linear 1 1 0\n"
+        "ion Fe2 0.7 0.0 0.0 v 0.0 0.5 0.0 2 Planar 0 0 1\n"
     )
     unsorted = JDFTXInfile.to_jdftxstructure(infile)
     ions = JDFTXInfile.from_str(unsorted.get_str())["ion"]
@@ -1759,7 +1942,7 @@ def test_jdftxstructure_sort_structure():
         JDFTXInfile.to_jdftxstructure(infile, sort_structure=True),
         JDFTXStructure(
             unsorted.structure.copy(site_properties=species_names),
-            selective_dynamics=unsorted.selective_dynamics,
+            movescale=unsorted.movescale,
             velocities=unsorted.velocities,
             constraint_types=unsorted.constraint_types,
             constraint_vectors=unsorted.constraint_vectors,
@@ -1802,7 +1985,10 @@ def test_jdftxstructure_keeps_structure_species():
 
 
 # Two Fe species (from pseudopotential files Fe1.upf and Fe2.upf, as for an antiferromagnet), and one named after O
-SPECIES_NAMES_TEXT = "lattice Cubic 10\nion Fe1 0 0 0 v 0.1 0 0 0\nion Fe2 0.5 0.5 0.5 1\nion O 0.25 0.25 0.25 1\n"
+# Every ion has a velocity, so velocities form a regular array and are a site property
+SPECIES_NAMES_TEXT = (
+    "lattice Cubic 10\nion Fe1 0 0 0 v 0.1 0 0 0\nion Fe2 0.5 0.5 0.5 v 0 0 0 1\nion O 0.25 0.25 0.25 v 0 0 0 1\n"
+)
 
 
 def _written_species(jif: JDFTXInfile) -> list[str]:
@@ -1817,9 +2003,12 @@ def test_ion_species_names():
     assert [site.specie.symbol for site in structure] == ["Fe", "Fe", "O"]
     assert structure.site_properties["jdftx_species"] == ["Fe1", "Fe2", "O"]
     assert _written_species(JDFTXInfile.from_structure(structure)) == ["Fe1", "Fe2", "O"]
-    # The names decide each ion's species, so they are kept without the other site properties too
+    # The names decide each ion's species, so they are kept without the other site properties too, as are movescale
+    # and selective_dynamics (which JDFTXStructure keeps in sync with the site properties)
     assert jif.to_pmg_structure(jif, fill_site_properties=False).site_properties == {
-        "jdftx_species": ["Fe1", "Fe2", "O"]
+        "jdftx_species": ["Fe1", "Fe2", "O"],
+        "movescale": [0.0, 1.0, 1.0],
+        "selective_dynamics": [[False] * 3, [True] * 3, [True] * 3],
     }
     without_properties = JDFTXInfile.from_structure(structure, ignore_site_properties=True)
     assert _written_species(without_properties) == ["Fe1", "Fe2", "O"]
@@ -1905,8 +2094,25 @@ def test_jdftxstructure_constraints_roundtrip():
     cart_jif = JDFTXInfile.from_str(jstruct.get_str(in_cart_coords=True))
     assert cart_jif["coords-type"] == "Cartesian"
     _assert_same_constraints(JDFTXStructure.from_jdftxinfile(cart_jif), jstruct)
-    # Constraints are kept as site properties, so they survive a trip through a pymatgen Structure
-    _assert_same_constraints(JDFTXStructure.from_jdftxinfile(JDFTXInfile.from_structure(jif.structure)), jstruct)
+    # Constraints on only some ions (or HyperPlane ions with different numbers of planes) don't form regular arrays, so
+    # they aren't site properties (which would break ASE conversion) and don't survive a trip through a Structure
+    assert not {"constraint_types", "constraint_vectors", "group_names"} & set(jif.structure.site_properties)
+    assert JDFTXStructure.from_jdftxinfile(JDFTXInfile.from_structure(jif.structure)).constraint_types is None
+    # Regular ones are site properties, and do
+    regular = JDFTXInfile.from_str(
+        "lattice 10 2 1 0 9 3 0 0 8\nion H 0.1 0.2 0.3 1 Linear 1 0 0\nion O 0 0 0 1 Planar 0 1 1\n"
+    )
+    _assert_same_constraints(
+        JDFTXStructure.from_jdftxinfile(JDFTXInfile.from_structure(regular.structure)),
+        JDFTXStructure.from_jdftxinfile(regular),
+    )
+
+
+def test_ragged_constraints_reach_ase():
+    """Structures with constraints on only some ions convert to ASE Atoms (the constraints aren't site properties)."""
+    pytest.importorskip("ase")
+    atoms = AseAtomsAdaptor.get_atoms(JDFTXInfile.from_str(CONSTRAINT_TEXT).structure)
+    assert len(atoms) == 5
 
 
 @pytest.mark.parametrize(
