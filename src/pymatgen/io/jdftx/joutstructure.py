@@ -605,9 +605,12 @@ class JOutStructure(Structure):
                 )
             except RuntimeError:  # The lines name another energy (e.g. an echo pymatgen couldn't read): use theirs
                 self.etype = self._get_etype_from_emin_lines(emin_lines)
-                self.elecmindata = JElSteps._from_text_slice(
-                    emin_lines, opt_type=self.eopt_type, etype=str(self.etype), skim_levels=skim_levels
-                )
+                try:
+                    self.elecmindata = JElSteps._from_text_slice(
+                        emin_lines, opt_type=self.eopt_type, etype=str(self.etype), skim_levels=skim_levels
+                    )
+                except RuntimeError as err:  # No energy label reads (e.g. a line cut short): skip like other bad steps
+                    raise ValueError(str(err)) from err
         else:
             if self.eopt_type is None:
                 raise ValueError("eopt_type is not set")

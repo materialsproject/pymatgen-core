@@ -398,6 +398,15 @@ def test_no_lowdin_steps(outfile_path: Path, geom_opt_type: str, geom_converged:
         assert jstruc.elecmindata.converged
 
 
+def test_cut_iteration_line(tmp_path: Path):
+    """A run killed mid-line (no energy on its last iteration line) loses only that geometry step."""
+    lines = nolowdin_ionmin_outfile_path.read_text().splitlines()
+    i = max(i for i, line in enumerate(lines) if line.startswith("ElecMinimize: Iter:"))
+    cut_path = tmp_path / "cut.out"
+    cut_path.write_text("\n".join([*lines[:i], lines[i].split("Etot")[0], "", "appended text"]) + "\n")
+    assert len(JDFTXOutfile.from_file(cut_path).slices[-1].jstrucs) == 6
+
+
 @pytest.mark.parametrize("smearing", [True, False])
 def test_unavailable_eigstats(tmp_path: Path, smearing: bool):
     # Without empty bands (e.g. an insulator with the default number of bands), JDFTx prints the LUMO, mu and gaps
