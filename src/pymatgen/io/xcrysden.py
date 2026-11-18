@@ -233,6 +233,8 @@ class XSF:
         """
         if self.structure is None:
             raise ValueError("Cannot write XSF without a structure")
+        if not self.structure.is_ordered:
+            raise ValueError("XSF can only be written from an ordered structure")
 
         lines: list[str] = []
         n_sites = len(self.structure)

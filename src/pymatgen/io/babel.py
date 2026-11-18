@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from monty.dev import requires
 
+from pymatgen.core import DummySpecies
 from pymatgen.core.structure import IMolecule, Molecule
 
 try:
@@ -58,6 +59,8 @@ class BabelMolAdaptor:
         if isinstance(mol, IMolecule):
             if not mol.is_ordered:
                 raise ValueError("OpenBabel Molecule only supports ordered molecules.")
+            if any(isinstance(sp, DummySpecies) for sp in mol.species):
+                raise ValueError("OpenBabel Molecule cannot represent DummySpecies (no atomic number)")
 
             # For some reason, manually adding atoms does not seem to create
             # the correct OBMol representation to do things like force field

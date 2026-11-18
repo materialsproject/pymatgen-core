@@ -277,16 +277,18 @@ class ResWriter:
 
         for site in sites:
             for specie, occ in site.species.items():
+                # The format has no oxidation states
+                symbol = specie.symbol
                 try:
-                    i = species.index(specie) + 1  # type:ignore[arg-type]
+                    i = species.index(symbol) + 1
                 except ValueError:
-                    species.append(specie)  # type:ignore[arg-type]
+                    species.append(symbol)
                     i = len(species)
 
                 x, y, z = map(float, site.frac_coords)
                 spin = site.properties.get("magmom")
                 spin = spin and float(spin)
-                ions.append(Ion(specie, i, (x, y, z), occ, spin))  # type:ignore[arg-type]
+                ions.append(Ion(symbol, i, (x, y, z), occ, spin))
 
         return ResSFAC(species, ions)
 
@@ -318,6 +320,10 @@ class ResWriter:
 
     def __init__(self, entry: Structure | IStructure | ComputedStructureEntry):
         """This class can be constructed from either a pymatgen Structure or ComputedStructureEntry object."""
+        structure = entry.structure if isinstance(entry, ComputedStructureEntry) else entry
+        if not structure.is_ordered:
+            # Each species of a site would be read back as a fully occupied site of its own
+            raise ValueError("Res file can only be constructed from an ordered structure")
         func: Callable[[Structure], Res] | Callable[[ComputedStructureEntry], Res]
         func = self._res_from_structure
         if isinstance(entry, ComputedStructureEntry):

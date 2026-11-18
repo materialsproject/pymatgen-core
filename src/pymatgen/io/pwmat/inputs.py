@@ -8,7 +8,7 @@ import numpy as np
 from monty.io import zopen
 from monty.json import MSONable
 
-from pymatgen.core import Lattice, Structure
+from pymatgen.core import DummySpecies, Lattice, Structure
 from pymatgen.symmetry.kpath import KPathSeek
 
 if TYPE_CHECKING:
@@ -368,6 +368,10 @@ class AtomConfig(MSONable):
                 are not grouped properly together. Defaults to False.
         """
         self.structure: Structure = Structure.from_sites(structure)
+        if not self.structure.is_ordered:
+            raise ValueError("PWmat format can only be written from an ordered structure")
+        if any(isinstance(sp, DummySpecies) for sp in self.structure.species):
+            raise ValueError("PWmat format cannot represent DummySpecies (no atomic number)")
         if sort_structure:
             self.structure = self.structure.get_sorted_structure()
         elements_counter = dict(sorted(Counter(self.structure.species).items()))
