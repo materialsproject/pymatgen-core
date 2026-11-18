@@ -384,8 +384,9 @@ class JDFTXOutfileSlice(_OutputMSONable):
         instance.is_bgw = is_bgw
         try:
             instance._from_out_slice_init_all(text, skim_levels, skip_props)
-        except (ValueError, IndexError, TypeError, KeyError, AttributeError):
+        except (ValueError, IndexError, TypeError, KeyError, AttributeError) as err:
             if none_on_error:
+                warnings.warn(f"Skipping an out file slice that could not be parsed ({err!r})", stacklevel=2)
                 return None
             raise
         return instance

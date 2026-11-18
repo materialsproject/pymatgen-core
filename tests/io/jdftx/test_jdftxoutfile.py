@@ -407,6 +407,22 @@ def test_cut_iteration_line(tmp_path: Path):
     assert len(JDFTXOutfile.from_file(cut_path).slices[-1].jstrucs) == 6
 
 
+def test_unparsable_slices(tmp_path: Path):
+    """A slice that fails to parse is dropped with a warning, and a file in which no slice parses raises."""
+    lines = eopt_elecmin_outfile_path.read_text().splitlines()
+    i = max(i for i, line in enumerate(lines) if line.startswith("ElecMinimize: Iter:"))
+    # A single point killed mid-line, then appended to: its only step fails
+    cut = [*lines[:i], lines[i].split(" F:")[0], "", "appended text"]
+    cut_path = tmp_path / "cut.out"
+    cut_path.write_text("\n".join(cut))
+    with pytest.warns(UserWarning, match="Skipping an out file slice"), pytest.raises(ValueError, match="could be"):
+        JDFTXOutfile.from_file(cut_path)
+    # Appended to a finished run, only the cut run is dropped
+    cut_path.write_text("\n".join(lines + cut))
+    with pytest.warns(UserWarning, match="Skipping an out file slice"):
+        assert len(JDFTXOutfile.from_file(cut_path).slices) == 1
+
+
 @pytest.mark.parametrize("smearing", [True, False])
 def test_unavailable_eigstats(tmp_path: Path, smearing: bool):
     # Without empty bands (e.g. an insulator with the default number of bands), JDFTx prints the LUMO, mu and gaps

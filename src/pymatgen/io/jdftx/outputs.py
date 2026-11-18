@@ -729,9 +729,10 @@ class JDFTXOutfile(_OutputMSONable):
             file_path (str | Path): The path to the JDFTx out file.
             is_bgw (bool): Mark True if data must be usable for BGW calculations. This will change the behavior of the
                 parser to be stricter with certain criteria.
-            none_slice_on_error (bool | None): If True, will return None if an error occurs while parsing a slice
-                instead of halting the parsing process. This can be useful for parsing files with multiple slices where
-                some slices may be incomplete or corrupted. If False, all slices may raise errors.
+            none_slice_on_error (bool): If True, a slice that fails to parse becomes None, with a warning, instead of
+                halting the parsing process. This can be useful for parsing files with multiple slices where some
+                slices may be incomplete or corrupted. If False, all slices may raise errors. A file in which no slice
+                parses raises a ValueError either way.
             pop_none_slices (bool): If True, slices that could not be parsed (None, see none_slice_on_error) are left
                 out of the slices list.
             skim_levels (list[str] | None): A list of depth levels to "skim". This will parse the "slices" in reverse
@@ -755,6 +756,9 @@ class JDFTXOutfile(_OutputMSONable):
 
         Returns:
             JDFTXOutfile: The JDFTXOutfile object.
+
+        Raises:
+            ValueError: If no slice of the file can be parsed.
         """
         _skim_levels: list[str] = list(skim_levels) if skim_levels is not None else []
         _skip_props: list[str] = list(skip_props) if skip_props is not None else []
@@ -778,7 +782,7 @@ class JDFTXOutfile(_OutputMSONable):
                     slices.append(oslice)
                     break
             if oslice is None:
-                raise RuntimeError("No valid JDFTx out file slices found.")
+                raise ValueError(f"No JDFTx out file slice in {file_path} could be parsed")
             return cls(slices=slices, skim_levels=skim_levels)
         slices = [
             JDFTXOutfileSlice._from_out_slice(
@@ -786,6 +790,8 @@ class JDFTXOutfile(_OutputMSONable):
             )
             for text in texts
         ]
+        if all(s is None for s in slices):
+            raise ValueError(f"No JDFTx out file slice in {file_path} could be parsed")
         if pop_none_slices:
             slices = [s for s in slices if s is not None]
         return cls(slices=slices, skim_levels=skim_levels)
