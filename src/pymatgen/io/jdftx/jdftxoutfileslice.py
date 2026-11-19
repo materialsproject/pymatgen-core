@@ -1332,7 +1332,7 @@ class JDFTXOutfileSlice(_OutputMSONable):
         if self.is_md and self.infile["ionic-dynamics"]["statMethod"] == "NoseHoover":
             tv = self.jstrucs.thermostat_velocity
             if tv is not None:
-                infile["thermostat-velocity"] = {"v1": tv[0], "v2": tv[1], "v3": tv[2]}
+                infile["thermostat-velocity"] = {"v": [float(v) for v in tv]}
         return infile
 
     def _get_printed_ions(self, in_cart_coords: bool) -> list[dict] | None:

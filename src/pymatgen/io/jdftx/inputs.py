@@ -203,6 +203,8 @@ class JDFTXInfile(dict, MSONable):
             tag_object = get_tag_object(key)
         except KeyError:
             raise KeyError(f"The {key} tag is not in MASTER_TAG_LIST")
+        if key in ("thermostat-velocity", "barostat-velocity") and isinstance(value, dict) and "v" not in value:
+            value = {"v": [value[f"v{i + 1}"] for i in range(len(value))]}  # Older form: {"v1": ..., "v2": ..., ...}
         _remaining_values = None
         if tag_object.can_repeat and isinstance(value, list):
             if len(value) > 1:

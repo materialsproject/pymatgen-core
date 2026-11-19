@@ -294,7 +294,7 @@ def test_outfile_to_infile(outfile_path: Path, infile_path: Path, outfile_known:
     [ov / nv for ov, nv in zip(old_velocities, new_velocities, strict=False)]
     assert_same_value(old_velocities, new_velocities)
     old_thermostat_velocity = jdftxoutfile.slices[-1].jstrucs.thermostat_velocity
-    new_thermostat_velocity = np.array([new_infile["thermostat-velocity"][f"v{i + 1}"] for i in range(3)])
+    new_thermostat_velocity = np.array(new_infile["thermostat-velocity"]["v"])
     assert_same_value(old_thermostat_velocity, new_thermostat_velocity)
 
     # TODO: Do the old TODO related to filling out default input tags so the robust comparison below
@@ -505,6 +505,18 @@ def test_to_jdftxinfile_keeps_fractional_move_scale(tmp_path: Path):
     restart = JDFTXInfile.from_str(str(outfile.to_jdftxinfile()))
     assert {ion["moveScale"] for ion in restart["ion"]} == {0.0, 0.5}
     _check_restart_matches_out_file(text, restart, outfile.slices[-1].infile, lattice_changed=False)
+
+
+def test_to_jdftxinfile_thermostat_chain_length(tmp_path: Path):
+    """A restart keeps every Nose-Hoover chain thermostat velocity, however many there are (chainLengthT)."""
+    text = example_aimd_outfile_path.read_text().replace("chainLengthT 3", "chainLengthT 2")
+    text = re.sub(r"^(thermostat-velocity \S+ \S+) \S+$", r"\1", text, flags=re.MULTILINE)
+    (tmp_path / "jdftx.out").write_text(text)
+    outfile = JDFTXOutfile.from_file(tmp_path / "jdftx.out")
+    restart = JDFTXInfile.from_str(str(outfile.to_jdftxinfile()))
+    assert restart["ionic-dynamics"]["chainLengthT"] == 2
+    assert restart["thermostat-velocity"]["v"] == list(outfile.slices[-1].jstrucs.thermostat_velocity)
+    assert len(restart["thermostat-velocity"]["v"]) == 2
 
 
 def test_to_jdftxinfile_keeps_rho_external():

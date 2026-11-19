@@ -1271,25 +1271,13 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "nConfigurations": IntTag(),
             }
         ),
+        # JDFTx reads as many values as are given (commands/ionic_dynamics.cpp, CommandStatVelocity): chainLengthT
+        # thermostat velocities, and 6 strain rates plus chainLengthP lattice thermostat velocities for the barostat
         "barostat-velocity": TagContainer(
-            subtags={
-                "v1": FloatTag(write_tagname=False, optional=False),
-                "v2": FloatTag(write_tagname=False, optional=False),
-                "v3": FloatTag(write_tagname=False, optional=False),
-                "v4": FloatTag(write_tagname=False, optional=False),
-                "v5": FloatTag(write_tagname=False, optional=False),
-                "v6": FloatTag(write_tagname=False, optional=False),
-                "v7": FloatTag(write_tagname=False, optional=False),
-                "v8": FloatTag(write_tagname=False, optional=False),
-                "v9": FloatTag(write_tagname=False, optional=False),
-            }
+            subtags={"v": FloatTag(write_tagname=False, can_repeat=True, ordered=True, optional=False)}
         ),
         "thermostat-velocity": TagContainer(
-            subtags={
-                "v1": FloatTag(write_tagname=False, optional=False),
-                "v2": FloatTag(write_tagname=False, optional=False),
-                "v3": FloatTag(write_tagname=False, optional=False),
-            }
+            subtags={"v": FloatTag(write_tagname=False, can_repeat=True, ordered=True, optional=False)}
         ),
         # Atoms are 1-based indices within their species; resolution in bohr, energy-per-step in Hartree bohr
         "metadynamics-bond": TagContainer(

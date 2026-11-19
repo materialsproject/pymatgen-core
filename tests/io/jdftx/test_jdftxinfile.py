@@ -570,6 +570,34 @@ def test_ion_writing(expected_out: str, stored_dict: dict):
     assert_same_value(output.strip().split(), expected_out.strip().split())
 
 
+@pytest.mark.parametrize("chain_length", [1, 2, 5])
+def test_stat_velocities_take_any_number_of_values(chain_length: int):
+    """JDFTx reads as many values as are given: chainLengthT thermostat velocities, and 6 strain rates plus
+    chainLengthP lattice thermostat velocities for the barostat.
+    """
+    thermostat = [0.1 * (i + 1) for i in range(chain_length)]
+    barostat = [0.5] * (6 + chain_length)
+    jif = JDFTXInfile.from_str(
+        f"thermostat-velocity {' '.join(map(str, thermostat))}\nbarostat-velocity {' '.join(map(str, barostat))}\n",
+        dont_require_structure=True,
+    )
+    assert jif["thermostat-velocity"] == {"v": thermostat}
+    assert jif["barostat-velocity"] == {"v": barostat}
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True) == jif
+
+
+def test_stat_velocities_older_dict_form():
+    """Dicts from older pymatgen, with one key per value ({"v1": ..., "v2": ..., ...}), still load."""
+    jif = JDFTXInfile.from_dict(
+        {
+            "thermostat-velocity": {"v1": 0.1, "v2": 0.2, "v3": 0.3},
+            "barostat-velocity": {f"v{i + 1}": 0.5 for i in range(9)},
+        }
+    )
+    assert jif["thermostat-velocity"] == {"v": [0.1, 0.2, 0.3]}
+    assert jif["barostat-velocity"] == {"v": [0.5] * 9}
+
+
 def test_fractional_move_scale():
     """moveScale is a double in JDFTx: any nonzero value lets the ion move (and scales its step)."""
     jif = JDFTXInfile.from_str(
