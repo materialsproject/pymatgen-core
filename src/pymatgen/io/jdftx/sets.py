@@ -21,9 +21,7 @@ class JdftxInputSet(InputSet):
     Parameters
     ----------
     jdftxinput
-        A JDFTXInfile object
-    structure
-        The structure to write with the inputs (it replaces any structure tags of jdftxinput)
+        A JdftxInput object
     """
 
     def __init__(self, jdftxinput: JDFTXInfile, structure: Structure) -> None:
@@ -43,8 +41,6 @@ class JdftxInputSet(InputSet):
         ----------
         directory
             Directory to write input files to.
-        infile
-            Name of the input file to write.
         make_dir
             Whether to create the directory if it does not already exist.
         overwrite
@@ -69,7 +65,7 @@ class JdftxInputSet(InputSet):
 
         Parameters
         ----------
-        file
+        directory
             Input file to read JDFTx inputs from.
         """
         jdftxinput = JDFTXInfile.from_file(file)
@@ -81,10 +77,10 @@ class JdftxInputSet(InputSet):
 
 def condense_jdftxinputs(jdftxinput: JDFTXInfile, jdftxstructure: JDFTXStructure) -> JDFTXInfile:
     """
-    Combine JDFTXInfile and JDFTXStructure into complete JDFTXInfile.
+    Combine JDFTXInfile and JDFTxStructure into complete JDFTXInfile.
 
     Function combines a JDFTXInfile class with calculation
-    settings and a JDFTXStructure that defines the structure
+    settings and a JDFTxStructure that defines the structure
     into one JDFTXInfile instance.
 
     Parameters
@@ -101,8 +97,6 @@ def condense_jdftxinputs(jdftxinput: JDFTXInfile, jdftxstructure: JDFTXStructure
             A JDFTXInfile that includes the calculation
             parameters and input structure.
     """
-    # Replace (rather than add to) any structure tags already in the inputs, writing in their coordinate system
+    # force Cartesian coordinates
     coords_type = jdftxinput.get("coords-type")
-    settings = jdftxinput.copy()
-    settings.strip_structure_tags()
-    return settings + JDFTXInfile.from_str(jdftxstructure.get_str(in_cart_coords=(coords_type == "Cartesian")))
+    return jdftxinput + JDFTXInfile.from_str(jdftxstructure.get_str(in_cart_coords=(coords_type == "Cartesian")))

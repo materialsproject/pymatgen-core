@@ -19,21 +19,21 @@ dump_files_dir = Path(TEST_FILES_DIR) / "io" / "jdftx" / "tmp"
 
 def assert_same_value(testval, knownval):
     if type(testval) not in [tuple, list]:
-        assert isinstance(testval, type(knownval)), f"Types differ: {type(testval)} vs {type(knownval)}"
+        assert isinstance(testval, type(knownval))
         if isinstance(testval, float):
-            assert testval == pytest.approx(knownval), f"Floats differ: {testval} vs {knownval}"
+            assert testval == pytest.approx(knownval)
         elif isinstance(testval, dict):
             for k in knownval:
-                assert k in testval, f"Key {k} missing from testval"
+                assert k in testval
                 assert_same_value(testval[k], knownval[k])
         elif testval is None:
-            assert knownval is None, f"One is None but the other isn't: {testval} vs {knownval}"
+            assert knownval is None
         elif isinstance(testval, ndarray):
-            assert allclose(testval, knownval), f"Arrays differ: {testval} vs {knownval}"
+            assert allclose(testval, knownval)
         else:
-            assert testval == knownval, f"Values differ: {testval} vs {knownval}"
+            assert testval == knownval
     else:
-        assert len(testval) == len(knownval), f"Lengths differ: {len(testval)} vs {len(knownval)}"
+        assert len(testval) == len(knownval)
         for i in range(len(testval)):
             assert_same_value(testval[i], knownval[i])
 
