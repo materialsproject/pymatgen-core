@@ -404,7 +404,24 @@ def test_cut_iteration_line(tmp_path: Path):
     i = max(i for i, line in enumerate(lines) if line.startswith("ElecMinimize: Iter:"))
     cut_path = tmp_path / "cut.out"
     cut_path.write_text("\n".join([*lines[:i], lines[i].split("Etot")[0], "", "appended text"]) + "\n")
-    assert len(JDFTXOutfile.from_file(cut_path).slices[-1].jstrucs) == 6
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        outfile = JDFTXOutfile.from_file(cut_path)
+    assert len(outfile.slices[-1].jstrucs) == 6
+    # The last step is often cut short in a running calculation, so it is skipped silently
+    assert not any("Skipping geometry step" in str(w.message) for w in record)
+
+
+def test_unparsable_middle_step_warns(tmp_path: Path):
+    """A step before the last that fails to parse is skipped with a warning giving its index."""
+    lines = nolowdin_ionmin_outfile_path.read_text().splitlines()
+    iter_lines = [i for i, line in enumerate(lines) if line.startswith("ElecMinimize: Iter:")]
+    i = iter_lines[len(iter_lines) // 2]
+    lines[i] = lines[i].split("Etot")[0]
+    (tmp_path / "jdftx.out").write_text("\n".join(lines) + "\n")
+    with pytest.warns(UserWarning, match=r"Skipping geometry step \d+ of \d+"):
+        outfile = JDFTXOutfile.from_file(tmp_path / "jdftx.out")
+    assert len(outfile.slices[-1].jstrucs) == 6
 
 
 def test_unparsable_slices(tmp_path: Path):

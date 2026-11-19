@@ -7,6 +7,7 @@ JOutStructure.
 from __future__ import annotations
 
 import pprint
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -496,20 +497,30 @@ def _get_joutstructure_list(
     for i, bounds in enumerate(out_bounds):
         if i > 0 and joutstructure_list:
             init_structure = joutstructure_list[-1]
-        # A step that fails to parse is skipped (the last one is often cut short in a running calculation)
-        joutstructure = parse_joutstructure_bounds(
-            init_structure,
-            out_slice,
-            bounds,
-            opt_type,
-            is_md,
-            has_igp,
-            expected_etype,
-            skim_levels,
-            raise_on_error=False,
-            skip_props=skip_props,
-            eopt_type=eopt_type,
-        )
+        try:
+            joutstructure = parse_joutstructure_bounds(
+                init_structure,
+                out_slice,
+                bounds,
+                opt_type,
+                is_md,
+                has_igp,
+                expected_etype,
+                skim_levels,
+                raise_on_error=True,
+                skip_props=skip_props,
+                eopt_type=eopt_type,
+            )
+        except (ValueError, IndexError, TypeError, KeyError, AttributeError) as err:
+            # A step that fails to parse is skipped; only the last one (often cut short in a running calculation)
+            # is skipped silently
+            if i < len(out_bounds) - 1:
+                warnings.warn(
+                    f"Skipping geometry step {i} of {len(out_bounds)} (counting from 0), which could not be parsed "
+                    f"({err!r}); the next step starts from the step before it",
+                    stacklevel=2,
+                )
+            continue
         if joutstructure is not None:
             joutstructure_list.append(joutstructure)
     return joutstructure_list
