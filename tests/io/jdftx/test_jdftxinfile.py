@@ -24,6 +24,7 @@ from pymatgen.io.jdftx.inputs import (
 )
 from pymatgen.io.jdftx.jdftxinfile_default_inputs import antoinePvap, default_inputs
 from pymatgen.io.jdftx.jdftxinfile_master_format import MASTER_TAG_LIST, get_tag_object
+from pymatgen.io.jdftx.outputs import JDFTXOutfile
 from pymatgen.io.vasp import Poscar
 
 from .inputs_test_utils import (
@@ -35,6 +36,7 @@ from .inputs_test_utils import (
     ex_infile2_fname,
     ex_infile3_fname,
 )
+from .outputs_test_utils import pcm_params_outfile_path
 from .shared_test_utils import assert_same_value
 
 if TYPE_CHECKING:
@@ -1653,6 +1655,20 @@ def test_jdftxinfile_comparison():
     assert not len(
         jif1.get_filtered_differing_tags(jif1copy, exclude_tag_categories=["electronic"])
     )  # Tag categories can be filtered out
+
+
+def test_get_differing_tags_fills_defaults():
+    """An input matches JDFTx's echo of it, which adds every default, including those that depend on the fluid."""
+    echo = JDFTXOutfile.from_file(pcm_params_outfile_path).infile
+    given = echo.copy()
+    for tag in ("ion-width", "fluid-minimize", "lcao-params"):
+        del given[tag]
+    given["fluid"] = {"type": "LinearPCM"}
+    given["fluid-solvent"] = [{"name": "H2O"}]
+    assert given.get_differing_tags(echo) == []
+    given["fluid"] = {"type": "NonlinearPCM"}  # Changes the fluid-minimize defaults
+    given["fluid-solvent"] = [{"name": "H2O", "epsBulk": 70.0}]
+    assert sorted(given.get_differing_tags(echo)) == ["fluid", "fluid-minimize", "fluid-solvent"]
 
 
 def test_antoine_pvap():

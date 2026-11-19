@@ -1,4 +1,4 @@
-"""Tests for the output_utils module."""
+"""Tests for the _output_utils module."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pymatgen.io.jdftx._output_utils import (
     find_first_range_key,
     get_proj_tju_from_file,
     get_start_lines,
+    is_lowdin_start_line,
     read_outfile_slices,
 )
 from pymatgen.io.jdftx.joutstructures import _get_joutstructures_start_idx
@@ -83,7 +84,7 @@ def test_find_jdftx_out_file(tmp_path):
     It tests the behavior to make sure the correct errors are raised on directories without and out file
     and directories with multiple out files. And out file must match "*.out" or "out" exactly.
     """
-    with pytest.raises(FileNotFoundError, match=re.escape("No JDFTx out file found in directory.")):
+    with pytest.raises(FileNotFoundError, match=re.escape(f"No JDFTx out file found in directory {tmp_path}.")):
         _find_jdftx_out_file(tmp_path)
     write_mt_file(tmp_path, "test.out")
     assert _find_jdftx_out_file(tmp_path) == tmp_path / "test.out"
@@ -94,8 +95,15 @@ def test_find_jdftx_out_file(tmp_path):
     write_mt_file(tmp_path, "out")
     assert _find_jdftx_out_file(tmp_path) == tmp_path / "out"
     write_mt_file(tmp_path, "tinyout.out")
-    with pytest.raises(FileNotFoundError, match=re.escape("Multiple JDFTx out files found in directory.")):
+    with pytest.raises(FileNotFoundError, match=re.escape(f"Multiple JDFTx out files found in directory {tmp_path}.")):
         _find_jdftx_out_file(tmp_path)
+
+
+def test_is_lowdin_start_line_deprecated():
+    with pytest.warns(FutureWarning, match="is_lowdin_start_line is deprecated"):
+        assert is_lowdin_start_line("#--- Lowdin population analysis ---")
+    with pytest.warns(FutureWarning, match="is_lowdin_start_line is deprecated"):
+        assert not is_lowdin_start_line("# oxidation-state H +0.000")
 
 
 def test_read_outfile_slices_keeps_last_line(tmp_path):
