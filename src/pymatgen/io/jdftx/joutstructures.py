@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from pymatgen.io.jdftx.jelstep import JElSteps
 
 
-from pymatgen.io.jdftx._output_utils import correct_geom_opt_type
+from pymatgen.io.jdftx._output_utils import _dataclass_from_dict, _json_dict, _OutputMSONable, correct_geom_opt_type
 from pymatgen.io.jdftx.joutstructure import JOutStructure, _line_type_map
 
 __author__ = "Ben Rich"
@@ -63,7 +63,7 @@ _joss_atrs_from_last_slice = (
 
 
 @dataclass
-class JOutStructures:
+class JOutStructures(_OutputMSONable):
     """
     Class for storing a series of JOutStructure objects.
 
@@ -290,7 +290,7 @@ class JOutStructures:
         Returns:
             dict: A dictionary representation of the JOutStructures object.
         """
-        dct = {}
+        dct: dict[str, Any] = {"@module": self.__class__.__module__, "@class": self.__class__.__name__}
         for fld in self.__dataclass_fields__:
             if fld == "slices":
                 dct[fld] = [slc.as_dict() for slc in self.slices]
@@ -300,7 +300,12 @@ class JOutStructures:
                 dct[fld] = value.as_dict()
             else:
                 dct[fld] = value
-        return dct
+        return _json_dict(dct)
+
+    @classmethod
+    def from_dict(cls, dct: dict[str, Any]) -> JOutStructures:
+        """Return a JOutStructures from the dictionary as_dict gives."""
+        return _dataclass_from_dict(cls, dct)
 
     def __getitem__(self, key: int | str) -> JOutStructure | Any:
         """Return item.

@@ -7,13 +7,17 @@ submodules in the future.
 
 from __future__ import annotations
 
+import json
+from dataclasses import fields
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 import numpy as np
 from monty.dev import deprecated
+from monty.json import MontyDecoder, MontyEncoder, MSONable
 
+from pymatgen.core.structure import Structure
 from pymatgen.core.units import Ha_to_eV
 from pymatgen.electronic_structure.core import Orbital
 
@@ -21,6 +25,69 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy.typing import NDArray
+
+_T = TypeVar("_T")
+
+
+class _OutputMSONable(MSONable):
+    """MSONable base for the output dataclasses, so pydantic models holding them dump them with as_dict.
+
+    monty's pydantic hook has no serializer, so pydantic dumps a dataclass field by field (no "@module"/"@class", and
+    with fields __init__ doesn't take). A pydantic model holding parsed output then can't be loaded back from
+    model_dump, dumpfn or jobflow's store. Structure isn't a dataclass, so it isn't affected.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+        """Pydantic core schema: monty's validator, serialized with as_dict."""
+        from pydantic_core import core_schema
+
+        schema = super().__get_pydantic_core_schema__(source_type, handler)
+        schema["serialization"] = core_schema.plain_serializer_function_ser_schema(lambda obj: obj.as_dict())
+        return schema
+
+
+def _json_dict(dct: dict[str, Any]) -> dict[str, Any]:
+    """Return an as_dict in plain JSON types, with arrays as monty writes them so that they load back as arrays (as
+    ComputedEntry.as_dict does for its data).
+    """
+    return json.loads(json.dumps(dct, cls=MontyEncoder))
+
+
+def _decode_value(value: Any) -> Any:
+    """Decode a value from an as_dict (Structure.from_dict leaves the arrays in a structure's properties encoded)."""
+    value = MontyDecoder().process_decoded(value)
+    if isinstance(value, Structure):
+        value.properties = MontyDecoder().process_decoded(value.properties)
+    return value
+
+
+def _none_to_nan(value: Any) -> Any:
+    """Turn each None inside an echoed input file's as_dict back into nan.
+
+    JDFTx echoes unset values as nan (e.g. MD's P0), and pydantic's JSON dumps write nan as null by default. Parsing
+    never stores None in an input file, so each None there was a nan.
+    """
+    if value is None:
+        return np.nan
+    if isinstance(value, dict):
+        return {key: _none_to_nan(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_none_to_nan(val) for val in value]
+    return value
+
+
+def _dataclass_from_dict(cls: type[_T], dct: dict[str, Any]) -> _T:
+    """Rebuild an output dataclass from its as_dict, decoding its init fields (__post_init__ derives the others)."""
+    init_fields = [fld for fld in fields(cls) if fld.init and fld.name in dct]  # type: ignore[arg-type]
+    return cls(**{fld.name: _decode_value(dct[fld.name]) for fld in init_fields})
+
+
+def _vibrational_modes_as_dict(modes: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Return vibrational modes with each complex value (imaginary frequencies) as [real, imag], as JSON has none."""
+    if modes is None:
+        return None
+    return [{key: [v.real, v.imag] if isinstance(v, complex) else v for key, v in mode.items()} for mode in modes]
 
 
 def check_file_exists(func: Callable) -> Any:

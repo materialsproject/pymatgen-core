@@ -162,6 +162,9 @@ def test_partial_posns_constraints_kept_off_site_properties():
     assert not {"constraint_types", "constraint_vectors", "group_names"} & set(jst.site_properties)
     assert jst.constraint_types == ["Linear", "HyperPlane", "HyperPlane", None]
     assert jst.group_names == [None, ["g1", "g2"], ["g1"], None]
+    loaded = JOutStructure.from_dict(jst.as_dict())
+    assert loaded.constraint_types == jst.constraint_types
+    assert loaded.group_names == jst.group_names
 
 
 def test_partial_posns_constraints_reach_ase():
