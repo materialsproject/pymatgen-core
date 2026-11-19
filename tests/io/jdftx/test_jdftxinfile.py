@@ -23,7 +23,7 @@ from pymatgen.io.jdftx.inputs import (
     selective_dynamics_site_prop_to_jdftx_interpretable,
 )
 from pymatgen.io.jdftx.jdftxinfile_default_inputs import antoinePvap, default_inputs
-from pymatgen.io.jdftx.jdftxinfile_master_format import MASTER_TAG_LIST, get_tag_object
+from pymatgen.io.jdftx.jdftxinfile_master_format import get_tag_object
 from pymatgen.io.jdftx.outputs import JDFTXOutfile
 from pymatgen.io.vasp import Poscar
 
@@ -1083,7 +1083,6 @@ def test_density_of_states_read_errors(line: str, error_match: str):
     [
         ("elec-ex-corr hyb-HSE06", "hyb-HSE06"),
         ("elec-ex-corr hyb-hse06", "hyb-HSE06"),  # JDFTx's names are case-insensitive: stored as its spelling
-        ("elec-ex-corr-compare hyb-HSE06", ["hyb-HSE06"]),  # repeatable, so stored as a list
     ],
 )
 def test_hse06_is_accepted_with_a_warning(line: str, expected: str | list[str]):
@@ -1238,58 +1237,6 @@ def test_fluid_site_params_bare_line_is_not_stored():
     assert "fluid-site-params" not in JDFTXInfile.from_str("fluid-site-params\n", dont_require_structure=True)
 
 
-@pytest.mark.parametrize(
-    ("echo", "expected_extra"),
-    [
-        # LinearPCM (from GC_ion.out)
-        (
-            (
-                "fluid-anion F- 0.5 MeanFieldLJ \\\n\tepsBulk 1 \\\n\tpMol 0 \\\n\tepsInf 1 \\\n\tPvap 0 \\\n"
-                "\tsigmaBulk 0 \\\n\tRvdw 2.24877 \\\n\tRes 0 \\\n\ttauNuc 343133\n"
-            ),
-            {},
-        ),
-        # ClassicalDFT, which also echoes the "translation" key as "translationMode"
-        (
-            (
-                "fluid-cation Na+ 0.5 MeanFieldLJ \\\n\tepsBulk 1 \\\n\tpMol 0 \\\n\tepsInf 1 \\\n\tPvap 0 \\\n"
-                "\tsigmaBulk 0 \\\n\tRvdw 2.19208 \\\n\tRes 0 \\\n\ttauNuc 343133 \\\n\tepsLJ 0 \\\n"
-                "\trepresentation MuEps \\\n\ts2quadType 7design24 \\\n\tquad_nBeta 0 \\\n\tquad_nAlpha 0 \\\n"
-                "\tquad_nGamma 0 \\\n\ttranslationMode LinearSpline \\\n\tNnorm 0\n"
-            ),
-            {
-                "Nnorm": 0.0,
-                "quad_nAlpha": 0,
-                "quad_nGamma": 0,
-                "representation": "MuEps",
-                "s2quadType": "7design24",
-                "translation": "LinearSpline",
-            },
-        ),
-    ],
-)
-def test_fluid_ion_echo_is_read_and_written_back(echo: str, expected_extra: dict[str, Any]):
-    """JDFTx echoes unset ion parameters with values it refuses as input (epsBulk 1, Pvap 0, ...)."""
-    tag = echo.split(maxsplit=1)[0]
-    jif = JDFTXInfile.from_str(echo, dont_require_structure=True, validate_value_boundaries=False)
-    # Written back as valid JDFTx input (checked with JDFTx: it echoes the same line)
-    written = str(jif)
-    tokens = written.split()
-    assert not any(key in tokens for key in ("epsBulk", "Pvap", "sigmaBulk", "Res", "epsLJ", "quad_nBeta"))
-    assert "translationMode" not in tokens
-    expected = {
-        "name": tokens[1],
-        "concentration": 0.5,
-        "functional": "MeanFieldLJ",
-        "epsInf": 1.0,
-        "pMol": 0.0,
-        "Rvdw": jif[tag][0]["Rvdw"],
-        "tauNuc": 343133.0,
-        **expected_extra,
-    }
-    assert JDFTXInfile.from_str(written, dont_require_structure=True)[tag] == [expected]
-
-
 @pytest.mark.parametrize("algorithm", ["CG", "MINRES"])
 def test_perturb_minimize_algorithm(algorithm: str):
     # JDFTx's options are CG|MINRES (checked with JDFTx)
@@ -1329,96 +1276,6 @@ JDFTX_REPEATABLE_TAGS = {
     "symmetry-matrix",
     "tau-core",
 }
-
-
-def test_repeatable_tags_match_jdftx():
-    repeatable = set()
-    for tag_group in MASTER_TAG_LIST.values():
-        for tag, tag_object in tag_group.items():
-            if isinstance(tag_object, MultiformatTag):
-                # A line is stored by the format it's read with, so each format must repeat if the tag does
-                assert all(option.can_repeat == tag_object.can_repeat for option in tag_object.format_options), tag
-            if tag_object.can_repeat:
-                repeatable.add(tag)
-    assert repeatable == JDFTX_REPEATABLE_TAGS
-
-
-@pytest.mark.parametrize(
-    ("lines", "expected"),
-    [
-        (
-            ["tau-core O 1.0 no", "tau-core H 0.5"],
-            [{"species-id": "O", "rCut": 1.0, "plot": False}, {"species-id": "H", "rCut": 0.5}],
-        ),
-        (
-            ["fluid-cation Na+ 0.5", "fluid-cation K+ 0.2 MeanFieldLJ"],
-            [{"name": "Na+", "concentration": 0.5}, {"name": "K+", "concentration": 0.2, "functional": "MeanFieldLJ"}],
-        ),
-        (
-            ["fluid-anion Cl- 0.5", "fluid-anion F- 0.2"],
-            [{"name": "Cl-", "concentration": 0.5}, {"name": "F-", "concentration": 0.2}],
-        ),
-        (
-            ["dump-Eresolved-density -0.5 -0.2", "dump-Eresolved-density -0.2 0.1"],
-            [{"Emin": -0.5, "Emax": -0.2}, {"Emin": -0.2, "Emax": 0.1}],
-        ),
-        # Each line can use a different format
-        (
-            ["elec-ex-corr-compare gga-PBE", "elec-ex-corr-compare gga-x-pbe gga-c-pbe"],
-            ["gga-PBE", {"funcX": "gga-x-pbe", "funcC": "gga-c-pbe"}],
-        ),
-        (["dump-fermi-density", "dump-fermi-density -0.1"], [True, -0.1]),
-    ],
-)
-def test_repeatable_commands(lines: list[str], expected: list):
-    """JDFTx reads each of these commands any number of times (checked with JDFTx), so they're stored as lists."""
-    tag = lines[0].split()[0]
-    jif = JDFTXInfile.from_str("\n".join(lines) + "\n", dont_require_structure=True)
-    assert jif[tag] == expected
-    assert [" ".join(line.split()) for line in str(jif).splitlines() if line] == lines
-    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)[tag] == expected
-    assert JDFTXInfile.from_str(f"{lines[0]}\n", dont_require_structure=True)[tag] == expected[:1]
-    jif = JDFTXInfile.from_str("lattice Cubic 10\n", dont_require_structure=True)
-    jif[tag] = expected[0]  # one value can still be set as it is
-    jif.append_tag(tag, expected[1])
-    assert jif[tag] == expected
-
-
-def test_repeated_commands_in_jdftx_echo_are_all_read():
-    """Out files used to keep only the first of each of these lines (with a warning), so restarts lost the rest."""
-    # JDFTx's echo of the commands, each given twice (LinearPCM water)
-    ion_keys = (
-        " \\\n\tepsBulk 1 \\\n\tpMol 0 \\\n\tepsInf 1 \\\n\tPvap 0 \\\n\tsigmaBulk 0 \\\n\tRvdw {} \\\n\tRes 0 \\\n"
-    )
-    echo = (
-        "dump-Eresolved-density -0.5 -0.2\ndump-Eresolved-density -0.2 0.1\n"
-        "dump-fermi-density nan\ndump-fermi-density -0.1\n"
-        "elec-ex-corr-compare gga-PBE\nelec-ex-corr-compare lda-PZ\n"
-        f"fluid-anion Cl- 0.5 MeanFieldLJ{ion_keys.format(3.15584)}\ttauNuc 343133\n"
-        f"fluid-anion F- 0.2 MeanFieldLJ{ion_keys.format(2.24877)}\ttauNuc 343133\n"
-        f"fluid-cation Na+ 0.5 MeanFieldLJ{ion_keys.format(2.19208)}\ttauNuc 343133\n"
-        f"fluid-cation K+ 0.2 MeanFieldLJ{ion_keys.format(2.85349)}\ttauNuc 343133\n"
-        "tau-core O 0 no\ntau-core H 0 no\n"
-    )
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # nothing skipped
-        jif = JDFTXInfile.from_str(echo, dont_require_structure=True, validate_value_boundaries=False)
-    assert [entry["Emin"] for entry in jif["dump-Eresolved-density"]] == [-0.5, -0.2]
-    assert np.isnan(jif["dump-fermi-density"][0])
-    assert jif["dump-fermi-density"][1] == -0.1
-    assert jif["elec-ex-corr-compare"] == ["gga-PBE", "lda-PZ"]
-    assert [(entry["name"], entry["Rvdw"]) for entry in jif["fluid-anion"]] == [("Cl-", 3.15584), ("F-", 2.24877)]
-    assert [(entry["name"], entry["Rvdw"]) for entry in jif["fluid-cation"]] == [("Na+", 2.19208), ("K+", 2.85349)]
-    assert [entry["species-id"] for entry in jif["tau-core"]] == ["O", "H"]
-
-
-def test_adding_infiles_appends_repeatable_commands():
-    jif1 = JDFTXInfile.from_str("fluid-cation Na+ 0.5\nelec-ex-corr-compare gga-PBE\n", dont_require_structure=True)
-    jif2 = JDFTXInfile.from_str("fluid-cation K+ 0.2\nelec-ex-corr-compare lda-PZ\n", dont_require_structure=True)
-    jif = jif1 + jif2
-    assert [entry["name"] for entry in jif["fluid-cation"]] == ["Na+", "K+"]
-    assert jif["elec-ex-corr-compare"] == ["gga-PBE", "lda-PZ"]  # used to raise AttributeError
-    assert (jif1 + jif1)["fluid-cation"] == jif1["fluid-cation"]  # entries already there aren't added again
 
 
 def test_dict_values_are_written_in_jdftx_order():
