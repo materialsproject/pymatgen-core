@@ -56,8 +56,8 @@ ex_infile1_knowns = {
     "fluid": {"type": "LinearPCM"},
     "pcm-variant": "CANDLE",
     "fluid-solvent": [{"name": "H2O"}],
-    "fluid-cation": [{"name": "Na+", "concentration": 0.5}],
-    "fluid-anion": [{"name": "F-", "concentration": 0.5}],
+    "fluid-cation": {"name": "Na+", "concentration": 0.5},
+    "fluid-anion": {"name": "F-", "concentration": 0.5},
     "initial-magnetic-moments": {
         "species-values": [{"species-id": "C", "values": [1.0]}, {"species-id": "O", "values": [1.0]}]
     },
