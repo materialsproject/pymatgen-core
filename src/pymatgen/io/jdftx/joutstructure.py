@@ -397,25 +397,25 @@ class JOutStructure(Structure):
             )
         instance.eopt_type = eopt_type
         instance.opt_type = opt_type
-        _line_types = list(line_types)
+        step_line_types = list(_line_types)
         if is_md:
             instance.is_md = True
-            _line_types.append("thermostat-velocity")
+            step_line_types.append("thermostat-velocity")
         # Since igp forces share the same header as normal forces and are printed before,
         # the igp forces line type must be inserted before the forces line type
         if has_igp:
-            _line_types.insert(_line_types.index("forces"), "igp_forces")
+            step_line_types.insert(step_line_types.index("forces"), "igp_forces")
         if expected_etype is not None:
             instance.etype = expected_etype
         # Remove line types that are being skipped anyways to speed up `_gather_line_collections`
         if "struct" in skip_props:
             # Position lines are still collected (not parsed): they show whether the step printed a new geometry
-            _line_types.remove("lattice")
+            step_line_types.remove("lattice")
         if "forces" in skip_props:
-            _line_types.remove("forces")
+            step_line_types.remove("forces")
         if "charges" in skip_props:
-            _line_types.remove("lowdin")
-        line_collections = instance._init_line_collections(_line_types)
+            step_line_types.remove("lowdin")
+        line_collections = instance._init_line_collections(step_line_types)
         line_collections = instance._gather_line_collections(line_collections, text_slice)
         if len(line_collections["posns"]["lines"]) == 0 and req_new_geom:
             raise ValueError("No posns lines found in slice, but req_new_geom is True")
@@ -878,9 +878,9 @@ class JOutStructure(Structure):
         charges_dict: dict[str, list[float]] = {}
         moments_dict: dict[str, list[float]] = {}
         for line in lowdin_lines:
-            if line_type_map["charges"] in line:
+            if _line_type_map["charges"] in line:
                 charges_dict = self._parse_lowdin_line(line, charges_dict)
-            elif line_type_map["magnetic_moments"] in line:
+            elif _line_type_map["magnetic_moments"] in line:
                 moments_dict = self._parse_lowdin_line(line, moments_dict)
         # JDFTx prints the values by species name (e.g. "# oxidation-state Fe1 ..."), which it reads ignoring case
         if len(self) == len(cur_species):
@@ -1023,8 +1023,8 @@ class JOutStructure(Structure):
             bool: True if the line_text is the start of a section of the
             JDFTx out file.
         """
-        if line_type in line_type_map:
-            return line_type_map[line_type] in line_text
+        if line_type in _line_type_map:
+            return _line_type_map[line_type] in line_text
         if line_type == "opt":
             return self._is_opt_start_line(line_text)
         raise ValueError(f"Unrecognized line type {line_type}")
@@ -1234,7 +1234,7 @@ def _parse_posn_line(
     return name, posn, sd, velocity, constraint_type, constraint_vector, group_names
 
 
-line_types = [
+_line_types = [
     "emin",
     "lattice",
     "strain",
@@ -1249,7 +1249,7 @@ line_types = [
 
 
 # Map of line types to their identifying start strings in a JDFTx out file
-line_type_map = {
+_line_type_map = {
     "lowdin": "#--- Lowdin population analysis ---",
     "ecomp": "# Energy components",
     "igp_forces": "# Forces in",

@@ -16,10 +16,10 @@ from pymatgen.io.jdftx.generic_tags import JDFTXOptionWarning, MultiformatTag
 from pymatgen.io.jdftx.inputs import (
     JDFTXInfile,
     JDFTXStructure,
+    _get_nanmaps,
     _infile_to_pmg_lattice,
     _remove_at_path,
     clean_infile_of_nans,
-    get_nanmaps,
     selective_dynamics_site_prop_to_jdftx_interpretable,
 )
 from pymatgen.io.jdftx.jdftxinfile_default_inputs import antoinePvap, default_inputs
@@ -1968,13 +1968,13 @@ def test_selective_dynamics_site_prop_to_jdftx_interpretable(selective_dynamics:
 
 
 def test_get_nanmaps():
-    assert get_nanmaps(np.nan) == [[]]
-    assert get_nanmaps(1.0) == get_nanmaps("nan") == get_nanmaps(None) == []
+    assert _get_nanmaps(np.nan) == [[]]
+    assert _get_nanmaps(1.0) == _get_nanmaps("nan") == _get_nanmaps(None) == []
     val = {"a": [1.0, np.nan, [np.nan]], "b": {"c": np.nan, "d": "nan", "e": True}}
-    assert get_nanmaps(val) == [["a", 1], ["a", 2, 0], ["b", "c"]]
+    assert _get_nanmaps(val) == [["a", 1], ["a", 2, 0], ["b", "c"]]
     # For a JDFTXInfile, each path starts at its tag name
     jif = JDFTXInfile.from_str("fluid-solvent H2O 55.338 ScalarEOS epsBulk nan\n", dont_require_structure=True)
-    assert get_nanmaps(jif) == [["fluid-solvent", 0, "epsBulk"]]
+    assert _get_nanmaps(jif) == [["fluid-solvent", 0, "epsBulk"]]
 
 
 def test_jdftxstructure_sort_structure():

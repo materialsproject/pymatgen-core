@@ -218,7 +218,7 @@ class AbstractTag(ClassPrintFormatter, ABC):
             Any: The parsed value.
         """
 
-    def read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[Any, int]:
+    def _read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[Any, int]:
         """Read the value for this tag from the front of a list of value tokens.
 
         Used by TagContainer to read positional subtags. Tags that read a single value consume one token.
@@ -996,7 +996,7 @@ class TagContainer(AbstractTag):
         self._check_unread_values(tag, value_list)
         return subdict
 
-    def read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[dict, int]:
+    def _read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[dict, int]:
         """Read this TagContainer as a positional subtag from the front of a list of value tokens.
 
         Subtags are read in the order they are defined. A keyword subtag (write_tagname=True) is read only where its
@@ -1077,7 +1077,7 @@ class TagContainer(AbstractTag):
         values = []
         n_total = 0
         while n_total < len(tokens) and tokens[n_total] == subtag:
-            value, n_read = subtag_type.read_from_tokens(subtag, tokens[n_total + 1 :])
+            value, n_read = subtag_type._read_from_tokens(subtag, tokens[n_total + 1 :])
             values.append(value)
             n_total += 1 + n_read
             if not subtag_type.can_repeat:
@@ -1103,12 +1103,12 @@ class TagContainer(AbstractTag):
                 nothing).
         """
         if not subtag_type.can_repeat:
-            return subtag_type.read_from_tokens(subtag, tokens)
+            return subtag_type._read_from_tokens(subtag, tokens)
         values = []
         n_total = 0
         while n_total < len(tokens):
             try:
-                value, n_read = subtag_type.read_from_tokens(subtag, tokens[n_total:])
+                value, n_read = subtag_type._read_from_tokens(subtag, tokens[n_total:])
             except (ValueError, TypeError):
                 break
             if n_read == 0:
@@ -1701,12 +1701,12 @@ class SubcommandTagContainer(TagContainer):
         """
         self._general_read_validate(tag, value)
         tokens = value.split()
-        entries, n_read = self.read_from_tokens(tag, tokens)
+        entries, n_read = self._read_from_tokens(tag, tokens)
         if n_read < len(tokens):
             raise ValueError(f"'{tokens[n_read]}' is not a valid subcommand of '{tag}'!")
         return entries
 
-    def read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[list[dict[str, Any]], int]:  # type: ignore[override]
+    def _read_from_tokens(self, tag: str, tokens: list[str]) -> tuple[list[dict[str, Any]], int]:  # type: ignore[override]
         """Read subcommands from the front of a list of value tokens, until a token is not a subcommand keyword.
 
         Args:

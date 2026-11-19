@@ -39,7 +39,7 @@ func_options = [
     "gga-PBEsol",  # Perdew-Burke-Ernzerhof GGA reparametrized for solids
     "gga-PW91",  # Perdew-Wang GGA
     "Hartree-Fock",  # Full exact exchange with no correlation
-    "hyb-HSE06",  # HSE06 'wPBEh' hybrid with 1/4 screened exact exchange (warns, see func_option_warnings)
+    "hyb-HSE06",  # HSE06 'wPBEh' hybrid with 1/4 screened exact exchange (warns, see _func_option_warnings)
     "hyb-HSE12",  # Reparametrized screened exchange functional for accuracy (w=0.185 A^-1 and a=0.313)
     "hyb-HSE12s",  # Reparametrized screened exchange functional for k-point convergence (w=0.408 A^-1 and a=0.425)
     "hyb-PBE0",  # Hybrid PBE with 1/4 exact exchange
@@ -56,7 +56,7 @@ func_options = [
 ]
 
 # Warnings for built-in functionals JDFTx accepts but whose implementation is known to differ from the reference
-func_option_warnings = {
+_func_option_warnings = {
     # JDFTx's own omega-PBE exchange; the last change to it (5c09ca66, 2019) followed 09e5cb50: "Changed kF definition
     # in HSE (omegaPBE) implementation to match libXC. Total energies get much closer, but gap still different"
     "hyb-HSE06": (

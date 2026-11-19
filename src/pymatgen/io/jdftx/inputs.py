@@ -1221,11 +1221,11 @@ def clean_infile_of_nans(infile: JDFTXInfile) -> JDFTXInfile:
         JDFTXInfile: Copy of infile without nan values.
     """
     infile_cleaned = infile.copy()
-    apply_popmaps(infile_cleaned, get_nanmaps(infile_cleaned))
+    _apply_popmaps(infile_cleaned, _get_nanmaps(infile_cleaned))
     return infile_cleaned
 
 
-def get_nanmaps(val: Any) -> list[list[str | int]]:
+def _get_nanmaps(val: Any) -> list[list[str | int]]:
     """Get the path to each nan inside a value.
 
     Each path is the sequence of dict keys / list indices leading to a nan, e.g. {"a": [1.0, nan]} gives [["a", 1]]
@@ -1242,10 +1242,10 @@ def get_nanmaps(val: Any) -> list[list[str | int]]:
         return [[]] if np.isnan(val) else []
     # Any other value (str, bool, None, ...) holds no nans to map
     items = val.items() if isinstance(val, dict) else enumerate(val) if isinstance(val, list) else []
-    return [[key, *nanmap] for key, v in items for nanmap in get_nanmaps(v)]
+    return [[key, *nanmap] for key, v in items for nanmap in _get_nanmaps(v)]
 
 
-def apply_popmaps(edit_infile: JDFTXInfile, popmaps: list[list[str | int]]) -> None:
+def _apply_popmaps(edit_infile: JDFTXInfile, popmaps: list[list[str | int]]) -> None:
     """Remove the value at the end of each path from a JDFTXInfile, in place.
 
     If a path runs through a non-optional subtag of a TagContainer, the entry containing that subtag is removed
@@ -1255,7 +1255,7 @@ def apply_popmaps(edit_infile: JDFTXInfile, popmaps: list[list[str | int]]) -> N
 
     Args:
         edit_infile (JDFTXInfile): JDFTXInfile to edit in place.
-        popmaps (list[list[str | int]]): Paths to remove, each starting at a tag name (see get_nanmaps).
+        popmaps (list[list[str | int]]): Paths to remove, each starting at a tag name (see _get_nanmaps).
 
     Raises:
         TypeError: If a path does not start with a tag name string.
@@ -1276,7 +1276,7 @@ def _get_removal_path(edit_infile: JDFTXInfile, popmap: list[str | int]) -> list
 
     Args:
         edit_infile (JDFTXInfile): JDFTXInfile the path points into.
-        popmap (list[str | int]): Path to a nan, starting at a tag name (see get_nanmaps).
+        popmap (list[str | int]): Path to a nan, starting at a tag name (see _get_nanmaps).
 
     Returns:
         list[str | int]: Path to the entry to remove, starting at the tag name.

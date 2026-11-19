@@ -28,9 +28,9 @@ from pymatgen.io.jdftx.generic_tags import (
     TagContainer,
 )
 from pymatgen.io.jdftx.jdftxinfile_ref_options import (
+    _func_option_warnings,
     fluid_solvent_options,
     func_c_options,
-    func_option_warnings,
     func_options,
     func_x_options,
     func_xc_options,
@@ -45,7 +45,7 @@ from pymatgen.io.jdftx.jdftxinfile_ref_options import (
 __author__ = "Jacob Clary, Ben Rich"
 
 
-def get_species_values_tag_container() -> TagContainer:
+def _get_species_values_tag_container() -> TagContainer:
     """Get a TagContainer for tags of the form '<species> <v1> <v2> ... [<species2> <v1> ...]'.
 
     Used for e.g. initial-magnetic-moments. Each species group reads values until the next species label, and the
@@ -384,7 +384,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 StrTag(
                     write_tagname=True,
                     options=deepcopy(func_options),
-                    option_warnings=deepcopy(func_option_warnings),
+                    option_warnings=deepcopy(_func_option_warnings),
                 ),
                 TagContainer(
                     subtags={
@@ -418,7 +418,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     can_repeat=True,
                     write_tagname=True,
                     options=func_options,
-                    option_warnings=deepcopy(func_option_warnings),
+                    option_warnings=deepcopy(_func_option_warnings),
                 ),
                 TagContainer(
                     can_repeat=True,
@@ -537,8 +537,8 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
             }
         ),
         "spintype": StrTag(options=["no-spin", "spin-orbit", "vector-spin", "z-spin"]),
-        "initial-magnetic-moments": get_species_values_tag_container(),
-        "initial-oxidation-state": get_species_values_tag_container(),
+        "initial-magnetic-moments": _get_species_values_tag_container(),
+        "initial-oxidation-state": _get_species_values_tag_container(),
         # add-U <species> <orbDesc> <UminusJ> [Vext <atom> <V>] ... [<species2> ...]
         # JDFTx allows add-U only once, with all U channels on one line (and any number of Vext's per channel)
         "add-U": TagContainer(

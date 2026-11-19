@@ -249,9 +249,9 @@ def test_multiformat_tag_validate_value_bounds():
 
 
 def test_read_from_tokens_consumes_one_token_for_single_value_tags():
-    assert StrTag().read_from_tokens("tag", ["a", "b"]) == ("a", 1)
-    assert FloatTag().read_from_tokens("tag", ["1.5", "b"]) == (1.5, 1)
-    assert IntTag().read_from_tokens("tag", ["3", "4"]) == (3, 1)
+    assert StrTag()._read_from_tokens("tag", ["a", "b"]) == ("a", 1)
+    assert FloatTag()._read_from_tokens("tag", ["1.5", "b"]) == (1.5, 1)
+    assert IntTag()._read_from_tokens("tag", ["3", "4"]) == (3, 1)
 
 
 def test_positional_repeatable_subtag_reads_greedily():
@@ -327,8 +327,8 @@ def test_empty_means_unset_keyword_subtag():
     assert tagcontainer.read("barbie", "ken 1 file allan 2") == {"ken": 1.0, "allan": 2.0}
     assert tagcontainer.read("barbie", "ken 1 file") == {"ken": 1.0}
     assert tagcontainer.read("barbie", "file f.bin ken 1") == {"file": "f.bin", "ken": 1.0}
-    assert tagcontainer.read_from_tokens("barbie", ["file", "ken", "1", "next"]) == ({"ken": 1.0}, 3)
-    assert tagcontainer.read_from_tokens("barbie", ["file", "f.bin", "next"]) == ({"file": "f.bin"}, 2)
+    assert tagcontainer._read_from_tokens("barbie", ["file", "ken", "1", "next"]) == ({"ken": 1.0}, 3)
+    assert tagcontainer._read_from_tokens("barbie", ["file", "f.bin", "next"]) == ({"file": "f.bin"}, 2)
     # Without it, the next keyword is taken as the value
     with pytest.raises(ValueError, match=re.escape("were not processed: ['1']")):
         TagContainer(subtags={"file": StrTag(), "ken": FloatTag()}).read("barbie", "file ken 1")
@@ -347,7 +347,7 @@ def test_tag_container_subtag_aliases():
     # A name JDFTx's echo uses for a subtag is read as that subtag, and written under the subtag's own name
     tagcontainer = TagContainer(subtags={"ken": StrTag(), "allan": FloatTag()}, subtag_aliases={"kenneth": "ken"})
     assert tagcontainer.read("barbie", "kenneth x allan 1") == {"ken": "x", "allan": 1.0}
-    assert tagcontainer.read_from_tokens("barbie", ["kenneth", "x", "next"]) == ({"ken": "x"}, 2)
+    assert tagcontainer._read_from_tokens("barbie", ["kenneth", "x", "next"]) == ({"ken": "x"}, 2)
     assert tagcontainer.write("barbie", {"ken": "x"}) == "barbie ken  x "
 
 
@@ -362,7 +362,7 @@ def test_tag_container_write_follows_subtag_order():
 
 def test_read_from_tokens_requires_a_token():
     with pytest.raises(ValueError, match="No value given for 'tag'"):
-        StrTag().read_from_tokens("tag", [])
+        StrTag()._read_from_tokens("tag", [])
 
 
 def _keyword_group_tagcontainer() -> TagContainer:
