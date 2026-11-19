@@ -735,7 +735,7 @@ class JDFTXInfile(dict, MSONable):
             )
             if not warn_only:
                 raise ValueError(msg)
-            warnings.warn(msg, stacklevel=3)
+            warnings.warn(msg, stacklevel=2)
 
     def validate_initial_magnetic_moments(self) -> None:
         """Check the initial-magnetic-moments tag for consistency with the spintype and ion tags.
@@ -1470,7 +1470,7 @@ class JDFTXStructure(MSONable):
             warnings.warn(
                 f"movescale and selective_dynamics disagree for sites {mismatched} (one marks them fixed, the other "
                 "free): they are held fixed",
-                stacklevel=4,
+                stacklevel=2,
             )
         # A site is fixed if either marks it fixed; a site without either (e.g. one appended to a structure read from
         # JDFTx) can move
