@@ -1118,7 +1118,7 @@ def _fill_default_values(tag: str, value: Any, infile: JDFTXInfile) -> Any:
     Returns:
         Any: The filled-in value.
     """
-    if tag == "fluid-solvent":
+    if tag in ("fluid-solvent", "fluid-cation", "fluid-anion"):
         temperature = infile.get("fluid", {}).get("Temperature", ref_infile["fluid"]["Temperature"])
         return [  # "bulk" is JDFTx's name for the default concentration
             get_default_fluid_params(entry.get("name", "H2O"), temperature)
