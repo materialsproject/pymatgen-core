@@ -38,12 +38,6 @@ if TYPE_CHECKING:
     from pymatgen.core.trajectory import Trajectory
     from pymatgen.io.jdftx.inputs import JDFTXInfile
     from pymatgen.io.jdftx.jelstep import JElSteps
-    from pymatgen.io.jdftx.jminsettings import (
-        JMinSettingsElectronic,
-        JMinSettingsFluid,
-        JMinSettingsIonic,
-        JMinSettingsLattice,
-    )
     from pymatgen.io.jdftx.joutstructures import JOutStructures
 
 __author__ = "Ben Rich, Jacob Clary"
@@ -337,10 +331,6 @@ class JDFTXOutputs:
 _jof_atr_from_last_slice = (
     "prefix",
     "jstrucs",
-    "jsettings_fluid",
-    "jsettings_electronic",
-    "jsettings_lattice",
-    "jsettings_ionic",
     "xc_func",
     "lattice_initial",
     "lattice_final",
@@ -416,7 +406,6 @@ _jof_atr_from_last_slice = (
     "vibrational_energy_components",
 )
 
-# TODO: Remove references to the deprecated 'jsettings_*' attributes in `JDFTXOutfile` and `JDFTXOutfileSlice`
 # TODO: JDFTXOutfile and JDFTXOutfileSlice are VERY bloated. The following attributes are redundant
 # to fields of the `Structure` object and their removal likely won't cause any confusion.
 # - lattice
@@ -472,18 +461,6 @@ class JDFTXOutfile:
             series of JOutStructure objects in its 'slices' attribute, each corresponding to a single structure
             (multiple iff performing a geometric optimization) as well as convergence data for the structures as a
             series.
-        jsettings_fluid (JMinSettingsFluid): The JMinSettingsFluid object from the most recent JDFTx call. This object
-            contains only a 'params' attribute, which is a dictionary of the input parameters for the fluid
-            optimization.
-        jsettings_electronic (JMinSettingsElectronic): The JMinSettingsElectronic object from the most recent JDFTx
-            call. This object contains only a 'params' attribute, which is a dictionary of the input parameters for the
-            electronic optimization.
-        jsettings_lattice (JMinSettingsLattice): The JMinSettingsLattice object from the most recent JDFTx call. This
-            object contains only a 'params' attribute, which is a dictionary of the input parameters for the lattice
-            optimization.
-        jsettings_ionic (JMinSettingsIonic): The JMinSettingsIonic object from the most recent JDFTx call. This object
-            contains only a 'params' attribute, which is a dictionary of the input parameters for the ionic
-            optimization.
         xc_func (str): The exchange-correlation functional used in the most recent JDFTx call. See documentation for
             JDFTx online for a list of available exchange-correlation functionals.
         lattice_initial (np.ndarray): The initial lattice vectors of the most recent JDFTx call as a 3x3 numpy array.
@@ -595,10 +572,6 @@ class JDFTXOutfile:
     slices: list[JDFTXOutfileSlice | None] = field(default_factory=list)
     prefix: str = field(init=False)
     jstrucs: JOutStructures = field(init=False)
-    jsettings_fluid: JMinSettingsFluid = field(init=False)
-    jsettings_electronic: JMinSettingsElectronic = field(init=False)
-    jsettings_lattice: JMinSettingsLattice = field(init=False)
-    jsettings_ionic: JMinSettingsIonic = field(init=False)
     xc_func: str = field(init=False)
     lattice_initial: np.ndarray = field(init=False)
     lattice_final: np.ndarray = field(init=False)
