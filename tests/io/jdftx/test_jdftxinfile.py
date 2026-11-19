@@ -459,6 +459,193 @@ def test_ion_writing(expected_out: str, stored_dict: dict):
 
 
 @pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        # Bare van-der-waals (DFT-D2 with the default scale; how JDFTx echoes a scale of 0) is a scale of 0
+        ("van-der-waals", 0.0),
+        ("van-der-waals ", 0.0),
+        ("van-der-waals 0", 0.0),
+        ("van-der-waals 0.75", 0.75),
+        ("van-der-waals D3", "D3"),
+        ("van-der-waals D3BJ", "D3BJ"),
+    ],
+)
+def test_van_der_waals(line: str, expected: float | str):
+    jif = JDFTXInfile.from_str(f"{line}\n", dont_require_structure=True)
+    assert jif["van-der-waals"] == expected
+    # Written values read back unchanged
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)["van-der-waals"] == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("rhoExternal rho.bin", {"filename": "rho.bin"}),
+        ("rhoExternal rho.bin yes", {"filename": "rho.bin", "includeSelfEnergy": True}),
+        ("rhoExternal rho.bin no", {"filename": "rho.bin", "includeSelfEnergy": False}),
+    ],
+)
+def test_rho_external(line: str, expected: dict):
+    """includeSelfEnergy is a yes/no flag in JDFTx."""
+    jif = JDFTXInfile.from_str(f"{line}\n", dont_require_structure=True)
+    assert jif["rhoExternal"] == expected
+    assert str(jif).split() == line.split()
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)["rhoExternal"] == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("Vexternal V.bin", {"filename": "V.bin"}),
+        # Spin-polarized potential
+        ("Vexternal Vup.bin Vdn.bin", {"filenameUp": "Vup.bin", "filenameDn": "Vdn.bin"}),
+    ],
+)
+def test_vexternal(line: str, expected: dict):
+    jif = JDFTXInfile.from_str(f"{line}\n", dont_require_structure=True)
+    assert jif["Vexternal"] == expected
+    assert str(jif).split() == line.split()
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)["Vexternal"] == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("perturb-incommensurate-wavefunctions wfns", {"filename": "wfns"}),
+        # EcutOld is a double in JDFTx (echoed with %g)
+        ("perturb-incommensurate-wavefunctions wfns 20.5", {"filename": "wfns", "EcutOld": 20.5}),
+        ("perturb-incommensurate-wavefunctions wfns 20", {"filename": "wfns", "EcutOld": 20.0}),
+    ],
+)
+def test_perturb_incommensurate_wavefunctions(line: str, expected: dict):
+    tag = "perturb-incommensurate-wavefunctions"
+    jif = JDFTXInfile.from_str(f"{line}\n", dont_require_structure=True)
+    assert jif[tag] == expected
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)[tag] == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        # Bulk defect: Eps is the bulk dielectric constant
+        ("Dtot 2.5 1 2", {"DtotFile": "Dtot", "Eps": 2.5, "rMin": 1.0, "rSigma": 2.0}),
+        # Surface defect: Eps is a slab-epsilon output file (with the Slab override for periodic Coulomb)
+        ("Dtot slabEps 1 2", {"DtotFile": "Dtot", "Eps": "slabEps", "rMin": 1.0, "rSigma": 2.0}),
+        (
+            "Slab 001 Dtot slabEps 1 2",
+            {"Slab": {"dir": "001"}, "DtotFile": "Dtot", "Eps": "slabEps", "rMin": 1.0, "rSigma": 2.0},
+        ),
+        # With the Slab override, JDFTx always reads Eps as a file name, even one that looks like a number
+        (
+            "Slab 010 Dtot 1e3 1 2",
+            {"Slab": {"dir": "010"}, "DtotFile": "Dtot", "Eps": "1e3", "rMin": 1.0, "rSigma": 2.0},
+        ),
+    ],
+)
+def test_charged_defect_correction(line: str, expected: dict):
+    """The forms JDFTx accepts (and echoes unchanged) are read, written and read back."""
+    tag = "charged-defect-correction"
+    jif = JDFTXInfile.from_str(f"{tag} {line}\n", dont_require_structure=True)
+    assert jif[tag] == expected
+    assert str(jif).split() == [tag, *line.replace(" 1 2", " 1.0 2.0").split()]
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)[tag] == expected
+    # Set from a dict
+    jif = JDFTXInfile.from_str("lattice Cubic 10\n", dont_require_structure=True)
+    jif[tag] = expected
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)[tag] == expected
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Slab Dtot slabEps 1 2",  # JDFTx requires <dir> after Slab
+        "Slab 011 Dtot slabEps 1 2",
+        "Dtot 2.5 1",
+        "Dtot 2.5 1 2 3",
+    ],
+)
+def test_charged_defect_correction_invalid(line: str):
+    with pytest.raises(ValueError, match="No valid read format"):
+        JDFTXInfile.from_str(f"charged-defect-correction {line}\n", dont_require_structure=True)
+
+
+def test_charged_defect_correction_slab_needs_eps_file():
+    # With the Slab override, Eps is a slab-epsilon file, not a dielectric constant
+    jif = JDFTXInfile.from_str("lattice Cubic 10\n", dont_require_structure=True)
+    value = {"Slab": {"dir": "001"}, "DtotFile": "Dtot", "Eps": 2.5, "rMin": 1.0, "rSigma": 2.0}
+    with pytest.raises(ValueError, match="could not be determined"):
+        jif["charged-defect-correction"] = value
+
+
+@pytest.mark.parametrize("algorithm", ["CG", "MINRES"])
+def test_perturb_minimize_algorithm(algorithm: str):
+    # JDFTx's options are CG|MINRES (checked with JDFTx)
+    jif = JDFTXInfile.from_str(f"perturb-minimize algorithm {algorithm} nIterations 10\n", dont_require_structure=True)
+    assert jif["perturb-minimize"] == {"algorithm": algorithm, "nIterations": 10}
+    assert " ".join(str(jif).split()) == f"perturb-minimize \\ algorithm {algorithm} \\ nIterations 10"
+
+
+def test_perturb_minimize_algorithm_rejects_cgiminres():
+    # pymatgen used to accept CGIMINRES, which JDFTx never had
+    with pytest.raises(ValueError, match="must be one of"):
+        JDFTXInfile.from_str("perturb-minimize algorithm CGIMINRES\n", dont_require_structure=True)
+
+
+@pytest.mark.parametrize(
+    ("line", "old_written", "written"),
+    [
+        (
+            "fluid-solvent H2O 55.338 ScalarEOS quad_nBeta 4 quad_nAlpha 2 quad_nGamma 2",
+            "fluid-solvent H2O 55.338 ScalarEOS quad_nAlpha 2.0 quad_nBeta 4.0 quad_nGamma 2.0",
+            "fluid-solvent H2O 55.338 ScalarEOS quad_nAlpha 2 quad_nBeta 4 quad_nGamma 2",
+        ),
+        (
+            "electron-scattering eta 0.01 computeRange 1 10",
+            "electron-scattering eta 0.01 computeRange 1.0 10.0",
+            "electron-scattering \\ eta 0.01 \\ computeRange 1 10",
+        ),
+        (
+            "density-of-states Slice 0 0 0 2 0 0 1",
+            "density-of-states Slice 0.0 0.0 0.0 2.0 0.0 0.0 1.0",
+            "density-of-states \\ Slice 0.0 0.0 0.0 2.0 0 0 1",
+        ),
+        (
+            "density-of-states AtomSlice H 1 2 1 -1 0",
+            "density-of-states AtomSlice H 1 2.0 1.0 -1.0 0.0",
+            "density-of-states \\ AtomSlice H 1 2.0 1 -1 0",
+        ),
+    ],
+)
+def test_integer_parameters_are_written_as_integers(line: str, old_written: str, written: str):
+    """JDFTx reads these as integers and rejects the old "4.0" form (checked with JDFTx), which still reads the same."""
+    for text in (line, old_written):
+        jif = JDFTXInfile.from_str(f"{text}\n", dont_require_structure=True)
+        assert " ".join(str(jif).split()) == written
+
+
+def test_dump_hc():
+    """HC (JDFTx since 2025-09) is a dump variable."""
+    jif = JDFTXInfile.from_str("dump End HC\n", dont_require_structure=True)
+    assert jif["dump"] == [{"End": {"HC": True}}]
+    assert " ".join(str(jif).split()) == "dump End HC"
+
+
+@pytest.mark.parametrize("tag", ["electric-field", "perturb-electric-field"])
+def test_electric_field_components_are_floats(tag: str):
+    """The field components are doubles in JDFTx (Eh/e/a0), so fields weaker than 1 must not be truncated to 0."""
+    expected = {"Ex": 0.01, "Ey": 0.0, "Ez": -2.5e-3}
+    jif = JDFTXInfile.from_str(f"{tag} 0.01 0 -2.5e-3\n", dont_require_structure=True)
+    assert_same_value(jif[tag], expected)
+    # Written values read back unchanged
+    assert_same_value(JDFTXInfile.from_str(str(jif), dont_require_structure=True)[tag], expected)
+    # Setting the tag from a dict or a list
+    jif[tag] = {"Ex": 0, "Ey": 0.5, "Ez": 0}
+    assert_same_value(jif[tag], {"Ex": 0.0, "Ey": 0.5, "Ez": 0.0})
+    jif[tag] = [0.0, 0.0, 0.002]
+    assert_same_value(JDFTXInfile.get_dict_representation(jif)[tag], {"Ex": 0.0, "Ey": 0.0, "Ez": 0.002})
+
+
+@pytest.mark.parametrize(
     ("lattice_type", "value_str"),
     [
         ("Rhombohedral", "Rhombohedral 1.0 1.0"),
@@ -559,6 +746,13 @@ def test_jdftxinfile_comparison():
     assert not len(
         jif1.get_filtered_differing_tags(jif1copy, exclude_tag_categories=["electronic"])
     )  # Tag categories can be filtered out
+
+
+def test_latt_scale_keeps_fractional_values():
+    # e.g. an angstrom-to-bohr conversion factor must not be truncated to 1
+    jif = JDFTXInfile.from_str("latt-scale 1.8897 1.8897 1.8897\n", dont_require_structure=True)
+    assert jif["latt-scale"] == {"s0": 1.8897, "s1": 1.8897, "s2": 1.8897}
+    assert JDFTXInfile.from_str(str(jif), dont_require_structure=True)["latt-scale"] == jif["latt-scale"]
 
 
 def test_jdftxstructure_lattice_coords_not_scaled():
