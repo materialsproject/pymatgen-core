@@ -1370,11 +1370,10 @@ class JDFTXStructure(MSONable):
     Attributes:
         structure (Structure): Associated Structure.
         selective_dynamics (list[list[bool]]): Selective dynamics flags for each site (one per direction, as in
-            structure.site_properties["selective_dynamics"]; one per site is also accepted). A site free in every
-            direction goes with any non-zero moveScale, and a site fixed in every direction with moveScale 0, so they
-            give movescale for the sites it isn't given for. Once set, they match movescale ([True] * 3 for a non-zero
-            moveScale, [False] * 3 for 0): given flags that disagree with movescale, or that fix only some directions
-            of a site, are replaced with a warning.
+            structure.site_properties["selective_dynamics"]; one per site is also accepted). A site is fixed (moveScale
+            0) if either these or movescale mark it fixed, with a warning where the other marks it free; flags that fix
+            only some directions count as fixed (with a warning), as JDFTx's moveScale applies to every direction. Once
+            set, they match movescale ([True] * 3 for a non-zero moveScale, [False] * 3 for 0).
         sort_structure (bool): Whether to sort the sites into the order JDFTx prints them in (grouped by species, in
             the order the species first appear), along with the per-site data below. Useful if species are not
             grouped properly together. Defaults to False. The order may not match JDFTx's if the input file names
@@ -1395,8 +1394,8 @@ class JDFTXStructure(MSONable):
             is expected.
         movescale (list[float]): JDFTx's moveScale for each site: 0 holds the ion fixed, and a non-zero value also
             scales the ion's steps in ionic and lattice minimizations (MD only uses whether it is 0). Must not be
-            negative (JDFTx rejects it). Filled from selective_dynamics for the sites it isn't given for (1 if free in
-            every direction, 0 otherwise), and 1 for sites with neither.
+            negative (JDFTx rejects it). Set to 0 for sites that selective_dynamics mark fixed, and to 1 for free sites
+            it isn't given for.
     """
 
     structure: Structure | None = None
@@ -1458,8 +1457,8 @@ class JDFTXStructure(MSONable):
             self._sync_movescale_and_selective_dynamics()
 
     def _sync_movescale_and_selective_dynamics(self) -> None:
-        """Fill movescale from selective_dynamics for the sites without it, set selective_dynamics to match movescale
-        (warning for the sites where the given ones don't), and set both as the structure's site properties.
+        """Combine movescale and selective_dynamics (a site is fixed if either marks it fixed, with a warning where the
+        other marks it free), set selective_dynamics to match, and set both as the structure's site properties.
         """
         structure = cast("Structure", self.structure)
         movescale = list(self.movescale) if self.movescale is not None else [None] * len(structure)
@@ -1474,8 +1473,7 @@ class JDFTXStructure(MSONable):
         if partial:
             warnings.warn(
                 f"Selective dynamics that fix only some directions of a site are not supported yet (sites {partial}): "
-                "JDFTx's moveScale applies to every direction, so these sites are held fixed unless movescale is set, "
-                "and their selective dynamics are set to match",
+                "JDFTx's moveScale applies to every direction, so these sites are held fixed",
                 stacklevel=4,
             )
         mismatched = [
@@ -1485,14 +1483,14 @@ class JDFTXStructure(MSONable):
         ]
         if mismatched:
             warnings.warn(
-                f"movescale and selective_dynamics disagree for sites {mismatched} (a site free in every direction "
-                "has a non-zero moveScale, and a fixed one 0): movescale is used, and the selective dynamics are set "
-                "to match",
+                f"movescale and selective_dynamics disagree for sites {mismatched} (one marks them fixed, the other "
+                "free): they are held fixed",
                 stacklevel=4,
             )
-        # A site without either (e.g. one appended to a structure read from JDFTx) can move
+        # A site is fixed if either marks it fixed; a site without either (e.g. one appended to a structure read from
+        # JDFTx) can move
         filled_movescale = [
-            float(scale) if scale is not None else 1.0 if sd is None else float(all(sd))
+            0.0 if sd is not None and not all(sd) else 1.0 if scale is None else float(scale)
             for scale, sd in zip(movescale, selective_dynamics, strict=True)
         ]
         if negative := [i for i, scale in enumerate(filled_movescale) if scale < 0]:

@@ -603,7 +603,7 @@ def test_jdftxstructure_movescale_and_selective_dynamics():
         JDFTXStructure(structure, movescale=[0.5, 0, 2], selective_dynamics=free_fixed_free)
     with pytest.warns(UserWarning, match=re.escape("disagree for sites [0, 1]")):
         jstruct = JDFTXStructure(structure, movescale=[0, 1, 1], selective_dynamics=free_fixed_free)
-    assert jstruct.movescale == [0.0, 1.0, 1.0]
+    assert jstruct.movescale == [0.0, 0.0, 1.0]  # Fixed if either marks it fixed
     with pytest.warns(UserWarning, match=re.escape("not supported yet (sites [1])")):
         jstruct = JDFTXStructure(structure, selective_dynamics=[[True] * 3, [True, False, True], [True] * 3])
     assert jstruct.movescale == [1.0, 0.0, 1.0]
@@ -616,7 +616,7 @@ def test_jdftxstructure_movescale_and_selective_dynamics():
     [
         ([True] * 3, 0.5, 0.5, False),
         ([True] * 3, 0.0, 0.0, True),
-        ([False] * 3, 0.5, 0.5, True),
+        ([False] * 3, 0.5, 0.0, True),
         ([True] * 3, None, 1.0, False),
         ([False] * 3, None, 0.0, False),
     ],
@@ -630,9 +630,10 @@ def test_from_structure_movescale_and_selective_dynamics(
     movescale_as_site_property: bool,
     sd_as_site_property: bool,
 ):
-    """The written moveScale is movescale where given, and else 0 or 1 from the selective dynamics, whether each is
-    given as an argument or as a site property. Selective dynamics that disagree on fixed vs free warn, except a
-    selective_dynamics site property beside a movescale argument, which the argument replaces as an intentional change.
+    """An ion is fixed if either movescale or selective_dynamics marks it fixed (warning where the other marks it free),
+    and else has the given movescale (1 if none), whether each is given as an argument or as a site property. The one
+    exception is a movescale argument beside a selective_dynamics site property: the argument replaces it, as an
+    intentional change, without a warning.
     """
     structure = Structure(Lattice.cubic(10.0), ["H"], [[0, 0, 0]])
     kwargs = {}
@@ -648,6 +649,7 @@ def test_from_structure_movescale_and_selective_dynamics(
         warnings.simplefilter("always")
         jif = JDFTXInfile.from_structure(structure, **kwargs)
     replaced = movescale is not None and not movescale_as_site_property and sd_as_site_property
+    expected = movescale if replaced else expected
     assert any("disagree" in str(w.message) for w in record) is (disagree and not replaced)
     assert JDFTXInfile.from_str(str(jif))["ion"][0]["moveScale"] == expected
 
@@ -658,6 +660,35 @@ def test_to_pmg_structure_selective_dynamics(movescale: float, selective_dynamic
     structure = JDFTXInfile.to_pmg_structure(JDFTXInfile.from_str(f"lattice Cubic 10.0\nion H 0 0 0 {movescale}\n"))
     assert structure.site_properties["movescale"] == [movescale]
     assert structure.site_properties["selective_dynamics"] == [selective_dynamics]
+
+
+@pytest.mark.parametrize(
+    ("movescale_in_file", "edits", "expected", "disagree"),
+    [
+        (1, {"selective_dynamics": [False] * 3}, 0.0, True),
+        (1, {"movescale": 0.0}, 0.0, True),
+        (1, {"movescale": 0.5}, 0.5, False),
+        (0, {"selective_dynamics": [True] * 3}, 0.0, True),
+        (0, {"movescale": 0.5}, 0.0, True),
+        (0, {"selective_dynamics": [True] * 3, "movescale": 0.5}, 0.5, False),
+    ],
+    ids=["freeze_by_sd", "freeze_by_movescale", "rescale", "unfreeze_by_sd", "unfreeze_by_movescale", "unfreeze_both"],
+)
+def test_editing_site_properties_of_structure_read_from_jdftx(
+    movescale_in_file: float, edits: dict, expected: float, disagree: bool
+):
+    """A structure read from JDFTx has both movescale and selective_dynamics, so editing one of them can't be told apart
+    from a stale other one: an ion is held fixed if either marks it fixed. Freezing works through either, and unfreezing
+    needs both.
+    """
+    structure = JDFTXInfile.from_str(f"lattice Cubic 10.0\nion H 0 0 0 {movescale_in_file}\n").structure
+    for name, value in edits.items():
+        structure.add_site_property(name, [value])
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        jif = JDFTXInfile.from_structure(structure)
+    assert any("disagree" in str(w.message) for w in record) is disagree
+    assert jif["ion"][0]["moveScale"] == expected
 
 
 def _one_h_structure() -> Structure:
@@ -690,16 +721,16 @@ def test_appended_site_movescale():
 
 
 def test_jdftxstructure_dict_round_trip_does_not_warn_again():
-    """Selective dynamics that disagree with movescale, or fix only some directions, are replaced with a warning, so a
-    saved JDFTXStructure loads back the same without warning again.
+    """Sites that movescale and selective_dynamics disagree on, or that are fixed in only some directions, are fixed
+    with a warning and both are set to match, so a saved JDFTXStructure loads back the same without warning again.
     """
     structure = Structure(Lattice.cubic(10.0), ["H", "H"], [[0, 0, 0], [0.5, 0.5, 0.5]])
     with pytest.warns(UserWarning, match="disagree"):
         jstruct = JDFTXStructure(
             structure, movescale=[0.5, None], selective_dynamics=[[False] * 3, [True, False, True]]
         )
-    assert jstruct.movescale == [0.5, 0.0]
-    assert jstruct.selective_dynamics == [[True] * 3, [False] * 3]
+    assert jstruct.movescale == [0.0, 0.0]
+    assert jstruct.selective_dynamics == [[False] * 3, [False] * 3]
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         loaded = JDFTXStructure.from_dict(jstruct.as_dict())
