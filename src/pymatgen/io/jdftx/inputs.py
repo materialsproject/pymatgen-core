@@ -236,7 +236,7 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             d (dict): Dictionary to create JDFTXInfile from.
-            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            validate_value_boundaries (bool, optional): Whether to warn about out of bounds values. Defaults to True.
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -246,7 +246,7 @@ class JDFTXInfile(dict, MSONable):
             if k not in ("@module", "@class"):
                 instance[k] = v
         if validate_value_boundaries:
-            instance.validate_boundaries()
+            instance.validate_boundaries(warn_only=True)
         return instance
 
     # TODO: This can be cleaned up by generalizing kwargs that are passed to from_str
@@ -268,7 +268,7 @@ class JDFTXInfile(dict, MSONable):
             sort_tags (bool, optional): Whether to sort the tags. Defaults to True.
             assign_path_parent (bool, optional): Whether to assign the parent directory of the input file for include
                 tags. Defaults to True.
-            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            validate_value_boundaries (bool, optional): Whether to warn about out of bounds values. Defaults to True.
 
         Returns:
             JDFTXInfile: The created JDFTXInfile object.
@@ -385,7 +385,7 @@ class JDFTXInfile(dict, MSONable):
 
         Args:
             line (str): Line to read.
-            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            validate_value_boundaries (bool, optional): Whether to warn about out of bounds values. Defaults to True.
             autofix (bool, optional): Whether to try to fix the types of the stored values. Defaults to True.
             overwrite_nonrepeatable (bool, optional): Whether a tag that can't repeat replaces the value this object
                 already has for it. If False, such a line raises an error. Defaults to True.
@@ -400,7 +400,7 @@ class JDFTXInfile(dict, MSONable):
         self.update(_params)
         self.validate_tags(try_auto_type_fix=autofix, error_on_failed_fix=True)
         if validate_value_boundaries:
-            self.validate_boundaries()
+            self.validate_boundaries(warn_only=True)
 
     @classmethod
     def from_str(
@@ -421,7 +421,7 @@ class JDFTXInfile(dict, MSONable):
             sort_tags (bool, optional): Whether to sort the tags. Defaults to True.
             path_parent (Path, optional): Path to the parent directory of the input file for include tags.
                                           Defaults to None.
-            validate_value_boundaries (bool, optional): Whether to validate the value boundaries. Defaults to True.
+            validate_value_boundaries (bool, optional): Whether to warn about out of bounds values. Defaults to True.
             skip_invalid_tags (bool, optional): Whether to skip lines that can't be read (with a warning) instead of
                 raising an error. Defaults to False.
 
@@ -456,7 +456,7 @@ class JDFTXInfile(dict, MSONable):
             params = {tag: params[tag] for tag in __TAG_LIST__ if tag in params}
         instance = cls(params)
         if validate_value_boundaries:
-            instance.validate_boundaries()
+            instance.validate_boundaries(warn_only=True)
         return instance
 
     @classmethod
@@ -707,13 +707,17 @@ class JDFTXInfile(dict, MSONable):
                     warnmsg += "(Check earlier warnings for more details)\n"
                 warnings.warn(warnmsg, stacklevel=2)
 
-    def validate_boundaries(self) -> None:
+    def validate_boundaries(self, warn_only: bool = False) -> None:
         """Validate the boundaries of the JDFTXInfile.
 
         Check every numeric value that has bounds (see AbstractNumericTag) against them.
 
+        Args:
+            warn_only (bool, optional): Whether to warn about out of bounds values instead of raising an error, as
+                done when reading (so that stored inputs stay loadable). Defaults to False.
+
         Raises:
-            ValueError: If any value is out of bounds, listing all of them.
+            ValueError: If any value is out of bounds (unless warn_only), listing all of them.
         """
         error_strs: list[str] = []
         for tag in self:
@@ -723,11 +727,15 @@ class JDFTXInfile(dict, MSONable):
                 error_strs.append(error_str)
         if len(error_strs) > 0:
             err_cat = "\n".join(error_strs)
-            raise ValueError(
+            msg = (
                 f"The following boundary errors were found in the JDFTXInfile:\n{err_cat}\n"
-                "\n Hint - if you are reading from a JDFTX out file, you need to set validate_value_boundaries "
-                "to False, as JDFTx will dump values at non-inclusive boundaries (ie 0.0 for values strictly > 0.0)."
+                "Out of bounds values are kept, but left out when the input is written. JDFTx out files print such "
+                "values for unset parameters (e.g. 0.0 for values strictly > 0.0). Set validate_value_boundaries to "
+                "False when reading to skip this check."
             )
+            if not warn_only:
+                raise ValueError(msg)
+            warnings.warn(msg, stacklevel=3)
 
     def validate_initial_magnetic_moments(self) -> None:
         """Check the initial-magnetic-moments tag for consistency with the spintype and ion tags.

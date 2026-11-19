@@ -915,11 +915,12 @@ def test_debug_setting():
     assert jif["debug"] == ["Forces", "Ecomponents", "KpointsBasis", "EigsFillings", "Symmetries"]
 
 
+@pytest.mark.filterwarnings("error:The following boundary errors")
 @pytest.mark.parametrize("concentration", ["55.338", "bulk"], ids=["concentration", "bulk"])
 def test_multiformat_tag_bounds(concentration: str):
     """Bounds on the subtags of a multiformat tag (here both fluid-solvent formats) are checked, as JDFTx does."""
     line = f"fluid-solvent H2O {concentration} ScalarEOS epsInf 0.5\n"  # JDFTx: "epsInf must be >= 1"
-    with pytest.raises(ValueError, match=re.escape("Value '0.5' for tag 'epsInf' is not within bounds")):
+    with pytest.warns(UserWarning, match=re.escape("Value '0.5' for tag 'epsInf' is not within bounds")):
         JDFTXInfile.from_str(line, dont_require_structure=True)
     jif = JDFTXInfile.from_str(line, dont_require_structure=True, validate_value_boundaries=False)
     assert jif["fluid-solvent"][0]["epsInf"] == 0.5
@@ -1116,9 +1117,13 @@ PCM_PARAMS_ECHO = (
 def test_pcm_params_echo_is_read_and_written_back():
     """JDFTx's echo prints every key: an empty cavityFile, and zeros for unset keys that JDFTx refuses as input."""
     unset = ["rhoMin", "rhoMax", "rhoDelta", "Ztot", "screenOverride"]
+    # Reading only warns about the refused zeros, also from a stored dict (where no flag can be passed)
+    with pytest.warns(UserWarning, match="boundary errors"):
+        jif = JDFTXInfile.from_str(PCM_PARAMS_ECHO, dont_require_structure=True)
+    with pytest.warns(UserWarning, match="boundary errors"):
+        assert JDFTXInfile.from_dict(jif.as_dict()) == jif
     with pytest.raises(ValueError, match="boundary errors"):
-        JDFTXInfile.from_str(PCM_PARAMS_ECHO, dont_require_structure=True)
-    jif = JDFTXInfile.from_str(PCM_PARAMS_ECHO, dont_require_structure=True, validate_value_boundaries=False)
+        jif.validate_boundaries()
     params = jif["pcm-params"]
     assert "cavityFile" not in params
     assert params["lMax"] == 3
@@ -1164,7 +1169,7 @@ FLUID_SITE_PARAMS_ECHO = (
 
 def test_fluid_site_params_echo_is_read_and_written_back():
     """JDFTx echoes every site, with empty file names and zeros it refuses as input, then a bare line per extra line."""
-    with pytest.raises(ValueError, match="'Rhs' is not within bounds x > 0"):
+    with pytest.warns(UserWarning, match="'Rhs' is not within bounds x > 0"):
         JDFTXInfile.from_str(FLUID_SITE_PARAMS_ECHO, dont_require_structure=True)
     jif = JDFTXInfile.from_str(FLUID_SITE_PARAMS_ECHO, dont_require_structure=True, validate_value_boundaries=False)
     entries = jif["fluid-site-params"]
@@ -1463,12 +1468,13 @@ def test_integer_parameters_are_written_as_integers(line: str, old_written: str,
 def test_quad_nbeta_zero_is_left_out():
     # JDFTx echoes an unset quad_nBeta as 0 (for ClassicalDFT), but refuses 0 as input
     line = "fluid-solvent H2O 55.338 ScalarEOS quad_nBeta 0 quad_nAlpha 0\n"
-    with pytest.raises(ValueError, match="'quad_nBeta' is not within bounds x > 0"):
+    with pytest.warns(UserWarning, match="'quad_nBeta' is not within bounds x > 0"):
         JDFTXInfile.from_str(line, dont_require_structure=True)
     jif = JDFTXInfile.from_str(line, dont_require_structure=True, validate_value_boundaries=False)
     assert " ".join(str(jif).split()) == "fluid-solvent H2O 55.338 ScalarEOS quad_nAlpha 0"
 
 
+@pytest.mark.filterwarnings("error:The following boundary errors")
 def test_vibrations_configuration_range():
     """iConfiguration/nConfigurations (JDFTx since 2026-08) are read and written; JDFTx needs iConfiguration >= -1."""
     line = "vibrations centralDiff yes iConfiguration 2 nConfigurations 3\n"
@@ -1480,7 +1486,7 @@ def test_vibrations_configuration_range():
     # -1 is the default; JDFTx refuses anything lower, but nConfigurations has no bounds
     unset = line.replace("iConfiguration 2", "iConfiguration -1").replace("nConfigurations 3", "nConfigurations -5")
     JDFTXInfile.from_str(unset, dont_require_structure=True)
-    with pytest.raises(ValueError, match=re.escape("Value '-2' for tag 'iConfiguration' is not within bounds x >= -1")):
+    with pytest.warns(UserWarning, match=re.escape("Value '-2' for tag 'iConfiguration' is not within bounds x >= -1")):
         JDFTXInfile.from_str(line.replace("iConfiguration 2", "iConfiguration -2"), dont_require_structure=True)
 
 
