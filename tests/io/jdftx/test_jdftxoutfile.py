@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import warnings
 from itertools import combinations
+from math import ceil
 from time import process_time
 from timeit import Timer
 from typing import TYPE_CHECKING
@@ -86,14 +87,18 @@ def test_JDFTXOutfile_fromfile(filename: Path, known: dict):
     jdftxoutfile_fromfile_matches_known(filename, known)
 
 
-def _parse_time(filename: Path, skim_levels: tuple[str, ...] | None = None) -> float:
-    """Best-of-n CPU time of parsing an out file.
+# Step of the coarsest CPU clock the tests run on (time.process_time advances by 1/64 s on Windows)
+CPU_CLOCK_STEP = 1 / 64
+
+
+def _parse_time(filename: Path, skim_levels: tuple[str, ...] | None = None, number: int = 1) -> float:
+    """Best-of-n CPU time of parsing an out file `number` times.
 
     CPU time leaves out time spent waiting on other processes (e.g. other pytest-xdist workers), and taking the
     fastest of several parses discards the ones slowed by interruptions, since noise can only add time.
     """
     timer = Timer(lambda: JDFTXOutfile.from_file(filename, skim_levels=skim_levels), timer=process_time)
-    return min(timer.repeat(repeat=5, number=1))
+    return min(timer.repeat(repeat=5, number=number))
 
 
 @pytest.mark.parametrize(
@@ -106,11 +111,21 @@ def _parse_time(filename: Path, skim_levels: tuple[str, ...] | None = None) -> f
 )
 def test_JDFTXOutfile_skimming(filename: Path, known: dict, known_simple: dict):
     jof_full = JDFTXOutfile.from_file(filename)
-    time_full = _parse_time(filename)
     # Count how many fewer objects are read at each depth level
     nless_outslices = len(jof_full.slices) - 1
     nless_last_geom = len(jof_full.slices[-1].jstrucs.slices) - 1
     nless_last_elec = len(jof_full.slices[-1].jstrucs.slices[-1].elecmindata.slices) - 1
+    # Each CPU time can be off by one step of the clock, so a speedup is only tested where it is at least two steps:
+    # - Only the skims that leave out most of the file are timed: whole out file slices if there are several, otherwise
+    #   geometry steps. Skimming only the geometry steps of a file with several slices saves under half of the time,
+    #   and skimming only electronic steps much less
+    # - Each timing is of enough parses for the full parse to take 6 steps (one parse of these files can take under 1)
+    timed_level = "outfile" if nless_outslices > 0 else "geom"
+    time_full = number = 0
+    if nless_outslices + nless_last_geom > 0:
+        single_parse_time = min(Timer(lambda: JDFTXOutfile.from_file(filename)).repeat(repeat=3, number=1))
+        number = ceil(6 * CPU_CLOCK_STEP / single_parse_time)
+        time_full = _parse_time(filename, number=number)
     skim_level_options = ["outfile", "geom", "elec"]
     # Don't run outfile depth skimming test if only one slice
     if not nless_outslices > 0:
@@ -141,10 +156,8 @@ def test_JDFTXOutfile_skimming(filename: Path, known: dict, known_simple: dict):
         less_outfile_slices_read = nless_outslices if "outfile" in skim_levels else 0
         less_geom_slices_read = nless_last_geom if "geom" in skim_levels else 0
         less_elec_slices_read = nless_last_elec if "elec" in skim_levels else 0
-        # Skipping only electronic steps does not save enough time to be detectable over noise in timing, so only
-        # test the speedup when whole out file slices or geometry steps are skipped
-        if less_outfile_slices_read + less_geom_slices_read > 0:
-            skim_time = _parse_time(filename, skim_levels)
+        if timed_level in skim_levels and less_outfile_slices_read + less_geom_slices_read > 0:
+            skim_time = _parse_time(filename, skim_levels, number=number)
             time_save_info = [
                 filename.name,
                 skim_levels,
