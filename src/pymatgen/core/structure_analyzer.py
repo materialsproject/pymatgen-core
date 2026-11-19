@@ -465,7 +465,7 @@ class OxideType:
             oh_mask = dist_matrix < relative_cutoff * 0.93
             if np.any(oh_mask):
                 # dist_matrix is O x H, so count the distinct O atoms that have an H neighbor
-                return "hydroxide", len(set(np.where(oh_mask)[0]))
+                return "hydroxide", int(oh_mask.any(axis=1).sum())
         dist_matrix = lattice.get_all_distances(o_sites_frac_coords, o_sites_frac_coords)
         np.fill_diagonal(dist_matrix, 1000)
         is_superoxide = is_peroxide = is_ozonide = False
