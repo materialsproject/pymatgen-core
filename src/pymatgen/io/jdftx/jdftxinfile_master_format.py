@@ -530,7 +530,6 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "smearingWidth": FloatTag(write_tagname=False, optional=False),
             },
         ),
-        # "elec-n-bands": IntTag(),
         "elec-n-bands": TagContainer(
             subtags={
                 "n": IntTag(write_tagname=False, optional=False, lb=0, lb_incl=True),

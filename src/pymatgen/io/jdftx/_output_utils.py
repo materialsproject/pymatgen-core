@@ -876,16 +876,3 @@ def _get_eigstats_varsdict(text: list[str]) -> tuple[bool, dict[str, float | Non
             eigstats_keymap[key] is not None for key in eigstats_keymap
         )
     return has_eigstats, varsdict
-
-
-def _parse_all_generic(line: str) -> dict[str, str]:
-    """Parse a line with key: value pairs, where values can contain spaces."""
-    _pieces = line.strip().split()
-    sig_idcs = [i for i, piece in enumerate(_pieces) if ":" in piece]
-    data = {}
-    for i, sig_idx in enumerate(sig_idcs):
-        key = _pieces[sig_idx].replace(":", "")
-        value_pieces = _pieces[sig_idx + 1 : sig_idcs[i + 1]] if i < len(sig_idcs) - 1 else _pieces[sig_idx + 1 :]
-        value_str = " ".join(value_pieces)
-        data[key] = value_str
-    return data

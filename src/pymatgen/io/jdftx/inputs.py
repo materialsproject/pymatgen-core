@@ -903,10 +903,7 @@ class JDFTXInfile(dict, MSONable):
         Returns:
             list[str]: The lines of the input file.
         """
-        # Join lines ending in "\" (line continuation) with the line after them. Previous implementation, kept in case
-        # the regex is not accepted (restore along with the commented-out `_gather_tags` method below):
-        # lines: list[str] = list(clean_lines(string.splitlines()))
-        # return JDFTXInfile._gather_tags(lines)
+        # Join lines ending in "\" (line continuation) with the line after them
         return re.sub(r"[ \t]*\\\n", " ", "\n".join(clean_lines(string.splitlines()))).splitlines()
 
     @classmethod
@@ -1013,30 +1010,6 @@ class JDFTXInfile(dict, MSONable):
         else:
             params[tag] = value
         return params
-
-    # Replaced by a regex in `_get_lines`; kept in case the regex is not accepted.
-    # @staticmethod
-    # def _gather_tags(lines: list[str]) -> list[str]:
-    #     """Gather broken lines into single string for processing later.
-    #
-    #     Args:
-    #         lines (list[str]): List of lines from the input file.
-    #
-    #     Returns:
-    #         list[str]: List of strings with tags broken across lines combined into single string.
-    #     """
-    #     total_tag = ""
-    #     gathered_strings = []
-    #     for line in lines:
-    #         if line[-1] == "\\":  # "\" indicates line continuation (the first "\" needed to be escaped)
-    #             total_tag += line[:-1].strip() + " "  # remove \ and any extra whitespace
-    #         elif total_tag:  # then finished with line continuations
-    #             total_tag += line
-    #             gathered_strings.append(total_tag)
-    #             total_tag = ""
-    #         else:  # then append line like normal
-    #             gathered_strings.append(line)
-    #     return gathered_strings
 
     @staticmethod
     def _needs_conversion(conversion: str, value: dict | list[dict] | list | list[list]) -> bool:

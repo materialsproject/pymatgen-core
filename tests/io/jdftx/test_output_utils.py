@@ -12,7 +12,6 @@ from numpy.testing import assert_array_equal
 from pymatgen.io.jdftx._output_utils import (
     _get_nbands_from_bandfile_filepath,
     _get_orb_label_list,
-    _parse_all_generic,
     find_first_range_key,
     get_proj_tju_from_file,
     get_start_lines,
@@ -98,21 +97,6 @@ def test_find_jdftx_out_file(tmp_path):
     write_mt_file(tmp_path, "tinyout.out")
     with pytest.raises(FileNotFoundError, match=re.escape(f"Multiple JDFTx out files found in directory {tmp_path}.")):
         _find_jdftx_out_file(tmp_path)
-
-
-def test_parse_all_generic():
-    ex_line = (
-        r"FillingsUpdate:  mu: +0.025844210  nElectrons: 515.000000  magneticMoment: [ Abs: 4.60583  Tot: -1.00000 ]"
-    )
-    ex_out = {
-        "FillingsUpdate": "",
-        "mu": "+0.025844210",
-        "nElectrons": "515.000000",
-        "magneticMoment": "[",
-        "Abs": "4.60583",
-        "Tot": "-1.00000 ]",
-    }
-    assert _parse_all_generic(ex_line) == ex_out
 
 
 def test_is_lowdin_start_line_deprecated():
