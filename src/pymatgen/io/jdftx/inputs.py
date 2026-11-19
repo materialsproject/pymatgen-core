@@ -1413,7 +1413,8 @@ class JDFTXStructure(MSONable):
             # keeping the order within each species. The per-site data given for the sites is sorted the same way.
             structure = cast("Structure", self.structure)
             names = [name.lower() for name in get_species_names(structure)]
-            order = sorted(range(len(names)), key=lambda i: names.index(names[i]))
+            rank = {name: r for r, name in enumerate(dict.fromkeys(names))}  # Species in order of first appearance
+            order = sorted(range(len(names)), key=lambda i: rank[names[i]])
             self.structure = type(structure).from_sites(
                 [structure[i] for i in order], charge=structure._charge, properties=structure.properties
             )
