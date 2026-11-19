@@ -1,18 +1,28 @@
-"""Input sets for Qchem."""
+"""Input sets and input set generators for Q-Chem.
+
+QCInputGenerator and its subclasses (SinglePointSetGenerator, OptSetGenerator, ...) hold the
+settings of a calculation and produce a QCInputSet for any molecule via get_input_set. The
+older QChemDictSet classes (SinglePointSet, OptSet, ...) are QCInput objects that are bound to
+a molecule at construction; they are built on top of the generators and give identical inputs.
+"""
 
 from __future__ import annotations
 
 import os
 import warnings
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from monty.io import zopen
+from monty.os.path import zpath
 
+from pymatgen.io.core import InputGenerator, InputSet
 from pymatgen.io.qchem.inputs import QCInput
 from pymatgen.io.qchem.utils import lower_and_check_unique
 
 if TYPE_CHECKING:
-    from typing import Any, Literal
+    from typing import Any, Literal, Self
 
     from pymatgen.core.structure import Molecule
     from pymatgen.util.typing import PathLike
@@ -22,6 +32,10 @@ __copyright__ = "Copyright 2018-2022, The Materials Project"
 __version__ = "0.1"
 __maintainer__ = "Samuel Blau"
 __email__ = "samblau1@gmail.com"
+
+# Warnings are attributed to the first stack frame outside pymatgen.io.qchem, i.e. the user's
+# code, no matter how many layers (generator, QChemDictSet, legacy subclass) sit in between.
+_SKIP_FILE_PREFIXES = (os.path.dirname(os.path.abspath(__file__)) + os.sep,)
 
 # Note that in addition to the solvent-specific parameters, this dict contains
 # dielectric constants for use with each solvent. The dielectric constants
@@ -127,258 +141,241 @@ CMIRS_SETTINGS: dict[str, Any] = {
 }
 
 
-class QChemDictSet(QCInput):
-    """Build a QCInput given all the various input parameters. Can be extended by standard implementations below."""
+QCHEM_INPUT_FILE = "mol.qin"
+# Q-Chem 5 reads the parameters of a custom SMD solvent from this file
+SOLVENT_DATA_FILE = "solvent_data"
 
-    def __init__(
-        self,
-        molecule: Molecule,
-        job_type: str,
-        basis_set: str,
-        scf_algorithm: str,
-        qchem_version: int = 5,
-        dft_rung: int = 4,
-        pcm_dielectric: float | None = None,
-        isosvp_dielectric: float | None = None,
-        smd_solvent: str | None = None,
-        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
-        custom_smd: str | None = None,
-        opt_variables: dict[str, list] | None = None,
-        scan_variables: dict[str, list] | None = None,
-        max_scf_cycles: int = 100,
-        geom_opt_max_cycles: int = 200,
-        plot_cubes: bool = False,
-        output_wavefunction: bool = False,
-        nbo_params: dict | None = None,
-        geom_opt: dict | None = None,
-        cdft_constraints: list[list[dict]] | None = None,
-        almo_coupling_states: list[list[tuple[int, int]]] | None = None,
-        overwrite_inputs: dict | None = None,
-        vdw_mode: Literal["atomic", "sequential"] = "atomic",
-        extra_scf_print: bool = False,
-    ):
-        """Initialize a QChemDictSet.
+
+class QCInputSet(InputSet):
+    """A Q-Chem InputSet: a dict-like container mapping filenames to file contents.
+
+    The main input file is always stored under the "mol.qin" key (see QCHEM_INPUT_FILE)
+    and is available as the ``qcinput`` attribute. Any other files (e.g. the "solvent_data"
+    file needed for custom SMD solvents in Q-Chem 5) are available as ``optional_files``.
+    """
+
+    def __init__(self, qcinput: QCInput, optional_files: dict[str, Any] | None = None) -> None:
+        """Initialize a QCInputSet.
 
         Args:
-            molecule (Pymatgen Molecule object): Molecule to run QChem on.
-            job_type (str): QChem job type to run. Valid options are "opt" for optimization,
-                "sp" for single point, "freq" for frequency calculation, or "force" for
-                force evaluation.
-            basis_set (str): Basis set to use. For example, "def2-tzvpd".
-            scf_algorithm (str): Algorithm to use for converging the SCF. Recommended choices are
-                "DIIS", "GDM", and "DIIS_GDM". Other algorithms supported by Qchem's GEN_SCFMAN
-                module will also likely perform well. Refer to the QChem manual for further details.
-            qchem_version (int): Which major version of Q-Chem will be run. Supports 5 and 6. (Default: 5)
-            dft_rung (int): Select the rung on "Jacob's Ladder of Density Functional Approximations" in
-                order of increasing accuracy/cost. For each rung, we have prescribed one functional based
-                on our experience, available benchmarks, and the suggestions of the Q-Chem manual:
-                1 (LSDA) = SPW92
-                2 (GGA) = B97-D3(BJ)
-                3 (metaGGA) = B97M-V
-                4 (hybrid metaGGA) = ωB97M-V
-                5 (double hybrid metaGGA) = ωB97M-(2).
-
-                (Default: 4)
-
-                To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
-
-            pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
-                If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
-                Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
-                custom keywords to overwrite_inputs, e.g.
-                overwrite_inputs = {"pcm": {"theory": "ssvpe"}}
-                Refer to the QChem manual for further details on the models available.
-
-                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
-            isosvp_dielectric (float): Dielectric constant to use for isodensity SS(V)PE implicit solvation model.
-                (Default: None). If supplied, will set solvent_method to "isosvp" and populate the $svp section
-                of the input file with appropriate parameters.
-
-                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
-            smd_solvent (str): Solvent to use for SMD implicit solvation model. (Default: None)
-                Examples include "water", "ethanol", "methanol", and "acetonitrile". Refer to the QChem
-                manual for a complete list of solvents available. To define a custom solvent, set this
-                argument to "custom" and populate custom_smd with the necessary parameters.
-
-                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
-            cmirs_solvent (str): Solvent to use for the CMIRS implicit solvation model. (Default: None).
-                Only 5 solvents are presently available as of Q-Chem 6: "water", "benzene", "cyclohexane",
-                "dimethyl sulfoxide", and "acetonitrile". Note that selection of a solvent here will also
-                populate the iso SS(V)PE dielectric constant, because CMIRS uses the isodensity SS(V)PE model
-                to compute electrostatics.
-
-                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
-            custom_smd (str): List of parameters to define a custom solvent in SMD. (Default: None)
-                Must be given as a string of seven comma separated values in the following order:
-                "dielectric, refractive index, acidity, basicity, surface tension, aromaticity,
-                electronegative halogenicity"
-                Refer to the QChem manual for further details.
-            opt_variables (dict): A dictionary of opt sections, where each opt section is a key
-                and the corresponding values are a list of strings. Strings must be formatted
-                as instructed by the QChem manual. The different opt sections are: CONSTRAINT, FIXED,
-                DUMMY, and CONNECT.
-
-                Ex. opt = {"CONSTRAINT": ["tors 2 3 4 5 25.0", "tors 2 5 7 9 80.0"], "FIXED": ["2 XY"]}
-            scan_variables (dict): A dictionary of scan variables. Because two constraints of the
-                same type are allowed (for instance, two torsions or two bond stretches), each TYPE of
-                variable (stre, bend, tors) should be its own key in the dict, rather than each variable.
-                Note that the total number of variable (sum of lengths of all lists) CANNOT be more than two.
-
-                Ex. scan_variables = {"stre": ["3 6 1.5 1.9 0.1"], "tors": ["1 2 3 4 -180 180 15"]}
-            max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
-            geom_opt_max_cycles (int): Maximum number of geometry optimization iterations. (Default: 200)
-            plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
-            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
-                (Default: False)
-            nbo_params (dict): A dict containing the desired NBO params. Note that a key:value pair of
-                "version":7 will trigger NBO7 analysis. Otherwise, NBO5 analysis will be performed,
-                including if an empty dict is passed. Besides a key of "version", all other key:value
-                pairs will be written into the $nbo section of the QChem input file. (Default: False)
-            geom_opt (dict): A dict containing parameters for the $geom_opt section of the Q-Chem input
-                file, which control the new geometry optimizer available starting in version 5.4.2. The
-                new optimizer remains under development but was officially released and became the default
-                optimizer in Q-Chem version 6.0.0. Note that for version 5.4.2, the new optimizer must be
-                explicitly requested by passing in a dictionary (empty or otherwise) for this input parameter.
-                (Default: False)
-            vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
-                only if you are using overwrite_inputs to add a $van_der_waals section to the input.
-                In 'atomic' mode (default), dict keys represent the atomic number associated with each
-                radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
-                position of a single specific atom in the input structure.
-                        cdft_constraints (list of lists of dicts):
-                A list of lists of dictionaries, where each dictionary represents a charge
-                constraint in the cdft section of the QChem input file.
-
-                Each entry in the main list represents one state (allowing for multi-configuration
-                calculations using constrained density functional theory - configuration interaction
-                (CDFT-CI). Each state is represented by a list, which itself contains some number of
-                constraints (dictionaries).
-
-                Ex:
-
-                1. For a single-state calculation with two constraints:
-                 cdft_constraints=[[
-                    {
-                        "value": 1.0,
-                        "coefficients": [1.0],
-                        "first_atoms": [1],
-                        "last_atoms": [2],
-                        "types": [None]
-                    },
-                    {
-                        "value": 2.0,
-                        "coefficients": [1.0, -1.0],
-                        "first_atoms": [1, 17],
-                        "last_atoms": [3, 19],
-                        "types": ["s"]
-                    }
-                ]]
-
-                Note that a type of None will default to a charge constraint (which can also be
-                accessed by requesting a type of "c" or "charge").
-
-                2. For a CDFT-CI multi-reference calculation:
-                cdft_constraints=[
-                    [
-                        {
-                            "value": 1.0,
-                            "coefficients": [1.0],
-                            "first_atoms": [1],
-                            "last_atoms": [27],
-                            "types": ["c"]
-                        },
-                        {
-                            "value": 0.0,
-                            "coefficients": [1.0],
-                            "first_atoms": [1],
-                            "last_atoms": [27],
-                            "types": ["s"]
-                        },
-                    ],
-                    [
-                        {
-                            "value": 0.0,
-                            "coefficients": [1.0],
-                            "first_atoms": [1],
-                            "last_atoms": [27],
-                            "types": ["c"]
-                        },
-                        {
-                            "value": -1.0,
-                            "coefficients": [1.0],
-                            "first_atoms": [1],
-                            "last_atoms": [27],
-                            "types": ["s"]
-                        },
-                    ]
-                ]
-            cdft_constraints (list[list[dict]]): A list of lists of dictionaries, where each
-            almo_coupling_states (list of lists of int 2-tuples):
-                A list of lists of int 2-tuples used for calculations of diabatization and state
-                coupling calculations relying on the absolutely localized molecular orbitals (ALMO)
-                methodology. Each entry in the main list represents a single state (two states are
-                included in an ALMO calculation). Within a single state, each 2-tuple represents the
-                charge and spin multiplicity of a single fragment.
-                ex: almo_coupling_states=[
-                            [
-                                (1, 2),
-                                (0, 1)
-                            ],
-                            [
-                                (0, 1),
-                                (1, 2)
-                            ]
-                        ]
-            overwrite_inputs (dict): Dictionary of QChem input sections to add or overwrite variables.
-                The currently available sections (keys) are rem, pcm,
-                solvent, smx, opt, scan, van_der_waals, and plots. The value of each key is a
-                dictionary of key value pairs relevant to that section. For example, to add
-                a new variable to the rem section that sets symmetry to false, use
-
-                overwrite_inputs = {"rem": {"symmetry": "false"}}
-
-                **Note that if something like basis is added to the rem dict it will overwrite
-                the default basis.**
-
-                **Note that supplying a van_der_waals section here will automatically modify
-                the PCM "radii" setting to "read".**
-
-                **Note that all keys must be given as strings, even when they are numbers!**
-            vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
-                only if you are using overwrite_inputs to add a $van_der_waals section to the input.
-                In 'atomic' mode (default), dict keys represent the atomic number associated with each
-                radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
-                position of a single specific atom in the input structure.
-            extra_scf_print (bool): Whether to store extra information generated from the SCF
-                cycle. If switched on, the Fock Matrix, coefficients of MO and the density matrix
-                will be stored.
+            qcinput (QCInput): The main Q-Chem input, written to "mol.qin".
+            optional_files (dict): Any other files to write, as a dict of {filename: contents}.
+                Contents can be strings, InputFile objects or any object whose str()
+                is the content of the file.
         """
-        self.molecule = molecule
-        self.job_type = job_type
-        self.basis_set = basis_set
-        self.scf_algorithm = scf_algorithm
-        self.qchem_version = qchem_version
-        self.dft_rung = dft_rung
-        self.pcm_dielectric = pcm_dielectric
-        self.isosvp_dielectric = isosvp_dielectric
-        self.smd_solvent = smd_solvent
-        self.cmirs_solvent = cmirs_solvent
-        self.custom_smd = custom_smd
-        self.opt_variables = opt_variables
-        self.scan_variables = scan_variables
-        self.max_scf_cycles = max_scf_cycles
-        self.geom_opt_max_cycles = geom_opt_max_cycles
-        self.plot_cubes = plot_cubes
-        self.output_wavefunction = output_wavefunction
-        self.nbo_params = nbo_params
-        self.geom_opt = geom_opt
-        self.cdft_constraints = cdft_constraints
-        self.almo_coupling_states = almo_coupling_states
-        self.overwrite_inputs = overwrite_inputs
-        self.vdw_mode = vdw_mode
-        self.extra_scf_print = extra_scf_print
+        super().__init__(inputs={QCHEM_INPUT_FILE: qcinput, **(optional_files or {})})  # type:ignore[dict-item]
 
+    @property
+    def qcinput(self) -> QCInput:
+        """The main Q-Chem input file object."""
+        return self.inputs[QCHEM_INPUT_FILE]  # type:ignore[return-value]
+
+    @property
+    def optional_files(self) -> dict[str, Any]:
+        """All files in the input set other than the main Q-Chem input file."""
+        return {str(name): contents for name, contents in self.inputs.items() if name != QCHEM_INPUT_FILE}
+
+    @classmethod
+    def from_directory(  # type:ignore[override]
+        cls, directory: PathLike, optional_files: dict[str, Any] | None = None
+    ) -> Self:
+        """Load a set of Q-Chem inputs from a directory.
+
+        Args:
+            directory (PathLike): Directory to read the Q-Chem inputs from. The main input
+                must be named "mol.qin" (optionally compressed, e.g. "mol.qin.gz").
+            optional_files (dict): Other files to read, as a dict of {filename: object class}.
+                The object class must have a from_file method. Use None instead of a
+                class to read the file as plain text. A "solvent_data" file (custom SMD
+                solvent in Q-Chem 5) is always read as plain text if it exists, so that
+                write_input and from_directory round-trip; it does not need to be listed here.
+        """
+        directory = Path(directory)
+        qcinput = QCInput.from_file(zpath(str(directory / QCHEM_INPUT_FILE)))
+
+        files_to_read: dict[str, Any] = {}
+        if os.path.isfile(zpath(str(directory / SOLVENT_DATA_FILE))):
+            files_to_read[SOLVENT_DATA_FILE] = None
+        files_to_read |= optional_files or {}
+
+        optional_inputs: dict[str, Any] = {}
+        for name, obj in files_to_read.items():
+            file_path = zpath(str(directory / name))
+            if obj is None:
+                with zopen(file_path, mode="rt", encoding="utf-8") as file:
+                    optional_inputs[name] = file.read()
+            else:
+                optional_inputs[name] = obj.from_file(file_path)
+
+        return cls(qcinput, optional_files=optional_inputs)
+
+
+@dataclass
+class QCInputGenerator(InputGenerator):
+    """Generate Q-Chem input sets.
+
+    A generator holds the "recipe" for a calculation and nothing that is specific to a
+    particular molecule. Call get_input_set with a molecule to obtain a QCInputSet that
+    can be written to disk. The same generator can be reused for any number of molecules.
+
+    Settings can be changed after construction. They are validated when the generator is
+    created and again every time get_input_set is called, so invalid edits made after
+    construction raise at get_input_set.
+
+    Args:
+        job_type (str): QChem job type to run. Valid options are "opt" for optimization,
+            "sp" for single point, "freq" for frequency calculation, "force" for
+            force evaluation, "ts" for a transition-state search or "pes_scan" for a
+            potential energy surface scan.
+        basis_set (str): Basis set to use. For example, "def2-tzvpd".
+        scf_algorithm (str): Algorithm to use for converging the SCF. Recommended choices are
+            "DIIS", "GDM", and "DIIS_GDM". Other algorithms supported by Qchem's GEN_SCFMAN
+            module will also likely perform well. Refer to the QChem manual for further details.
+        qchem_version (int): Which major version of Q-Chem will be run. Supports 5 and 6. (Default: 5)
+        dft_rung (int): Select the rung on "Jacob's Ladder of Density Functional Approximations" in
+            order of increasing accuracy/cost. For each rung, we have prescribed one functional based
+            on our experience, available benchmarks, and the suggestions of the Q-Chem manual:
+            1 (LSDA) = SPW92
+            2 (GGA) = B97-D3(BJ)
+            3 (metaGGA) = B97M-V
+            4 (hybrid metaGGA) = ωB97M-V
+            5 (double hybrid metaGGA) = ωB97M-(2).
+
+            (Default: 4)
+
+            To set a functional not given by one of the above, set the overwrite_inputs
+            argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
+        pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
+            If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
+            Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
+            custom keywords to overwrite_inputs, e.g.
+            overwrite_inputs = {"pcm": {"theory": "ssvpe"}}
+            Refer to the QChem manual for further details on the models available.
+
+            **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
+        isosvp_dielectric (float): Dielectric constant to use for isodensity SS(V)PE implicit solvation model.
+            (Default: None). If supplied, will set solvent_method to "isosvp" and populate the $svp section
+            of the input file with appropriate parameters.
+        smd_solvent (str): Solvent to use for SMD implicit solvation model. (Default: None)
+            Examples include "water", "ethanol", "methanol", and "acetonitrile". Refer to the QChem
+            manual for a complete list of solvents available. To define a custom solvent, set this
+            argument to "custom" and populate custom_smd with the necessary parameters.
+        cmirs_solvent (str): Solvent to use for the CMIRS implicit solvation model. (Default: None).
+            Only 5 solvents are presently available as of Q-Chem 6: "water", "benzene", "cyclohexane",
+            "dimethyl sulfoxide", and "acetonitrile". Note that selection of a solvent here will also
+            populate the iso SS(V)PE dielectric constant, because CMIRS uses the isodensity SS(V)PE model
+            to compute electrostatics.
+        custom_smd (str): List of parameters to define a custom solvent in SMD. (Default: None)
+            Must be given as a string of seven comma separated values in the following order:
+            "dielectric, refractive index, acidity, basicity, surface tension, aromaticity,
+            electronegative halogenicity"
+            Refer to the QChem manual for further details. For Q-Chem 5, these parameters are
+            written to a "solvent_data" file that is included in the generated input set.
+        opt_variables (dict): A dictionary of opt sections, where each opt section is a key
+            and the corresponding values are a list of strings. Strings must be formatted
+            as instructed by the QChem manual. The different opt sections are: CONSTRAINT, FIXED,
+            DUMMY, and CONNECT.
+
+            Ex. opt = {"CONSTRAINT": ["tors 2 3 4 5 25.0", "tors 2 5 7 9 80.0"], "FIXED": ["2 XY"]}
+        scan_variables (dict): A dictionary of scan variables. Because two constraints of the
+            same type are allowed (for instance, two torsions or two bond stretches), each TYPE of
+            variable (stre, bend, tors) should be its own key in the dict, rather than each variable.
+            Note that the total number of variable (sum of lengths of all lists) CANNOT be more than two.
+
+            Ex. scan_variables = {"stre": ["3 6 1.5 1.9 0.1"], "tors": ["1 2 3 4 -180 180 15"]}
+        max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
+        geom_opt_max_cycles (int): Maximum number of geometry optimization iterations. (Default: 200)
+        plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+        output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+            (Default: False)
+        nbo_params (dict): A dict containing the desired NBO params. Note that a key:value pair of
+            "version":7 will trigger NBO7 analysis. Otherwise, NBO5 analysis will be performed,
+            including if an empty dict is passed. Besides a key of "version", all other key:value
+            pairs will be written into the $nbo section of the QChem input file. (Default: None)
+        geom_opt (dict): A dict containing parameters for the $geom_opt section of the Q-Chem input
+            file, which control the new geometry optimizer available starting in version 5.4.2. The
+            new optimizer remains under development but was officially released and became the default
+            optimizer in Q-Chem version 6.0.0. Note that for version 5.4.2, the new optimizer must be
+            explicitly requested by passing in a dictionary (empty or otherwise) for this input parameter.
+            (Default: None)
+        cdft_constraints (list[list[dict]]): A list of lists of dictionaries, where each dictionary
+            represents a charge constraint in the $cdft section of the QChem input file. Each entry in
+            the main list represents one state (allowing for multi-configuration calculations using
+            constrained density functional theory - configuration interaction (CDFT-CI)). Each state
+            is represented by a list, which itself contains some number of constraints (dictionaries)
+            with the keys "value", "coefficients", "first_atoms", "last_atoms" and "types".
+            See QChemDictSet for worked examples.
+        almo_coupling_states (list[list[tuple[int, int]]]): A list of lists of int 2-tuples used for
+            calculations of diabatization and state coupling calculations relying on the absolutely
+            localized molecular orbitals (ALMO) methodology. Each entry in the main list represents a
+            single state (two states are included in an ALMO calculation). Within a single state, each
+            2-tuple represents the charge and spin multiplicity of a single fragment.
+            Ex. almo_coupling_states = [[(1, 2), (0, 1)], [(0, 1), (1, 2)]]
+        overwrite_inputs (dict): Dictionary of QChem input sections to add or overwrite variables.
+            The currently available sections (keys) are rem, pcm, solvent, smx, opt, scan,
+            van_der_waals, plots, svp and pcm_nonels. The value of each key is a
+            dictionary of key value pairs relevant to that section. For example, to add
+            a new variable to the rem section that sets symmetry to false, use
+
+            overwrite_inputs = {"rem": {"symmetry": "false"}}
+
+            **Note that if something like basis is added to the rem dict it will overwrite
+            the default basis.**
+
+            **Note that supplying a van_der_waals section here will automatically modify
+            the PCM "radii" setting to "read".**
+
+            **Note that all keys must be given as strings, even when they are numbers!**
+        vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
+            only if you are using overwrite_inputs to add a $van_der_waals section to the input.
+            In 'atomic' mode (default), dict keys represent the atomic number associated with each
+            radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
+            position of a single specific atom in the input structure.
+        extra_scf_print (bool): Whether to store extra information generated from the SCF
+            cycle. If switched on, the Fock Matrix, coefficients of MO and the density matrix
+            will be stored.
+    """
+
+    job_type: str
+    basis_set: str
+    scf_algorithm: str
+    qchem_version: int = 5
+    dft_rung: int = 4
+    pcm_dielectric: float | None = None
+    isosvp_dielectric: float | None = None
+    smd_solvent: str | None = None
+    cmirs_solvent: Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None = None
+    custom_smd: str | None = None
+    opt_variables: dict[str, list] | None = None
+    scan_variables: dict[str, list] | None = None
+    max_scf_cycles: int = 100
+    geom_opt_max_cycles: int = 200
+    plot_cubes: bool = False
+    output_wavefunction: bool = False
+    nbo_params: dict | None = None
+    geom_opt: dict | None = None
+    cdft_constraints: list[list[dict]] | None = None
+    almo_coupling_states: list[list[tuple[int, int]]] | None = None
+    overwrite_inputs: dict | None = None
+    vdw_mode: Literal["atomic", "sequential"] = "atomic"
+    extra_scf_print: bool = False
+
+    def __post_init__(self) -> None:
+        """Fail early if the settings cannot produce a valid input."""
+        with warnings.catch_warnings():
+            # warnings are emitted when the input set is actually generated
+            warnings.simplefilter("ignore")
+            self._get_sections()
+
+    def _get_sections(self) -> dict[str, Any]:
+        """Build the sections of the Q-Chem input file from the generator settings.
+
+        Nothing here depends on the molecule, and neither the generator nor any of the
+        user-supplied dicts are modified, so this can be called any number of times.
+
+        Returns:
+            dict: keyword arguments for QCInput (everything except the molecule).
+        """
         pcm_defaults = {
             "heavypoints": "194",
             "hpoints": "194",
@@ -409,7 +406,7 @@ class QChemDictSet(QCInput):
         svp: dict[str, Any] = {}
         pcm_nonels: dict[str, Any] = {}
         rem: dict[str, Any] = {
-            "job_type": job_type,
+            "job_type": self.job_type,
             "basis": self.basis_set,
             "max_scf_cycles": str(self.max_scf_cycles),
             "gen_scfman": "true",
@@ -555,10 +552,10 @@ class QChemDictSet(QCInput):
                     pcm |= lower_and_check_unique(sec_dict)
                 if sec == "solvent":
                     solvent |= lower_and_check_unique(sec_dict)
-                    if rem["solvent_method"] != "pcm":
+                    if rem.get("solvent_method") != "pcm":
                         warnings.warn(
                             "The solvent section will be ignored unless solvent_method=pcm!",
-                            stacklevel=2,
+                            skip_file_prefixes=_SKIP_FILE_PREFIXES,
                         )
                 if sec == "smx":
                     smx |= lower_and_check_unique(sec_dict)
@@ -592,17 +589,17 @@ class QChemDictSet(QCInput):
                             if self.cmirs_solvent is not None and v == "0":
                                 warnings.warn(
                                     "Setting IDEFESR=0 will disable the CMIRS calculation you requested!",
-                                    stacklevel=2,
+                                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
                                 )
                             if self.cmirs_solvent is None and v == "1":
                                 warnings.warn(
                                     "Setting IDEFESR=1 will have no effect unless you specify a cmirs_solvent!",
-                                    stacklevel=2,
+                                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
                                 )
-                        if k == "dielst" and rem["solvent_method"] != "isosvp":
+                        if k == "dielst" and rem.get("solvent_method") != "isosvp":
                             warnings.warn(
                                 "Setting DIELST will have no effect unless you specify a solvent_method=isosvp!",
-                                stacklevel=2,
+                                skip_file_prefixes=_SKIP_FILE_PREFIXES,
                             )
 
                         svp[k] = v
@@ -611,7 +608,7 @@ class QChemDictSet(QCInput):
                     for k, v in temp_pcm_nonels.items():
                         pcm_nonels[k] = v
 
-        if extra_scf_print:
+        if self.extra_scf_print:
             # Allow for the printing of the Fock matrix and the eigenvales
             rem["scf_final_print"] = "3"
             # If extra_scf_print is specified, make sure that the convergence of the
@@ -620,24 +617,401 @@ class QChemDictSet(QCInput):
             if "scf_convergence" not in rem or int(rem["scf_convergence"]) < 8:
                 rem["scf_convergence"] = "8"
 
-        super().__init__(
-            self.molecule,
-            rem=rem,
-            opt=opt,
-            pcm=pcm,
-            solvent=solvent,
-            smx=smx,
-            scan=scan,
-            van_der_waals=vdw,
+        return {
+            "rem": rem,
+            "opt": opt,
+            "pcm": pcm,
+            "solvent": solvent,
+            "smx": smx,
+            "scan": scan,
+            "van_der_waals": vdw,
+            "vdw_mode": self.vdw_mode,
+            "plots": plots,
+            "nbo": nbo,
+            "geom_opt": geom_opt,
+            "cdft": self.cdft_constraints,
+            "almo_coupling": self.almo_coupling_states,
+            "svp": svp,
+            "pcm_nonels": pcm_nonels,
+        }
+
+    def get_input_set(self, molecule: Molecule | list[Molecule] | Literal["read"]) -> QCInputSet:
+        """Get a Q-Chem input set for a molecule.
+
+        Args:
+            molecule (Molecule): The molecule to run Q-Chem on. As in QCInput, this can also be
+                a list of Molecules (fragments) or the string "read".
+
+        Returns:
+            QCInputSet: the input set, which can be written to disk with write_input.
+        """
+        optional_files: dict[str, Any] = {}
+        if self.smd_solvent in {"custom", "other"} and self.qchem_version == 5:
+            # Q-Chem 5 reads the parameters of a custom SMD solvent from this file
+            optional_files[SOLVENT_DATA_FILE] = self.custom_smd
+
+        return QCInputSet(QCInput(molecule, **self._get_sections()), optional_files=optional_files)
+
+
+@dataclass
+class SinglePointSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for single point calculations."""
+
+    job_type: str = "sp"
+    basis_set: str = "def2-tzvpd"
+    scf_algorithm: str = "diis"
+
+
+@dataclass
+class OptSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for geometry optimizations."""
+
+    job_type: str = "opt"
+    basis_set: str = "def2-svpd"
+    scf_algorithm: str = "diis"
+
+
+@dataclass
+class TransitionStateSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for transition-state searches."""
+
+    job_type: str = "ts"
+    basis_set: str = "def2-svpd"
+    scf_algorithm: str = "diis"
+
+
+@dataclass
+class ForceSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for force (gradient) calculations."""
+
+    job_type: str = "force"
+    basis_set: str = "def2-tzvpd"
+    scf_algorithm: str = "diis"
+
+
+@dataclass
+class FreqSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for frequency calculations."""
+
+    job_type: str = "freq"
+    basis_set: str = "def2-svpd"
+    scf_algorithm: str = "diis"
+
+
+@dataclass
+class PESScanSetGenerator(QCInputGenerator):
+    """Generate Q-Chem input sets for potential energy surface scans (PES_SCAN).
+
+    There are no sensible default scan variables because they depend entirely on the
+    molecular structure. They must be supplied before generating an input set, either with
+    scan_variables or with the "scan" section of overwrite_inputs. A PES scan should not be
+    run with less than one variable (or more than two variables).
+    """
+
+    job_type: str = "pes_scan"
+    basis_set: str = "def2-svpd"
+    scf_algorithm: str = "diis"
+
+    def get_input_set(self, molecule: Molecule | list[Molecule] | Literal["read"]) -> QCInputSet:
+        """Get a Q-Chem PES scan input set for a molecule.
+
+        Args:
+            molecule (Molecule): The molecule to run Q-Chem on.
+
+        Returns:
+            QCInputSet: the input set, which can be written to disk with write_input.
+        """
+        input_set = super().get_input_set(molecule)
+        if not input_set.qcinput.scan:
+            raise ValueError("Cannot run a pes_scan job without some variable to scan over!")
+        return input_set
+
+
+class QChemDictSet(QCInput):
+    """Build a QCInput given all the various input parameters. Can be extended by standard implementations below.
+
+    The input parameters are processed by QCInputGenerator, which takes the same arguments (apart
+    from the molecule) and is the recommended interface for workflows: unlike this class, a
+    generator is not tied to one molecule.
+    """
+
+    def __init__(
+        self,
+        molecule: Molecule,
+        job_type: str,
+        basis_set: str,
+        scf_algorithm: str,
+        qchem_version: int = 5,
+        dft_rung: int = 4,
+        pcm_dielectric: float | None = None,
+        isosvp_dielectric: float | None = None,
+        smd_solvent: str | None = None,
+        cmirs_solvent: (Literal["water", "acetonitrile", "dimethyl sulfoxide", "cyclohexane", "benzene"] | None) = None,
+        custom_smd: str | None = None,
+        opt_variables: dict[str, list] | None = None,
+        scan_variables: dict[str, list] | None = None,
+        max_scf_cycles: int = 100,
+        geom_opt_max_cycles: int = 200,
+        plot_cubes: bool = False,
+        output_wavefunction: bool = False,
+        nbo_params: dict | None = None,
+        geom_opt: dict | None = None,
+        cdft_constraints: list[list[dict]] | None = None,
+        almo_coupling_states: list[list[tuple[int, int]]] | None = None,
+        overwrite_inputs: dict | None = None,
+        vdw_mode: Literal["atomic", "sequential"] = "atomic",
+        extra_scf_print: bool = False,
+    ):
+        """Initialize a QChemDictSet.
+
+        Args:
+            molecule (Pymatgen Molecule object): Molecule to run QChem on.
+            job_type (str): QChem job type to run. Valid options are "opt" for optimization,
+                "sp" for single point, "freq" for frequency calculation, or "force" for
+                force evaluation.
+            basis_set (str): Basis set to use. For example, "def2-tzvpd".
+            scf_algorithm (str): Algorithm to use for converging the SCF. Recommended choices are
+                "DIIS", "GDM", and "DIIS_GDM". Other algorithms supported by Qchem's GEN_SCFMAN
+                module will also likely perform well. Refer to the QChem manual for further details.
+            qchem_version (int): Which major version of Q-Chem will be run. Supports 5 and 6. (Default: 5)
+            dft_rung (int): Select the rung on "Jacob's Ladder of Density Functional Approximations" in
+                order of increasing accuracy/cost. For each rung, we have prescribed one functional based
+                on our experience, available benchmarks, and the suggestions of the Q-Chem manual:
+                1 (LSDA) = SPW92
+                2 (GGA) = B97-D3(BJ)
+                3 (metaGGA) = B97M-V
+                4 (hybrid metaGGA) = ωB97M-V
+                5 (double hybrid metaGGA) = ωB97M-(2).
+
+                (Default: 4)
+
+                To set a functional not given by one of the above, set the overwrite_inputs
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
+
+            pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
+                If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
+                Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
+                custom keywords to overwrite_inputs, e.g.
+                overwrite_inputs = {"pcm": {"theory": "ssvpe"}}
+                Refer to the QChem manual for further details on the models available.
+
+                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
+            isosvp_dielectric (float): Dielectric constant to use for isodensity SS(V)PE implicit solvation model.
+                (Default: None). If supplied, will set solvent_method to "isosvp" and populate the $svp section
+                of the input file with appropriate parameters.
+
+                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
+            smd_solvent (str): Solvent to use for SMD implicit solvation model. (Default: None)
+                Examples include "water", "ethanol", "methanol", and "acetonitrile". Refer to the QChem
+                manual for a complete list of solvents available. To define a custom solvent, set this
+                argument to "custom" and populate custom_smd with the necessary parameters.
+
+                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
+            cmirs_solvent (str): Solvent to use for the CMIRS implicit solvation model. (Default: None).
+                Only 5 solvents are presently available as of Q-Chem 6: "water", "benzene", "cyclohexane",
+                "dimethyl sulfoxide", and "acetonitrile". Note that selection of a solvent here will also
+                populate the iso SS(V)PE dielectric constant, because CMIRS uses the isodensity SS(V)PE model
+                to compute electrostatics.
+
+                **Note that only one of pcm_dielectric, isosvp_dielectric, smd_solvent, or cmirs_solvent may be set.**
+            custom_smd (str): List of parameters to define a custom solvent in SMD. (Default: None)
+                Must be given as a string of seven comma separated values in the following order:
+                "dielectric, refractive index, acidity, basicity, surface tension, aromaticity,
+                electronegative halogenicity"
+                Refer to the QChem manual for further details.
+            opt_variables (dict): A dictionary of opt sections, where each opt section is a key
+                and the corresponding values are a list of strings. Strings must be formatted
+                as instructed by the QChem manual. The different opt sections are: CONSTRAINT, FIXED,
+                DUMMY, and CONNECT.
+
+                Ex. opt = {"CONSTRAINT": ["tors 2 3 4 5 25.0", "tors 2 5 7 9 80.0"], "FIXED": ["2 XY"]}
+            scan_variables (dict): A dictionary of scan variables. Because two constraints of the
+                same type are allowed (for instance, two torsions or two bond stretches), each TYPE of
+                variable (stre, bend, tors) should be its own key in the dict, rather than each variable.
+                Note that the total number of variable (sum of lengths of all lists) CANNOT be more than two.
+
+                Ex. scan_variables = {"stre": ["3 6 1.5 1.9 0.1"], "tors": ["1 2 3 4 -180 180 15"]}
+            max_scf_cycles (int): Maximum number of SCF iterations. (Default: 100)
+            geom_opt_max_cycles (int): Maximum number of geometry optimization iterations. (Default: 200)
+            plot_cubes (bool): Whether to write CUBE files of the electron density. (Default: False)
+            output_wavefunction (bool): Whether to write a wavefunction (*.wfn) file of the electron density
+                (Default: False)
+            nbo_params (dict): A dict containing the desired NBO params. Note that a key:value pair of
+                "version":7 will trigger NBO7 analysis. Otherwise, NBO5 analysis will be performed,
+                including if an empty dict is passed. Besides a key of "version", all other key:value
+                pairs will be written into the $nbo section of the QChem input file. (Default: False)
+            geom_opt (dict): A dict containing parameters for the $geom_opt section of the Q-Chem input
+                file, which control the new geometry optimizer available starting in version 5.4.2. The
+                new optimizer remains under development but was officially released and became the default
+                optimizer in Q-Chem version 6.0.0. Note that for version 5.4.2, the new optimizer must be
+                explicitly requested by passing in a dictionary (empty or otherwise) for this input parameter.
+                (Default: False)
+            vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
+                only if you are using overwrite_inputs to add a $van_der_waals section to the input.
+                In 'atomic' mode (default), dict keys represent the atomic number associated with each
+                radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
+                position of a single specific atom in the input structure.
+            cdft_constraints (list of lists of dicts):
+                A list of lists of dictionaries, where each dictionary represents a charge
+                constraint in the cdft section of the QChem input file.
+
+                Each entry in the main list represents one state (allowing for multi-configuration
+                calculations using constrained density functional theory - configuration interaction
+                (CDFT-CI). Each state is represented by a list, which itself contains some number of
+                constraints (dictionaries).
+
+                Ex:
+
+                1. For a single-state calculation with two constraints:
+                 cdft_constraints=[[
+                    {
+                        "value": 1.0,
+                        "coefficients": [1.0],
+                        "first_atoms": [1],
+                        "last_atoms": [2],
+                        "types": [None]
+                    },
+                    {
+                        "value": 2.0,
+                        "coefficients": [1.0, -1.0],
+                        "first_atoms": [1, 17],
+                        "last_atoms": [3, 19],
+                        "types": ["s"]
+                    }
+                ]]
+
+                Note that a type of None will default to a charge constraint (which can also be
+                accessed by requesting a type of "c" or "charge").
+
+                2. For a CDFT-CI multi-reference calculation:
+                cdft_constraints=[
+                    [
+                        {
+                            "value": 1.0,
+                            "coefficients": [1.0],
+                            "first_atoms": [1],
+                            "last_atoms": [27],
+                            "types": ["c"]
+                        },
+                        {
+                            "value": 0.0,
+                            "coefficients": [1.0],
+                            "first_atoms": [1],
+                            "last_atoms": [27],
+                            "types": ["s"]
+                        },
+                    ],
+                    [
+                        {
+                            "value": 0.0,
+                            "coefficients": [1.0],
+                            "first_atoms": [1],
+                            "last_atoms": [27],
+                            "types": ["c"]
+                        },
+                        {
+                            "value": -1.0,
+                            "coefficients": [1.0],
+                            "first_atoms": [1],
+                            "last_atoms": [27],
+                            "types": ["s"]
+                        },
+                    ]
+                ]
+            cdft_constraints (list[list[dict]]): A list of lists of dictionaries, where each
+            almo_coupling_states (list of lists of int 2-tuples):
+                A list of lists of int 2-tuples used for calculations of diabatization and state
+                coupling calculations relying on the absolutely localized molecular orbitals (ALMO)
+                methodology. Each entry in the main list represents a single state (two states are
+                included in an ALMO calculation). Within a single state, each 2-tuple represents the
+                charge and spin multiplicity of a single fragment.
+                ex: almo_coupling_states=[
+                            [
+                                (1, 2),
+                                (0, 1)
+                            ],
+                            [
+                                (0, 1),
+                                (1, 2)
+                            ]
+                        ]
+            overwrite_inputs (dict): Dictionary of QChem input sections to add or overwrite variables.
+                The currently available sections (keys) are rem, pcm,
+                solvent, smx, opt, scan, van_der_waals, and plots. The value of each key is a
+                dictionary of key value pairs relevant to that section. For example, to add
+                a new variable to the rem section that sets symmetry to false, use
+
+                overwrite_inputs = {"rem": {"symmetry": "false"}}
+
+                **Note that if something like basis is added to the rem dict it will overwrite
+                the default basis.**
+
+                **Note that supplying a van_der_waals section here will automatically modify
+                the PCM "radii" setting to "read".**
+
+                **Note that all keys must be given as strings, even when they are numbers!**
+            vdw_mode ('atomic' | 'sequential'): Method of specifying custom van der Waals radii. Applies
+                only if you are using overwrite_inputs to add a $van_der_waals section to the input.
+                In 'atomic' mode (default), dict keys represent the atomic number associated with each
+                radius (e.g., '12' = carbon). In 'sequential' mode, dict keys represent the sequential
+                position of a single specific atom in the input structure.
+            extra_scf_print (bool): Whether to store extra information generated from the SCF
+                cycle. If switched on, the Fock Matrix, coefficients of MO and the density matrix
+                will be stored.
+        """
+        self.molecule = molecule
+        self.job_type = job_type
+        self.basis_set = basis_set
+        self.scf_algorithm = scf_algorithm
+        self.qchem_version = qchem_version
+        self.dft_rung = dft_rung
+        self.pcm_dielectric = pcm_dielectric
+        self.isosvp_dielectric = isosvp_dielectric
+        self.smd_solvent = smd_solvent
+        self.cmirs_solvent = cmirs_solvent
+        self.custom_smd = custom_smd
+        self.opt_variables = opt_variables
+        self.scan_variables = scan_variables
+        self.max_scf_cycles = max_scf_cycles
+        self.geom_opt_max_cycles = geom_opt_max_cycles
+        self.plot_cubes = plot_cubes
+        self.output_wavefunction = output_wavefunction
+        self.nbo_params = nbo_params
+        self.geom_opt = geom_opt
+        self.cdft_constraints = cdft_constraints
+        self.almo_coupling_states = almo_coupling_states
+        self.overwrite_inputs = overwrite_inputs
+        self.vdw_mode = vdw_mode
+        self.extra_scf_print = extra_scf_print
+
+        generator = QCInputGenerator(
+            job_type=self.job_type,
+            basis_set=self.basis_set,
+            scf_algorithm=self.scf_algorithm,
+            qchem_version=self.qchem_version,
+            dft_rung=self.dft_rung,
+            pcm_dielectric=self.pcm_dielectric,
+            isosvp_dielectric=self.isosvp_dielectric,
+            smd_solvent=self.smd_solvent,
+            cmirs_solvent=self.cmirs_solvent,
+            custom_smd=self.custom_smd,
+            opt_variables=self.opt_variables,
+            scan_variables=self.scan_variables,
+            max_scf_cycles=self.max_scf_cycles,
+            geom_opt_max_cycles=self.geom_opt_max_cycles,
+            plot_cubes=self.plot_cubes,
+            output_wavefunction=self.output_wavefunction,
+            nbo_params=self.nbo_params,
+            geom_opt=self.geom_opt,
+            cdft_constraints=self.cdft_constraints,
+            almo_coupling_states=self.almo_coupling_states,
+            overwrite_inputs=self.overwrite_inputs,
             vdw_mode=self.vdw_mode,
-            plots=plots,
-            nbo=nbo,
-            geom_opt=geom_opt,
-            cdft=self.cdft_constraints,
-            almo_coupling=self.almo_coupling_states,
-            svp=svp,
-            pcm_nonels=pcm_nonels,
+            extra_scf_print=self.extra_scf_print,
         )
+        # _get_sections already ran once (silently) in QCInputGenerator.__post_init__ to validate
+        # the settings. This second call is the one that emits warnings; do not merge the two.
+        super().__init__(self.molecule, **generator._get_sections())
 
     def write(self, input_file: PathLike) -> None:
         """Write the Q-Chem input file, plus a solvent_data sidecar if needed.
@@ -701,7 +1075,7 @@ class SinglePointSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -930,7 +1304,7 @@ class OptSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1141,7 +1515,7 @@ class TransitionStateSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1278,7 +1652,7 @@ class ForceSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1472,7 +1846,7 @@ class FreqSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1628,8 +2002,9 @@ class PESScanSet(QChemDictSet):
     geometries.
     Note: Because there are no defaults that can be used for a PES scan (the
     variables are completely dependent on the molecular structure), by default
-    scan_variables = None. However, a PES Scan job should not be run with less
-    than one variable (or more than two variables).
+    scan_variables = None. The scan must be supplied either with scan_variables or
+    with the "scan" section of overwrite_inputs, as for PESScanSetGenerator. A PES
+    Scan job should not be run with less than one variable (or more than two variables).
     """
 
     def __init__(
@@ -1687,7 +2062,7 @@ class PESScanSet(QChemDictSet):
                 (Default: 4)
 
                 To set a functional not given by one of the above, set the overwrite_inputs
-                argument to {"method":"<NAME OF FUNCTIONAL>"}
+                argument to {"rem": {"method": "<NAME OF FUNCTIONAL>"}}
             pcm_dielectric (float): Dielectric constant to use for PCM implicit solvation model. (Default: None)
                 If supplied, will set up the $pcm section of the input file for a C-PCM calculation.
                 Other types of PCM calculations (e.g., IEF-PCM, SS(V)PE, etc.) may be requested by passing
@@ -1748,9 +2123,6 @@ class PESScanSet(QChemDictSet):
         self.scf_algorithm = scf_algorithm
         self.max_scf_cycles = max_scf_cycles
 
-        if scan_variables is None:
-            raise ValueError("Cannot run a pes_scan job without some variable to scan over!")
-
         super().__init__(
             molecule=molecule,
             job_type="pes_scan",
@@ -1772,3 +2144,6 @@ class PESScanSet(QChemDictSet):
             overwrite_inputs=overwrite_inputs,
             vdw_mode=vdw_mode,
         )
+        # same check as PESScanSetGenerator.get_input_set, so both accept the same settings
+        if not self.scan:
+            raise ValueError("Cannot run a pes_scan job without some variable to scan over!")
