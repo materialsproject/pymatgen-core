@@ -1355,7 +1355,7 @@ class JDFTXStructure(MSONable):
         selective_dynamics (list[list[bool]]): Selective dynamics flags for each site (one per direction, as in
             structure.site_properties["selective_dynamics"]; one per site is also accepted). A site is fixed (moveScale
             0) if either these or movescale mark it fixed, with a warning where the other marks it free; flags that fix
-            only some directions count as fixed (with a warning), as JDFTx's moveScale applies to every direction. Once
+            only some directions of a site raise an error, as JDFTx's moveScale applies to every direction. Once
             set, they match movescale ([True] * 3 for a non-zero moveScale, [False] * 3 for 0).
         sort_structure (bool): Whether to sort the sites into the order JDFTx prints them in (grouped by species, in
             the order the species first appear), along with the per-site data below. Useful if species are not
@@ -1455,15 +1455,16 @@ class JDFTXStructure(MSONable):
         # TODO: write a site fixed along only some directions with a Linear or Planar constraint instead
         partial = [i for i, sd in enumerate(selective_dynamics) if sd is not None and any(sd) and not all(sd)]
         if partial:
-            warnings.warn(
-                f"Selective dynamics that fix only some directions of a site are not supported yet (sites {partial}): "
-                "JDFTx's moveScale applies to every direction, so these sites are held fixed",
-                stacklevel=4,
+            raise NotImplementedError(
+                f"Selective dynamics that fix only some directions of a site are not supported yet (sites {partial}), "
+                "as JDFTx's moveScale applies to every direction. Give selective_dynamics or movescale that fix or "
+                "free each of these sites entirely (a 'Linear' or 'Planar' constraint, see constraint_types, can limit "
+                "the directions a free site moves in)"
             )
         mismatched = [
             i
             for i, (scale, sd) in enumerate(zip(movescale, selective_dynamics, strict=True))
-            if scale is not None and sd is not None and (all(sd) or not any(sd)) and bool(scale) != all(sd)
+            if scale is not None and sd is not None and bool(scale) != all(sd)
         ]
         if mismatched:
             warnings.warn(

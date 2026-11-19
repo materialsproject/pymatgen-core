@@ -632,9 +632,14 @@ def test_jdftxstructure_movescale_and_selective_dynamics():
     with pytest.warns(UserWarning, match=re.escape("disagree for sites [0, 1]")):
         jstruct = JDFTXStructure(structure, movescale=[0, 1, 1], selective_dynamics=free_fixed_free)
     assert jstruct.movescale == [0.0, 0.0, 1.0]  # Fixed if either marks it fixed
-    with pytest.warns(UserWarning, match=re.escape("not supported yet (sites [1])")):
-        jstruct = JDFTXStructure(structure, selective_dynamics=[[True] * 3, [True, False, True], [True] * 3])
-    assert jstruct.movescale == [1.0, 0.0, 1.0]
+    # A site fixed in only some directions is refused instead of being frozen, also as a site property
+    partly_fixed = [[True] * 3, [True, False, True], [True] * 3]
+    with pytest.raises(NotImplementedError, match=re.escape("not supported yet (sites [1])")):
+        JDFTXStructure(structure, selective_dynamics=partly_fixed)
+    structure.add_site_property("selective_dynamics", partly_fixed)
+    with pytest.raises(NotImplementedError, match=re.escape("not supported yet (sites [1])")):
+        JDFTXInfile.from_structure(structure)
+    assert JDFTXInfile.from_structure(structure, selective_dynamics=free_fixed_free)["ion"][1]["moveScale"] == 0.0
 
 
 @pytest.mark.parametrize("sd_as_site_property", [False, True], ids=["sd_arg", "sd_site_property"])
@@ -749,16 +754,14 @@ def test_appended_site_movescale():
 
 
 def test_jdftxstructure_dict_round_trip_does_not_warn_again():
-    """Sites that movescale and selective_dynamics disagree on, or that are fixed in only some directions, are fixed
-    with a warning and both are set to match, so a saved JDFTXStructure loads back the same without warning again.
+    """Sites that movescale and selective_dynamics disagree on are fixed with a warning and both are set to match, so
+    a saved JDFTXStructure loads back the same without warning again.
     """
     structure = Structure(Lattice.cubic(10.0), ["H", "H"], [[0, 0, 0], [0.5, 0.5, 0.5]])
     with pytest.warns(UserWarning, match="disagree"):
-        jstruct = JDFTXStructure(
-            structure, movescale=[0.5, None], selective_dynamics=[[False] * 3, [True, False, True]]
-        )
-    assert jstruct.movescale == [0.0, 0.0]
-    assert jstruct.selective_dynamics == [[False] * 3, [False] * 3]
+        jstruct = JDFTXStructure(structure, movescale=[0.5, None], selective_dynamics=[[False] * 3, [True] * 3])
+    assert jstruct.movescale == [0.0, 1.0]
+    assert jstruct.selective_dynamics == [[False] * 3, [True] * 3]
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         loaded = JDFTXStructure.from_dict(jstruct.as_dict())
