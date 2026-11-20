@@ -51,6 +51,8 @@ def _json_dict(dct: dict[str, Any]) -> dict[str, Any]:
     """Return an as_dict in plain JSON types, with arrays as monty writes them so that they load back as arrays (as
     ComputedEntry.as_dict does for its data).
     """
+    # TODO: Each nested as_dict calls this on what its children already encoded, so a parsed out file is encoded once
+    # per nesting level. Build the nested dict without encoding it, and encode it once in the as_dict that was called.
     return json.loads(json.dumps(dct, cls=MontyEncoder))
 
 
