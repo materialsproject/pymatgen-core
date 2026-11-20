@@ -125,7 +125,8 @@ def test_JDFTXOutfile_skimming(filename: Path, known: dict, known_simple: dict):
     if nless_outslices + nless_last_geom > 0:
         single_parse_time = min(Timer(lambda: JDFTXOutfile.from_file(filename)).repeat(repeat=3, number=1))
         number = ceil(6 * CPU_CLOCK_STEP / single_parse_time)
-        time_full = _parse_time(filename, number=number)
+        while (time_full := _parse_time(filename, number=number)) < 6 * CPU_CLOCK_STEP:
+            number *= 2
     skim_level_options = ["outfile", "geom", "elec"]
     # Don't run outfile depth skimming test if only one slice
     if not nless_outslices > 0:
