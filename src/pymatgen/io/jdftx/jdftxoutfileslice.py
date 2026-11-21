@@ -433,6 +433,7 @@ class JDFTXOutfileSlice:
             raise ValueError("Calculation did not begin for this out file slice.")
         with warnings.catch_warnings():  # Warnings on the choice of options are for whoever sets them, not readers
             warnings.simplefilter("ignore", JDFTXOptionWarning)
+            # TODO: Keep the lines skip_invalid_tags leaves out (it only warns), for to_jdftxinfile to warn about them
             self.infile = JDFTXInfile.from_str(
                 "\n".join(text[start_line_idx:end_line_idx]), validate_value_boundaries=False, skip_invalid_tags=True
             )
@@ -1265,6 +1266,8 @@ class JDFTXOutfileSlice:
         Returns:
             JDFTXInfile: A JDFTXInfile object representing the input parameters of the JDFTXOutfileSlice.
         """
+        # TODO: Warn if the echoed input had commands that could not be read (skipped in _set_internal_infile), as the
+        # restart then lacks them
         # Use internal infile as a reference for calculation parameters
         with warnings.catch_warnings():  # Warnings on the choice of options were for whoever set them
             warnings.simplefilter("ignore", JDFTXOptionWarning)
