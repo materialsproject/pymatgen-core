@@ -14,7 +14,7 @@ from pymatgen.util.testing import TEST_FILES_DIR
 from .shared_test_utils import assert_same_value
 
 
-def assert_idential_jif(jif1: JDFTXInfile | dict, jif2: JDFTXInfile | dict):
+def assert_identical_jif(jif1: JDFTXInfile | dict, jif2: JDFTXInfile | dict):
     djif1 = jif1.as_dict() if isinstance(jif1, JDFTXInfile) else jif1
     djif2 = jif2.as_dict() if isinstance(jif2, JDFTXInfile) else jif2
     assert_same_value(djif1, djif2)
@@ -34,7 +34,7 @@ def assert_equiv_jdftxstructure(struc1: JDFTXStructure, struc2: JDFTXStructure) 
     """
     d1 = struc1.as_dict()
     d2 = struc2.as_dict()
-    assert_idential_jif(d1, d2)
+    assert_identical_jif(d1, d2)
 
 
 ex_in_files_dir = Path(TEST_FILES_DIR) / "io" / "jdftx" / "test_jdftx_in_files"
@@ -46,7 +46,7 @@ ex_infile1_knowns = {
     "elec-ex-corr": "gga",
     "van-der-waals": "D3",
     "elec-cutoff": {"Ecut": 20.0, "EcutRho": 100.0},
-    "elec-n-bands": 15,
+    "elec-n-bands": {"n": 15},
     "kpoint-folding": {"n0": 1, "n1": 1, "n2": 1},
     "spintype": "z-spin",
     "core-overlap-check": "none",
@@ -58,8 +58,11 @@ ex_infile1_knowns = {
     "fluid-solvent": [{"name": "H2O"}],
     "fluid-cation": {"name": "Na+", "concentration": 0.5},
     "fluid-anion": {"name": "F-", "concentration": 0.5},
-    "initial-magnetic-moments": "C 1 O 1",
+    "initial-magnetic-moments": {
+        "species-values": [{"species-id": "C", "values": [1.0]}, {"species-id": "O", "values": [1.0]}]
+    },
 }
 
 ex_infile2_fname = ex_in_files_dir / "example_sp.in"
 ex_infile3_fname = ex_in_files_dir / "ct_slab_001.in"
+aimd_infile_fname = ex_in_files_dir / "aimd.in"

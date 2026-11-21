@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from typing import Any
 
     from pymatgen.io.jdftx.jelstep import JElSteps
-    from pymatgen.io.jdftx.jminsettings import JMinSettings
 from pymatgen.core import Structure
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.trajectory import Trajectory
@@ -75,10 +74,6 @@ class JDFTXOutfileSlice:
         jstrucs (JOutStructures | None): JOutStructures instance containing intermediate structures. Holds a "slices"
             attribute, which is a list of JOutStructure instances. (A JOutStructure instance functions as a Structure
             object, along with a JElSteps instance (stored as elecmindata) and other JDFTx-calculation-specific data.)
-        jsettings_fluid (JMinSettings | None): JMinSettings instance containing fluid optimization settings.
-        jsettings_electronic (JMinSettings | None): JMinSettings instance containing electronic optimization settings.
-        jsettings_lattice (JMinSettings | None): JMinSettings instance containing lattice optimization settings.
-        jsettings_ionic (JMinSettings | None): JMinSettings instance containing ionic optimization settings.
         xc_func (str | None): Exchange-correlation functional used in the calculation.
         lattice_initial (np.ndarray | None): Initial lattice matrix in Angstroms.
         lattice_final (np.ndarray | None): Final lattice matrix in Angstroms.
@@ -196,10 +191,6 @@ class JDFTXOutfileSlice:
     prefix: str | None = None
 
     jstrucs: JOutStructures | None = None
-    jsettings_fluid: JMinSettings | None = None
-    jsettings_electronic: JMinSettings | None = None
-    jsettings_lattice: JMinSettings | None = None
-    jsettings_ionic: JMinSettings | None = None
     constant_lattice: bool | None = None
 
     xc_func: str | None = None
@@ -352,7 +343,6 @@ class JDFTXOutfileSlice:
 
     def _from_out_slice_init_all(self, text: list[str]) -> None:
         self._set_internal_infile(text)
-        # self._set_min_settings(text)
         self._set_geomopt_vars(text)
         self._set_jstrucs(text)
         self._set_backup_vars(text)
@@ -794,51 +784,6 @@ class JDFTXOutfileSlice:
             self.valence_electrons = self.total_electrons - self.semicore_electrons  # accounts for if system is charged
         else:
             raise ValueError("Total electrons and semicore electrons must be set.")
-
-    def _collect_settings_lines(self, text: list[str], start_flag: str) -> list[int]:
-        """Collect the lines of settings from the out file text.
-
-        Args:
-            text (list[str]): Output of read_file for out file.
-            start_flag (str): Key to start collecting settings lines.
-
-        Returns:
-            list[int]: List of line numbers where settings occur.
-        """
-        started = False
-        line_texts = []
-        for i, line_text in enumerate(text):
-            if started:
-                if line_text.strip().split()[-1].strip() == "\\":
-                    line_texts.append(i)
-                else:
-                    started = False
-            elif start_flag in line_text:
-                started = True
-            elif line_texts:
-                break
-        return line_texts
-
-    def _create_settings_dict(self, text: list[str], start_flag: str) -> dict:
-        """Get a dictionary of settings from the out file text.
-
-        Create a dictionary of settings from the out file text.
-
-        Args:
-            text (list[str]): Output of read_file for out file.
-            start_flag (str): Key to start collecting settings lines.
-
-        Returns:
-            dict: Dictionary of settings.
-        """
-        line_texts = self._collect_settings_lines(text, start_flag)
-        settings_dict = {}
-        for line_text in line_texts:
-            line_text_list = text[line_text].strip().split()
-            key = line_text_list[0].lower()
-            value = line_text_list[1]
-            settings_dict[key] = value
-        return settings_dict
 
     def _set_geomopt_vars(self, text: list[str]) -> None:
         """Set the geom_opt and geom_opt_type class variables.
@@ -1311,14 +1256,11 @@ class JDFTXOutfileSlice:
         for cls in inspect.getmro(self.__class__):
             for key, value in cls.__dict__.items():
                 if not key.startswith("_") and (not callable(value) or isinstance(value, property)):
-                    pref = ""
                     suff = ", \n"
                     val = repr(getattr(self, key))
-                    if "jsettings" in key:
-                        pref = "\n    "
                     if key == "jstrucs":
                         val = "(... JOutStructures object ...)"
-                    out_str += f"{pref}{key}={val}{suff}"
+                    out_str += f"{key}={val}{suff}"
         out_str += ")"
         return out_str
 
