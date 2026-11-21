@@ -5,6 +5,8 @@ This module contains;
     tag names to AbstractTag-type objects.
 - get_tag_object: a function that returns an AbstractTag-type object from
     MASTER_TAG_LIST given a tag name.
+- get_tag_object_on_val: the same, but for a tag with several formats (MultiformatTag)
+    it returns the format option that fits a given value.
 """
 
 from __future__ import annotations
@@ -12,20 +14,21 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from pymatgen.core.periodic_table import Element
 from pymatgen.io.jdftx.generic_tags import (
     AbstractTag,
     BoolTag,
     BoolTagContainer,
     DumpTagContainer,
     FloatTag,
-    InitMagMomTag,
     IntTag,
     MultiformatTag,
+    StrListTag,
     StrTag,
+    SubcommandTagContainer,
     TagContainer,
 )
 from pymatgen.io.jdftx.jdftxinfile_ref_options import (
+    _func_option_warnings,
     fluid_solvent_options,
     func_c_options,
     func_options,
@@ -33,12 +36,38 @@ from pymatgen.io.jdftx.jdftxinfile_ref_options import (
     func_xc_options,
     jdftxdumpfreqoptions,
     jdftxdumpvaroptions,
+    jdftxfluid_subtag_aliases,
     jdftxfluid_subtagdict,
     jdftxminimize_subtagdict,
     kinetic_functionals,
 )
 
 __author__ = "Jacob Clary, Ben Rich"
+
+
+def _get_species_values_tag_container() -> TagContainer:
+    """Get a TagContainer for tags of the form '<species> <v1> <v2> ... [<species2> <v1> ...]'.
+
+    Used for e.g. initial-magnetic-moments. Each species group reads values until the next species label, and the
+    order of the values within a group is significant (one or more values per ion of that species).
+
+    Returns:
+        TagContainer: The TagContainer, read into {"species-values": [{"species-id": ..., "values": [...]}, ...]}.
+    """
+    return TagContainer(
+        subtags={
+            "species-values": TagContainer(
+                write_tagname=False,
+                can_repeat=True,
+                optional=False,
+                subtags={
+                    "species-id": StrTag(write_tagname=False, optional=False),
+                    "values": FloatTag(write_tagname=False, can_repeat=True, ordered=True, optional=False),
+                },
+            ),
+        }
+    )
+
 
 MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
     "extrafiles": {
@@ -48,9 +77,9 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "latt-scale": TagContainer(
             allow_list_representation=True,
             subtags={
-                "s0": IntTag(write_tagname=False, optional=False),
-                "s1": IntTag(write_tagname=False, optional=False),
-                "s2": IntTag(write_tagname=False, optional=False),
+                "s0": FloatTag(write_tagname=False, optional=False),
+                "s1": FloatTag(write_tagname=False, optional=False),
+                "s2": FloatTag(write_tagname=False, optional=False),
             },
         ),
         "latt-move-scale": TagContainer(
@@ -71,15 +100,15 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     linebreak_nth_entry=3,
                     allow_list_representation=True,
                     subtags={
-                        "R00": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R01": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R02": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R10": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R11": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R12": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R20": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R21": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "R22": FloatTag(write_tagname=False, optional=False, prec=12),
+                        "R00": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R01": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R02": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R10": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R11": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R12": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R20": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R21": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "R22": FloatTag(write_tagname=False, optional=False, prec=15),
                     },
                 ),
                 TagContainer(
@@ -97,7 +126,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     subtags={
                         "modification": StrTag(
                             options=["Base-Centered"],  # Single-option modification could be a boolean tag, but keeping
-                            # as a string tagfor consistency with the other modified lattice tags
+                            # as a string tag for consistency with the other modified lattice tags
                             optional=False,
                             write_tagname=False,
                             write_value=True,
@@ -210,96 +239,75 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     allow_list_representation=False,
                     can_repeat=True,
                     subtags={
-                        "species-id": StrTag(
-                            write_tagname=False,
-                            optional=False,
-                            options=[
-                                value.symbol
-                                for key, value in Element.__dict__.items()
-                                if not key.startswith("_") and not callable(value)
-                            ],  # Required in case bad species names gets fed
-                        ),
-                        "x0": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x1": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x2": FloatTag(write_tagname=False, optional=False, prec=12),
+                        # e.g. Fe1 for a species read from Fe1.upf (see element_from_species_name)
+                        "species-id": StrTag(write_tagname=False, optional=False, species_name=True),
+                        "x0": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x1": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x2": FloatTag(write_tagname=False, optional=False, prec=15),
                         "v": TagContainer(
                             allow_list_representation=True,
                             subtags={
-                                "vx0": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx1": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx2": FloatTag(write_tagname=False, optional=False, prec=12),
+                                "vx0": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx1": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx2": FloatTag(write_tagname=False, optional=False, prec=15),
                             },
                         ),
-                        "moveScale": IntTag(write_tagname=False, optional=False),
+                        "moveScale": FloatTag(write_tagname=False, optional=False),
                     },
                 ),
                 TagContainer(
                     allow_list_representation=False,
                     can_repeat=True,
                     subtags={
-                        "species-id": StrTag(
-                            write_tagname=False,
-                            optional=False,
-                            options=[
-                                value.symbol
-                                for key, value in Element.__dict__.items()
-                                if not key.startswith("_") and not callable(value)
-                            ],  # Required in case bad species names gets fed
-                        ),
-                        "x0": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x1": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x2": FloatTag(write_tagname=False, optional=False, prec=12),
+                        # e.g. Fe1 for a species read from Fe1.upf (see element_from_species_name)
+                        "species-id": StrTag(write_tagname=False, optional=False, species_name=True),
+                        "x0": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x1": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x2": FloatTag(write_tagname=False, optional=False, prec=15),
                         "v": TagContainer(
                             allow_list_representation=True,
                             subtags={
-                                "vx0": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx1": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx2": FloatTag(write_tagname=False, optional=False, prec=12),
+                                "vx0": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx1": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx2": FloatTag(write_tagname=False, optional=False, prec=15),
                             },
                         ),
-                        "moveScale": IntTag(write_tagname=False, optional=False),
+                        "moveScale": FloatTag(write_tagname=False, optional=False),
                         "constraint type": StrTag(
                             options=["Linear", "Planar", "HyperPlane"],
                             write_tagname=False,
                             optional=False,
                         ),
-                        "d0": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "d1": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "d2": FloatTag(write_tagname=False, optional=False, prec=12),
+                        "d0": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "d1": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "d2": FloatTag(write_tagname=False, optional=False, prec=15),
                     },
                 ),
                 TagContainer(
                     allow_list_representation=False,
                     can_repeat=True,
                     subtags={
-                        "species-id": StrTag(
-                            write_tagname=False,
-                            optional=False,
-                            options=[
-                                value.symbol
-                                for key, value in Element.__dict__.items()
-                                if not key.startswith("_") and not callable(value)
-                            ],  # Required in case bad species names gets fed
-                        ),
-                        "x0": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x1": FloatTag(write_tagname=False, optional=False, prec=12),
-                        "x2": FloatTag(write_tagname=False, optional=False, prec=12),
+                        # e.g. Fe1 for a species read from Fe1.upf (see element_from_species_name)
+                        "species-id": StrTag(write_tagname=False, optional=False, species_name=True),
+                        "x0": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x1": FloatTag(write_tagname=False, optional=False, prec=15),
+                        "x2": FloatTag(write_tagname=False, optional=False, prec=15),
                         "v": TagContainer(
                             allow_list_representation=True,
                             subtags={
-                                "vx0": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx1": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "vx2": FloatTag(write_tagname=False, optional=False, prec=12),
+                                "vx0": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx1": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "vx2": FloatTag(write_tagname=False, optional=False, prec=15),
                             },
                         ),
-                        "moveScale": IntTag(write_tagname=False, optional=False),
+                        "moveScale": FloatTag(write_tagname=False, optional=False),
                         "HyperPlane": TagContainer(
                             write_tagname=True,
                             can_repeat=True,
                             subtags={
-                                "d0": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "d1": FloatTag(write_tagname=False, optional=False, prec=12),
-                                "d2": FloatTag(write_tagname=False, optional=False, prec=12),
+                                "d0": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "d1": FloatTag(write_tagname=False, optional=False, prec=15),
+                                "d2": FloatTag(write_tagname=False, optional=False, prec=15),
                                 "group": StrTag(write_tagname=False, optional=False),
                             },
                         ),
@@ -373,12 +381,10 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
     "electronic": {
         "elec-ex-corr": MultiformatTag(
             format_options=[
-                # note that hyb-HSE06 has a bug in JDFTx and should not be
-                # used and is excluded here use the LibXC version instead
-                # (hyb-gga-HSE06)
                 StrTag(
                     write_tagname=True,
                     options=deepcopy(func_options),
+                    option_warnings=deepcopy(_func_option_warnings),
                 ),
                 TagContainer(
                     subtags={
@@ -408,12 +414,10 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "elec-ex-corr-compare": MultiformatTag(
             can_repeat=True,
             format_options=[
-                # note that hyb-HSE06 has a bug in JDFTx and should not be used
-                # and is excluded here use the LibXC version instead
-                # (hyb-gga-HSE06)
                 StrTag(
                     write_tagname=True,
                     options=func_options,
+                    option_warnings=deepcopy(_func_option_warnings),
                 ),
                 TagContainer(
                     subtags={
@@ -472,12 +476,37 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "plot": BoolTag(write_tagname=False),
             }
         ),
+        "chargeball": TagContainer(
+            can_repeat=True,
+            subtags={
+                "species-id": StrTag(write_tagname=False, optional=False),
+                "norm": FloatTag(write_tagname=False, optional=False),
+                "width": FloatTag(write_tagname=False, optional=False),
+            },
+        ),
         "lj-override": FloatTag(),
+        # van-der-waals [<scaleOverride>=0] | D3 | D3BJ: a bare van-der-waals (which is how JDFTx echoes a scale of 0)
+        # is DFT-D2 with the default scale, read as a scale of 0
         "van-der-waals": MultiformatTag(
             format_options=[
-                StrTag(options=["D3"]),
-                FloatTag(),
+                StrTag(options=["D3", "D3BJ"]),
+                FloatTag(value_if_bare=0.0),
             ]
+        ),
+        # setVDW <species> <C6> <R0> [<species2> ...]: DFT-D2 parameters, C6 in J nm^6/mol and R0 in Angstrom
+        "setVDW": TagContainer(
+            subtags={
+                "species-params": TagContainer(
+                    write_tagname=False,
+                    can_repeat=True,
+                    optional=False,
+                    subtags={
+                        "species": StrTag(write_tagname=False, optional=False),
+                        "C6": FloatTag(write_tagname=False, optional=False),
+                        "R0": FloatTag(write_tagname=False, optional=False),
+                    },
+                ),
+            },
         ),
         "elec-cutoff": TagContainer(
             allow_list_representation=True,
@@ -497,9 +526,41 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "smearingWidth": FloatTag(write_tagname=False, optional=False),
             },
         ),
-        "elec-n-bands": IntTag(),
+        "elec-n-bands": TagContainer(
+            subtags={
+                "n": IntTag(write_tagname=False, optional=False, lb=0, lb_incl=True),
+                "multiplier": FloatTag(write_tagname=False, optional=True, lb=1.0, lb_incl=True),
+            }
+        ),
         "spintype": StrTag(options=["no-spin", "spin-orbit", "vector-spin", "z-spin"]),
-        "initial-magnetic-moments": InitMagMomTag(),
+        "initial-magnetic-moments": _get_species_values_tag_container(),
+        "initial-oxidation-state": _get_species_values_tag_container(),
+        # add-U <species> <orbDesc> <UminusJ> [Vext <atom> <V>] ... [<species2> ...]
+        # JDFTx allows add-U only once, with all U channels on one line (and any number of Vext's per channel)
+        "add-U": TagContainer(
+            optional=True,
+            subtags={
+                "U-channels": TagContainer(
+                    write_tagname=False,
+                    can_repeat=True,
+                    optional=False,
+                    subtags={
+                        "species": StrTag(write_tagname=False, optional=False),
+                        "orbDesc": StrTag(write_tagname=False, optional=False),
+                        "UminusJ": FloatTag(write_tagname=False, optional=False),
+                        "Vext": TagContainer(
+                            write_tagname=True,
+                            can_repeat=True,
+                            optional=True,
+                            subtags={
+                                "atom": IntTag(write_tagname=False, optional=False),
+                                "V": FloatTag(write_tagname=False, optional=False),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
         "elec-initial-magnetization": TagContainer(
             subtags={
                 "M": FloatTag(write_tagname=False, optional=False),
@@ -536,17 +597,17 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "electric-field": TagContainer(
             allow_list_representation=True,
             subtags={
-                "Ex": IntTag(write_tagname=False, optional=False),
-                "Ey": IntTag(write_tagname=False, optional=False),
-                "Ez": IntTag(write_tagname=False, optional=False),
+                "Ex": FloatTag(write_tagname=False, optional=False),
+                "Ey": FloatTag(write_tagname=False, optional=False),
+                "Ez": FloatTag(write_tagname=False, optional=False),
             },
         ),
         "perturb-electric-field": TagContainer(
             allow_list_representation=True,
             subtags={
-                "Ex": IntTag(write_tagname=False, optional=False),
-                "Ey": IntTag(write_tagname=False, optional=False),
-                "Ez": IntTag(write_tagname=False, optional=False),
+                "Ex": FloatTag(write_tagname=False, optional=False),
+                "Ey": FloatTag(write_tagname=False, optional=False),
+                "Ez": FloatTag(write_tagname=False, optional=False),
             },
         ),
         "box-potential": TagContainer(
@@ -574,6 +635,15 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     write_tagname=False,
                     optional=False,
                 ),
+                "center": TagContainer(
+                    allow_list_representation=True,
+                    optional=True,
+                    subtags={
+                        "x": FloatTag(write_tagname=False, optional=False),
+                        "y": FloatTag(write_tagname=False, optional=False),
+                        "z": FloatTag(write_tagname=False, optional=False),
+                    },
+                ),
             },
         ),
         "bulk-epsilon": TagContainer(
@@ -594,23 +664,40 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "sigma": FloatTag(write_tagname=False, optional=False),
             },
         ),
-        "charged-defect-correction": TagContainer(
-            subtags={
-                "Slab": TagContainer(
+        # charged-defect-correction [Slab <dir>] <DtotFile> <bulkEps>|<slabEpsFile> <rMin> <rSigma>: JDFTx reads Eps as
+        # the bulk dielectric constant for coulomb-interaction Periodic, or as a slab-epsilon output file for
+        # coulomb-interaction Slab or with the Slab override (which JDFTx only recognizes as the first token)
+        "charged-defect-correction": MultiformatTag(
+            format_options=[
+                TagContainer(
                     subtags={
-                        "dir": StrTag(options=["100", "010", "001"], write_tagname=False),
+                        "DtotFile": StrTag(write_tagname=False, optional=False),
+                        "Eps": FloatTag(write_tagname=False, optional=False),
+                        "rMin": FloatTag(write_tagname=False, optional=False),
+                        "rSigma": FloatTag(write_tagname=False, optional=False),
                     }
                 ),
-                "DtotFile": StrTag(write_tagname=False, optional=False),
-                "Eps": MultiformatTag(
-                    format_options=[
-                        FloatTag(write_tagname=False, optional=False),
-                        StrTag(write_tagname=False, optional=False),
-                    ]
+                TagContainer(
+                    subtags={
+                        "Slab": TagContainer(
+                            optional=False,
+                            subtags={"dir": StrTag(options=["100", "010", "001"], write_tagname=False, optional=False)},
+                        ),
+                        "DtotFile": StrTag(write_tagname=False, optional=False),
+                        "Eps": StrTag(write_tagname=False, optional=False),
+                        "rMin": FloatTag(write_tagname=False, optional=False),
+                        "rSigma": FloatTag(write_tagname=False, optional=False),
+                    }
                 ),
-                "rMin": FloatTag(write_tagname=False, optional=False),
-                "rSigma": FloatTag(write_tagname=False, optional=False),
-            }
+                TagContainer(
+                    subtags={
+                        "DtotFile": StrTag(write_tagname=False, optional=False),
+                        "Eps": StrTag(write_tagname=False, optional=False),
+                        "rMin": FloatTag(write_tagname=False, optional=False),
+                        "rSigma": FloatTag(write_tagname=False, optional=False),
+                    }
+                ),
+            ]
         ),
         "Cprime-params": TagContainer(
             subtags={
@@ -634,8 +721,9 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "EcutTransverse": FloatTag(),
                 "computeRange": TagContainer(
                     subtags={
-                        "iqStart": FloatTag(write_tagname=False, optional=False),
-                        "iqStop": FloatTag(write_tagname=False, optional=False),
+                        # 1-based momentum transfer indices; JDFTx also needs iqStop >= iqStart
+                        "iqStart": IntTag(write_tagname=False, optional=False, lb=1),
+                        "iqStop": IntTag(write_tagname=False, optional=False, lb=1),
                     }
                 ),
             },
@@ -744,7 +832,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "perturb-incommensurate-wavefunctions": TagContainer(
             subtags={
                 "filename": StrTag(write_tagname=False, optional=False),
-                "EcutOld": IntTag(write_tagname=False),
+                "EcutOld": FloatTag(write_tagname=False),
             }
         ),
         "perturb-rhoExternal": StrTag(),
@@ -753,10 +841,10 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "fix-electron-potential": StrTag(),
         "Vexternal": MultiformatTag(
             format_options=[
-                TagContainer(subtags={"filename": StrTag(write_value=False, optional=False)}),
+                TagContainer(subtags={"filename": StrTag(write_tagname=False, optional=False)}),
                 TagContainer(
                     subtags={
-                        "filenameUp": StrTag(write_value=False, optional=False),
+                        "filenameUp": StrTag(write_tagname=False, optional=False),
                         "filenameDn": StrTag(write_tagname=False, optional=False),
                     }
                 ),
@@ -765,7 +853,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "rhoExternal": TagContainer(
             subtags={
                 "filename": StrTag(write_tagname=False, optional=False),
-                "includeSelfEnergy": FloatTag(write_tagname=False),
+                "includeSelfEnergy": BoolTag(write_tagname=False),
             }
         ),
         "slab-epsilon": TagContainer(
@@ -846,7 +934,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
             linebreak_nth_entry=1,
             multiline_tag=False,
             subtags={
-                "algorithm": StrTag(options=["MINRES", "CGIMINRES"]),
+                "algorithm": StrTag(options=["CG", "MINRES"]),
                 "CGBypass": BoolTag(),
                 "nIterations": IntTag(),
                 "recomputeResidual": BoolTag(),
@@ -902,6 +990,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                         ),
                         **deepcopy(jdftxfluid_subtagdict),
                     },
+                    subtag_aliases=deepcopy(jdftxfluid_subtag_aliases),
                 ),
                 TagContainer(
                     can_repeat=True,
@@ -922,6 +1011,7 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                         ),
                         **deepcopy(jdftxfluid_subtagdict),
                     },
+                    subtag_aliases=deepcopy(jdftxfluid_subtag_aliases),
                 ),
             ],
         ),
@@ -939,7 +1029,8 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     write_tagname=False,
                 ),
                 **deepcopy(jdftxfluid_subtagdict),
-            }
+            },
+            subtag_aliases=deepcopy(jdftxfluid_subtag_aliases),
         ),
         "fluid-cation": TagContainer(
             subtags={
@@ -955,7 +1046,8 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     write_tagname=False,
                 ),
                 **deepcopy(jdftxfluid_subtagdict),
-            }
+            },
+            subtag_aliases=deepcopy(jdftxfluid_subtag_aliases),
         ),
         "fluid-dielectric-constant": TagContainer(
             subtags={
@@ -1019,6 +1111,20 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
             },
         ),
         "fluid-vdwScale": FloatTag(),
+        # set-atomic-radius <species> <Ri> [<species2> ...]: radii (Angstrom) used by some solvation models
+        "set-atomic-radius": TagContainer(
+            subtags={
+                "species-radii": TagContainer(
+                    write_tagname=False,
+                    can_repeat=True,
+                    optional=False,
+                    subtags={
+                        "species": StrTag(write_tagname=False, optional=False),
+                        "Ri": FloatTag(write_tagname=False, optional=False),
+                    },
+                ),
+            },
+        ),
         "fluid-gummel-loop": TagContainer(
             subtags={
                 "maxIterations": IntTag(write_tagname=False, optional=False),
@@ -1026,39 +1132,53 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
             }
         ),
         "fluid-solve-frequency": StrTag(options=["Default", "Gummel", "Inner"]),
+        # "fluid-site-params <component> <siteName> <key> <value> ...". JDFTx defaults <component> and <siteName> (to
+        # the first ones) only when nothing follows them, so a bare line changes nothing (and isn't stored). Bounds are
+        # JDFTx's checks. JDFTx echoes this only for ClassicalDFT and SaLSA: every site of every component, with empty
+        # filenames and 0 for unset values it refuses as input (e.g. Rhs), then one bare line per further input line.
         "fluid-site-params": TagContainer(
-            linebreak_nth_entry=1,
             multiline_tag=False,
             can_repeat=True,
+            bare_is_noop=True,
             subtags={
                 "component": StrTag(
-                    options=[
+                    write_tagname=False,
+                    options=[  # fluidComponentMap in JDFTx's fluid.cpp
+                        "H2O",
+                        "CHCl3",
                         "CCl4",
                         "CH3CN",
-                        "CHCl3",
+                        "DMC",
+                        "EC",
+                        "PC",
+                        "DMF",
+                        "THF",
+                        "EthylEther",
+                        "Chlorobenzene",
+                        "Isobutanol",
+                        "CarbonDisulfide",
+                        "CustomSolvent",
+                        "Na+",
+                        "Na(H2O)4+",
+                        "CustomCation",
                         "Cl-",
+                        "F-",
                         "ClO4-",
                         "CustomAnion",
-                        "CustomCation",
-                        "F-",
-                        "H2O",
-                        "Na(H2O)4+",
-                        "Na+",
                     ],
-                    optional=False,
                 ),
-                "siteName": StrTag(optional=False),
-                "aElec": FloatTag(),
-                "alpha": FloatTag(),
-                "aPol": FloatTag(),
-                "elecFilename": StrTag(),
-                "elecFilenameG": StrTag(),
-                "rcElec": FloatTag(),
-                "Rhs": FloatTag(),
-                "sigmaElec": FloatTag(),
-                "sigmaNuc": FloatTag(),
-                "Zelec": FloatTag(),
-                "Znuc": FloatTag(),
+                "siteName": StrTag(write_tagname=False),
+                "aElec": FloatTag(lb=0.0, lb_incl=False),
+                "alpha": FloatTag(lb=0.0, lb_incl=False),
+                "aPol": FloatTag(lb=0.0, lb_incl=False),
+                "elecFilename": StrTag(empty_means_unset=True),
+                "elecFilenameG": StrTag(empty_means_unset=True),
+                "rcElec": FloatTag(lb=0.0),
+                "Rhs": FloatTag(lb=0.0, lb_incl=False),
+                "sigmaElec": FloatTag(lb=0.0),
+                "sigmaNuc": FloatTag(lb=0.0),
+                "Zelec": FloatTag(lb=0.0),
+                "Znuc": FloatTag(lb=0.0),
             },
         ),
         "pcm-variant": StrTag(
@@ -1092,31 +1212,36 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "residualThreshold": FloatTag(),
             },
         ),
+        # Bounds are JDFTx's checks (pcm_params.cpp). JDFTx's echo prints every key, with an empty cavityFile and 0 for
+        # unset rhoMin/rhoMax/rhoDelta/Ztot/screenOverride, which JDFTx refuses as input; values out of bounds are
+        # left out when writing, so a restart from an out file stays valid.
         "pcm-params": TagContainer(
             linebreak_nth_entry=1,
             multiline_tag=False,
             subtags={
-                "cavityFile": StrTag(),
+                "cavityFile": StrTag(empty_means_unset=True),
                 "cavityPressure": FloatTag(),
-                "cavityScale": FloatTag(),
+                "cavityScale": FloatTag(lb=0.0, lb_incl=False),
                 "cavityTension": FloatTag(),
-                "eta_wDiel": FloatTag(),
-                "ionSpacing": FloatTag(),
-                "lMax": FloatTag(),
-                "nc": FloatTag(),
+                "eta_wDiel": FloatTag(lb=0.0),
+                "ionSpacing": FloatTag(lb=0.0),
+                "lMax": IntTag(lb=0),
+                "nc": FloatTag(lb=0.0, lb_incl=False),
                 "pCavity": FloatTag(),
-                "rhoDelta": FloatTag(),
-                "rhoMax": FloatTag(),
-                "rhoMin": FloatTag(),
-                "screenOverride": FloatTag(),
-                "sigma": FloatTag(),
-                "sqrtC6eff": FloatTag(),
+                "phiCavity": FloatTag(),
+                "rhoDelta": FloatTag(lb=0.0, lb_incl=False),
+                "rhoMax": FloatTag(lb=0.0, lb_incl=False),
+                "rhoMin": FloatTag(lb=0.0, lb_incl=False),
+                "screenOverride": FloatTag(lb=0.0, lb_incl=False),
+                "sigma": FloatTag(lb=0.0, lb_incl=False),
+                "sqrtC6eff": FloatTag(lb=0.0),
+                # Replaced by phiCavity in JDFTx on 2026-08-04 (b83bb662); JDFTx builds from 2024-02 until then have it
                 "Zcenter": FloatTag(),
                 "zMask0": FloatTag(),
-                "zMaskH": FloatTag(),
-                "zMaskIonH": FloatTag(),
-                "zMaskSigma": FloatTag(),
-                "Ztot": FloatTag(),
+                "zMaskH": FloatTag(lb=0.0),
+                "zMaskIonH": FloatTag(lb=0.0),
+                "zMaskSigma": FloatTag(lb=0.0, lb_incl=False),
+                "Ztot": FloatTag(lb=0.0, lb_incl=False),
             },
         ),
     },
@@ -1131,35 +1256,41 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "omegaMin": FloatTag(),
                 "T": FloatTag(),
                 "omegaResolution": FloatTag(),
+                "dumpK": BoolTag(),
+                # Added in JDFTx 2026-08-27 (c80e3463); JDFTx since then echoes both, even when unset (-1).
+                # iConfiguration -1 (default) starts at configuration 0; JDFTx rejects anything below -1.
+                "iConfiguration": IntTag(lb=-1),
+                # 0 and -1 (default) both run through the last configuration; JDFTx sets no bounds
+                "nConfigurations": IntTag(),
             }
         ),
+        # JDFTx reads as many values as are given (commands/ionic_dynamics.cpp, CommandStatVelocity): chainLengthT
+        # thermostat velocities, and 6 strain rates plus chainLengthP lattice thermostat velocities for the barostat
         "barostat-velocity": TagContainer(
-            subtags={
-                "v1": FloatTag(write_tagname=False, optional=False),
-                "v2": FloatTag(write_tagname=False, optional=False),
-                "v3": FloatTag(write_tagname=False, optional=False),
-                "v4": FloatTag(write_tagname=False, optional=False),
-                "v5": FloatTag(write_tagname=False, optional=False),
-                "v6": FloatTag(write_tagname=False, optional=False),
-                "v7": FloatTag(write_tagname=False, optional=False),
-                "v8": FloatTag(write_tagname=False, optional=False),
-                "v9": FloatTag(write_tagname=False, optional=False),
-            }
+            subtags={"v": FloatTag(write_tagname=False, can_repeat=True, ordered=True, optional=False)}
         ),
         "thermostat-velocity": TagContainer(
+            subtags={"v": FloatTag(write_tagname=False, can_repeat=True, ordered=True, optional=False)}
+        ),
+        # Atoms are 1-based indices within their species; resolution in bohr, energy-per-step in Hartree bohr
+        "metadynamics-bond": TagContainer(
             subtags={
-                "v1": FloatTag(write_tagname=False, optional=False),
-                "v2": FloatTag(write_tagname=False, optional=False),
-                "v3": FloatTag(write_tagname=False, optional=False),
-            }
+                "species1": StrTag(write_tagname=False, optional=False),
+                "atom1": IntTag(write_tagname=False, optional=False),
+                "species2": StrTag(write_tagname=False, optional=False),
+                "atom2": IntTag(write_tagname=False, optional=False),
+                "resolution": FloatTag(write_tagname=False, optional=False),
+                "energy-per-step": FloatTag(write_tagname=False, optional=False),
+                "state-file": StrTag(write_tagname=False),
+            },
         ),
         "ionic-dynamics": TagContainer(
             linebreak_nth_entry=1,
             multiline_tag=False,
             subtags={
                 "B0": FloatTag(),
-                "chainLengthP": FloatTag(),
-                "chainLengthT": FloatTag(),
+                "chainLengthP": IntTag(),
+                "chainLengthT": IntTag(),
                 "dt": FloatTag(),
                 "nSteps": IntTag(),
                 "P0": FloatTag(),  # can accept numpy.nan
@@ -1226,24 +1357,22 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "norm": BoolTag(write_tagname=False, optional=False),
             }
         ),
-        "density-of-states": TagContainer(
-            linebreak_nth_entry=1,
+        "density-of-states": SubcommandTagContainer(
             subtags={
                 "Total": BoolTag(write_value=False),
                 "Slice": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "c0": FloatTag(write_tagname=False, optional=False),
                         "c1": FloatTag(write_tagname=False, optional=False),
                         "c2": FloatTag(write_tagname=False, optional=False),
                         "r": FloatTag(write_tagname=False, optional=False),
-                        "i0": FloatTag(write_tagname=False, optional=False),
-                        "i1": FloatTag(write_tagname=False, optional=False),
-                        "i2": FloatTag(write_tagname=False, optional=False),
+                        # Miller indices of the plane
+                        "i0": IntTag(write_tagname=False, optional=False),
+                        "i1": IntTag(write_tagname=False, optional=False),
+                        "i2": IntTag(write_tagname=False, optional=False),
                     },
                 ),
                 "Sphere": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "c0": FloatTag(write_tagname=False, optional=False),
                         "c1": FloatTag(write_tagname=False, optional=False),
@@ -1252,18 +1381,17 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     },
                 ),
                 "AtomSlice": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "species": StrTag(write_tagname=False, optional=False),
                         "atomIndex": IntTag(write_tagname=False, optional=False),
                         "r": FloatTag(write_tagname=False, optional=False),
-                        "i0": FloatTag(write_tagname=False, optional=False),
-                        "i1": FloatTag(write_tagname=False, optional=False),
-                        "i2": FloatTag(write_tagname=False, optional=False),
+                        # Miller indices of the plane
+                        "i0": IntTag(write_tagname=False, optional=False),
+                        "i1": IntTag(write_tagname=False, optional=False),
+                        "i2": IntTag(write_tagname=False, optional=False),
                     },
                 ),
                 "AtomSphere": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "species": StrTag(write_tagname=False, optional=False),
                         "atomIndex": IntTag(write_tagname=False, optional=False),
@@ -1272,7 +1400,6 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 ),
                 "File": StrTag(),
                 "Orbital": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "species": StrTag(write_tagname=False, optional=False),
                         "atomIndex": IntTag(write_tagname=False, optional=False),
@@ -1280,7 +1407,6 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                     },
                 ),
                 "OrthoOrbital": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "species": StrTag(write_tagname=False, optional=False),
                         "atomIndex": IntTag(write_tagname=False, optional=False),
@@ -1293,7 +1419,6 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
                 "Occupied": BoolTag(write_value=False),
                 "Complete": BoolTag(write_value=False),
                 "SpinProjected": TagContainer(
-                    can_repeat=True,
                     subtags={
                         "theta": FloatTag(write_tagname=False, optional=False),
                         "phi": FloatTag(write_tagname=False, optional=False),
@@ -1369,7 +1494,8 @@ MASTER_TAG_LIST: dict[str, dict[str, Any]] = {
         "potential-subtraction": BoolTag(),
     },
     "misc": {
-        "debug": StrTag(
+        # debug <option> <option> ...: JDFTx echoes all options merged into the first debug line, and the others bare
+        "debug": StrListTag(
             options=[
                 "Ecomponents",
                 "EigsFillings",
@@ -1436,13 +1562,14 @@ def get_tag_object(tag: str) -> AbstractTag:
 
 
 def get_tag_object_on_val(tag: str, val: Any) -> AbstractTag:
-    """Get the tag object for a given tag name.
+    """Get the tag object for a given tag name and value.
 
     Args:
         tag (str): The tag name.
+        val (Any): A value of the tag, as a string to read or as a parsed value.
 
     Returns:
-        AbstractTag: The tag object.
+        AbstractTag: The tag object. For a MultiformatTag, this is the format option that fits the value.
     """
     tag_object = get_tag_object(tag)
     if isinstance(tag_object, MultiformatTag):
