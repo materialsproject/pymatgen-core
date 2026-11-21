@@ -1,0 +1,8 @@
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.087841331  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49640  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.010295937505232  |grad|_K:  1.102e-04  alpha:  1.000e+00
+	FillingsUpdate:  mu: -0.099399028  nElectrons: 6.000000  magneticMoment: [ Abs: 5.43900  Tot: +2.00000 ]
+	SubspaceRotationAdjust: set factor to -nan
+ElecMinimize: Iter:   1  F: -3.018425965201787  |grad|_K:       -nan  alpha:  1.878e+00  linmin:       -nan  t[s]:    443.30
+ElecMinimize: |grad|_K=-nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
