@@ -2100,6 +2100,20 @@ def test_jdftxstructure_velocities_are_cartesian():
     np.testing.assert_allclose(cart_jstruct.velocities[0], jstruct.velocities[0])
 
 
+def test_jdftxstructure_from_older_dict_leaves_out_velocities():
+    # A dict stored before velocities were Cartesian angstrom/fs (one without movescale) holds them as its ion lines
+    # had them, so they are left out with a warning, as they were then, instead of being read as angstrom/fs
+    structure = Structure(Lattice.cubic(10.0), ["H"], [[0, 0, 0]])
+    older_dict = {"structure": structure.as_dict(), "selective_dynamics": [1], "velocities": [[0.01, 0.02, 0.03]]}
+    with pytest.warns(UserWarning, match="Leaving out the velocities"):
+        jstruct = JDFTXStructure.from_dict(older_dict)
+    assert jstruct.velocities is None
+    assert jstruct.movescale == [1.0]
+    with warnings.catch_warnings():  # Nothing to leave out, nothing to warn about
+        warnings.simplefilter("error")
+        JDFTXStructure.from_dict(older_dict | {"velocities": [None]})
+
+
 def _jdftx_named_lattice(a, b, c, alpha, beta, gamma):
     """Lattice vectors (columns, bohr) as JDFTx builds a named lattice (GridInfo::setLatticeVectors)."""
     cos_a, cos_b = np.cos(np.radians(alpha)), np.cos(np.radians(beta))

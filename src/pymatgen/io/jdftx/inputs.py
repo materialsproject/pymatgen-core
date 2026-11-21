@@ -1791,14 +1791,28 @@ class JDFTXStructure(MSONable):
         Returns:
             JDFTXStructure: The created JDFTXStructure object.
         """
+        # TODO: Decode the arrays in these (MontyDecoder().process_decoded). Velocities stored with dumpfn/MontyEncoder
+        # load as monty array dicts, which get_str then fails on (with jsanitize they are lists, which load fine)
+        per_site_data: dict[str, Any] = {
+            key: params.get(key)
+            for key in ("velocities", "constraint_types", "constraint_vectors", "hyperplane_group_names")
+        }
+        # A dict without movescale is from before these were Cartesian angstrom (and fs): it holds them as its ion lines
+        # had them, in coordinates it doesn't record. They are left out, as from_dict left them out then.
+        if "movescale" not in params:
+            if left_out := [key for key, value in per_site_data.items() if not _allnone(value)]:
+                warnings.warn(
+                    f"Leaving out the {', '.join(left_out)} of a JDFTXStructure dict stored by an older version, which "
+                    "kept them in the coordinates of its ion lines instead of Cartesian angstrom (and fs). Re-create "
+                    "it from the input file to keep them.",
+                    stacklevel=2,
+                )
+            per_site_data = {}
         return cls(
             Structure.from_dict(params["structure"]),
             selective_dynamics=params["selective_dynamics"],
-            velocities=params.get("velocities"),
-            constraint_types=params.get("constraint_types"),
-            constraint_vectors=params.get("constraint_vectors"),
-            hyperplane_group_names=params.get("hyperplane_group_names"),
             movescale=params.get("movescale"),  # Older dicts only have selective_dynamics (one 0/1 value per site)
+            **per_site_data,
         )
 
 
