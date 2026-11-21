@@ -14,6 +14,8 @@ from .outputs_test_utils import (
     ex_iter_line1_known,
     ex_subspace_line1,
     ex_subspace_line1_known,
+    ex_unconv_emin_slice,
+    ex_unconv_emin_slice_known,
 )
 from .outputs_test_utils import ex_jstep_known1 as ex_known1
 from .outputs_test_utils import ex_jstep_known2 as ex_known2
@@ -123,3 +125,10 @@ def test_JElSteps_known(
         for i in range(len(ex_lines)):
             val2 = getattr(jeis[i], var)
             assert is_right_known(val2, ex_knowns[i][var])
+
+
+def test_unconv_jelsteps():
+    jeis = JElSteps._from_text_slice(ex_unconv_emin_slice, opt_type="ElecMinimize", etype="F")
+    for attr in ex_unconv_emin_slice_known:
+        assert hasattr(jeis, attr)
+        assert getattr(jeis, attr) == ex_unconv_emin_slice_known[attr]

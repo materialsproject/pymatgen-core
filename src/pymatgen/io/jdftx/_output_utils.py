@@ -7,18 +7,89 @@ submodules in the future.
 
 from __future__ import annotations
 
+import json
+from dataclasses import fields
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 import numpy as np
+from monty.dev import deprecated
+from monty.json import MontyDecoder, MontyEncoder, MSONable
 
+from pymatgen.core.structure import Structure
+from pymatgen.core.units import Ha_to_eV
 from pymatgen.electronic_structure.core import Orbital
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy.typing import NDArray
+
+_T = TypeVar("_T")
+
+
+class _OutputMSONable(MSONable):
+    """MSONable base for the output dataclasses, so pydantic models holding them dump them with as_dict.
+
+    monty's pydantic hook has no serializer, so pydantic dumps a dataclass field by field (no "@module"/"@class", and
+    with fields __init__ doesn't take). A pydantic model holding parsed output then can't be loaded back from
+    model_dump, dumpfn or jobflow's store. Structure isn't a dataclass, so it isn't affected.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+        """Pydantic core schema: monty's validator, serialized with as_dict."""
+        from pydantic_core import core_schema
+
+        schema = super().__get_pydantic_core_schema__(source_type, handler)
+        schema["serialization"] = core_schema.plain_serializer_function_ser_schema(lambda obj: obj.as_dict())
+        return schema
+
+
+def _json_dict(dct: dict[str, Any]) -> dict[str, Any]:
+    """Return an as_dict in plain JSON types, with arrays as monty writes them so that they load back as arrays (as
+    ComputedEntry.as_dict does for its data).
+    """
+    # TODO: Each nested as_dict calls this on what its children already encoded, so a parsed out file is encoded once
+    # per nesting level. Build the nested dict without encoding it, and encode it once in the as_dict that was called.
+    return json.loads(json.dumps(dct, cls=MontyEncoder))
+
+
+def _decode_value(value: Any) -> Any:
+    """Decode a value from an as_dict (Structure.from_dict leaves the arrays in a structure's properties encoded)."""
+    value = MontyDecoder().process_decoded(value)
+    if isinstance(value, Structure):
+        value.properties = MontyDecoder().process_decoded(value.properties)
+    return value
+
+
+def _none_to_nan(value: Any) -> Any:
+    """Turn each None inside an echoed input file's as_dict back into nan.
+
+    JDFTx echoes unset values as nan (e.g. MD's P0), and pydantic's JSON dumps write nan as null by default. Parsing
+    never stores None in an input file, so each None there was a nan.
+    """
+    if value is None:
+        return np.nan
+    if isinstance(value, dict):
+        return {key: _none_to_nan(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_none_to_nan(val) for val in value]
+    return value
+
+
+def _dataclass_from_dict(cls: type[_T], dct: dict[str, Any]) -> _T:
+    """Rebuild an output dataclass from its as_dict, decoding its init fields (__post_init__ derives the others)."""
+    init_fields = [fld for fld in fields(cls) if fld.init and fld.name in dct]  # type: ignore[arg-type]
+    return cls(**{fld.name: _decode_value(dct[fld.name]) for fld in init_fields})
+
+
+def _vibrational_modes_as_dict(modes: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Return vibrational modes with each complex value (imaginary frequencies) as [real, imag], as JSON has none."""
+    if modes is None:
+        return None
+    return [{key: [v.real, v.imag] if isinstance(v, complex) else v for key, v in mode.items()} for mode in modes]
 
 
 def check_file_exists(func: Callable) -> Any:
@@ -45,7 +116,7 @@ def read_file(file_name: str) -> list[str]:
 
     Parameters
     ----------
-    filename: Path or str
+    file_name: Path or str
         name of file to read
 
     Returns
@@ -83,14 +154,12 @@ def _read_bandfile_header(bandfile_filepath: str | Path) -> list[str]:
 
 def read_outfile_slices(file_name: str) -> list[list[str]]:
     """
-    Read slice of out file into a list of str.
+    Read an out file into a list of slices, each a list of str.
 
     Parameters
     ----------
-    filename: Path or str
+    file_name: Path or str
         name of file to read
-    out_slice_idx: int
-        index of slice to read from file
 
     Returns
     -------
@@ -108,9 +177,9 @@ def read_outfile_slices(file_name: str) -> list[list[str]]:
 
 
 def _brkt_list_of_3_to_nparray(line: str) -> NDArray[np.float64]:
-    """Return 3x1 numpy array.
+    """Return length-3 numpy array.
 
-    Convert a string of the form "[ x y z ]" to a 3x1 numpy array
+    Convert a string of the form "[ x y z ]" to a length-3 numpy array
 
     Parameters
     ----------
@@ -143,8 +212,6 @@ def _brkt_list_of_3x3_to_nparray(lines: list[str], i_start: int = 0) -> NDArray[
     return out
 
 
-# Named "t1" in unmet anticipation of multiple ways that a float would be needed
-# to be read following the variable string with a colon.
 def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     """Return float val from '...lkey: val...' in linetext.
 
@@ -158,6 +225,11 @@ def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     lkey: str
         A string that appears before the float value in linetext. Must include
         the colon.
+
+    Returns
+    -------
+    val: float | None
+        The value (nan if it is printed as "nan"), or None if lkey is not in linetext
     """
     colon_var = None
     if lkey in linetext:
@@ -166,59 +238,51 @@ def get_colon_val(linetext: str, lkey: str) -> float | np.float64 | None:
     return colon_var
 
 
-# Temporary alias until the outside modules are merged with the renaming
+# Temporary alias for the old name until the outside modules are merged with the renaming. (It was named "t1" in unmet
+# anticipation of multiple ways that a float would be needed to be read following the variable string with a colon.)
 get_colon_var_t1 = get_colon_val
 
 
-# This function matches the format of the generic "is_<x>_start_line" functions specific to
-# the JOutStructure object initialization, but is not moved to the joutstructure module
-# as it is also used in methods for other JDFTx IO modules (e.g. JOutStructures) so it
-# is kept here to avoid circular imports.
+@deprecated(
+    message="JDFTx skips the Lowdin block when no pseudopotential has atomic orbitals, so it is no longer used to "
+    "find ionic steps.",
+    deadline=(2027, 10, 24),
+)
 def is_lowdin_start_line(line_text: str) -> bool:
-    """Return True if the line_text is the start of Lowdin log message.
-
-    Return True if the line_text is the start of a Lowdin population analysis
-    in a JDFTx out file.
-
-    Parameters
-    ----------
-    line_text: str
-        A line of text from a JDFTx out file
-
-    Returns
-    -------
-    is_line: bool
-        True if the line_text is the start of a Lowdin population analysis in a
-        JDFTx out file
-    """
+    """Deprecated. Return True if the line_text is the start of a Lowdin population analysis in a JDFTx out file."""
     return "#--- Lowdin population analysis ---" in line_text
 
 
-# TODO: Figure out if this ever actually gets called, (I think I added it to make JOutStructure user friendly
-# but JOutStructure is not intended to be a user-initialized class)
-def correct_geom_opt_type(opt_type: str | None) -> str | None:
+def correct_geom_opt_type(opt_type: str | None) -> str:
     """Return recognizable opt_type string.
 
     Correct the opt_type string to match the JDFTx convention.
 
     Parameters
     ----------
-    opt_type:
-        The type of optimization step
+    opt_type: str | None
+        The type of optimization step (any string containing "lattice" or "ionic", ignoring case), or None
 
     Returns
     -------
-    opt_type: str | None
-        The corrected type of optimization step
+    opt_type: str
+        The corrected type of optimization step ("LatticeMinimize", "IonicMinimize" or "IonicDynamics"), or an
+        empty string if opt_type is None
+
+    Raises
+    ------
+    ValueError
+        If opt_type is not recognized
     """
+    opt_type_return = ""
     if opt_type is not None:
         if "lattice" in opt_type.lower():
-            opt_type = "LatticeMinimize"
+            opt_type_return = "LatticeMinimize"
         elif "ionic" in opt_type.lower():
-            opt_type = "IonicDynamics" if "dyn" in opt_type.lower() else "IonicMinimize"
+            opt_type_return = "IonicDynamics" if "dyn" in opt_type.lower() else "IonicMinimize"
         else:
-            opt_type = None
-    return opt_type
+            raise ValueError(f"Unrecognized optimization type: {opt_type}")
+    return opt_type_return
 
 
 def get_start_lines(
@@ -552,6 +616,8 @@ def _is_complex_bandfile_filepath(bandfile_filepath: str | Path) -> bool:
 
 
 # TODO: This is very likely redundant to something in pymatgen - replace with that if possible.
+# The real spherical harmonics of each l in the order JDFTx writes them in a bandProjections file (m = -l ... l, as
+# defined in JDFTx's core/SphericalHarmonics.h), which is also the order of pymatgen's Orbital enum.
 orb_ref_list = [
     ["s"],
     ["py", "pz", "px"],
@@ -568,7 +634,8 @@ orb_ref_to_o_dict = {
     "dz2": int(Orbital.dz2),
     "dxz": int(Orbital.dxz),
     "dx2-y2": int(Orbital.dx2_y2),
-    # Keep the f-orbitals arbitrary-ish until they get designated names in pymatgen.
+    # pymatgen names the f orbitals by m (f_3 for m = -3, ..., f3 for m = 3), in the same order as VASP's (fy3x2,
+    # fxyz, fyz2, fz3, fxz2, fzx2, fx3) and JDFTx's.
     orb_ref_list[-1][0]: int(Orbital.f_3),
     orb_ref_list[-1][1]: int(Orbital.f_2),
     orb_ref_list[-1][2]: int(Orbital.f_1),
@@ -636,9 +703,9 @@ def _get_atom_orb_labels_ref_dict(bandfile_filepath: Path) -> dict[str, list[str
     For example:
     {
         "H": ["s"],
-        "O": ["s", "px", "py", "pz", "dxy", "dxz", "dyz", "dx2y2", "dz2"],
-        "Pt": ["0s", "1s", "0px", "0py", "0pz", "1px", "1py", "1pz", "dxy", "dxz", "dyz", "dx2y2", "dz2",
-               "fx3-3xy2", "fyx2-yz2", "fxz2", "fz3", "fyz2", "fxyz", "f3yx2-y3"]
+        "O": ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"],
+        "Pt": ["0s", "1s", "0py", "0pz", "0px", "1py", "1pz", "1px", "dxy", "dyz", "dz2", "dxz", "dx2-y2",
+               "fy(3x2-y2)", "fxyz", "fyz2", "fz3", "fxz2", "fz(x2-y2)", "fx(x2-3y2)"]
     }
     where the numbers are needed when using pseudopotentials with multiple valence shells of the same angular momentum
     and are NOT REPRESENTATIVE OF THE TRUE PRINCIPAL QUANTUM NUMBER.
@@ -746,7 +813,7 @@ def _get_orb_label_list(bandfile_filepath: Path) -> tuple[str, ...]:
         bandfile_filepath (str | Path): The path to the bandfile.
 
     Returns:
-        tuple[str]: A list of all atomic orbital projection string representations.
+        tuple[str, ...]: A tuple of all atomic orbital projection string representations.
     """
     labels_dict = _get_atom_orb_labels_ref_dict(bandfile_filepath)
     atom_count_list = _get_atom_count_list(bandfile_filepath)
@@ -760,3 +827,54 @@ def _get_orb_label_list(bandfile_filepath: Path) -> tuple[str, ...]:
     if len(labels_list) != _get_orb_label_list_expected_len(labels_dict, atom_count_list):
         raise RuntimeError("Number of atomic orbital projections does not match expected length.")
     return tuple(labels_list)
+
+
+eigstats_keymap = {
+    "eMin": "emin",
+    "HOMO": "homo",
+    "mu": "efermi",
+    "LUMO": "lumo",
+    "eMax": "emax",
+    "HOMO-LUMO gap": "egap",
+    "Optical gap": "optical_egap",
+}
+
+
+def _get_eigstats_varsdict(text: list[str]) -> tuple[bool, dict[str, float | None]]:
+    """Get the eigenvalue statistics from the out file text.
+
+    Args:
+        text (list[str]): Output of read_file for out file.
+
+    Returns:
+        tuple[bool, dict[str, float | None]]: Whether the out file has an eigStats dump listing every statistic, and
+            the dictionary of eigenvalue statistics (in eV). A statistic JDFTx printed as "unavailable" (e.g. LUMO and
+            mu when there are no empty bands) is None.
+    """
+    has_eigstats = False
+    varsdict: dict[str, float | None] = {}
+    lines1 = find_all_key("Dumping ", text)
+    lines2 = find_all_key("eigStats' ...", text)
+    lines3 = [lines1[i] for i in range(len(lines1)) if lines1[i] in lines2]
+    if not lines3:
+        for key in list(eigstats_keymap.keys()):
+            varsdict[eigstats_keymap[key]] = None
+        has_eigstats = False
+    else:
+        line_start = lines3[-1]
+        line_start_rel_idx = lines1.index(line_start)
+        if len(lines1) >= line_start_rel_idx + 2:
+            line_end = lines1[line_start_rel_idx + 1]
+        else:
+            # eigStats is the last dump; its (indented) block ends at the first non-indented line
+            line_end = line_start + 1
+            while line_end < len(text) and text[line_end][:1].isspace() and text[line_end].strip():
+                line_end += 1
+        _varsdict = _init_dict_from_colon_dump_lines([text[idx] for idx in range(line_start, line_end)])
+        for key in _varsdict:
+            value = _varsdict[key]
+            varsdict[eigstats_keymap[key]] = None if value == "unavailable" else float(value) * Ha_to_eV
+        has_eigstats = all(eigstats_keymap[key] in varsdict for key in eigstats_keymap) and all(
+            eigstats_keymap[key] is not None for key in eigstats_keymap
+        )
+    return has_eigstats, varsdict
