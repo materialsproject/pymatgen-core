@@ -38,12 +38,6 @@ if TYPE_CHECKING:
     from pymatgen.core.trajectory import Trajectory
     from pymatgen.io.jdftx.inputs import JDFTXInfile
     from pymatgen.io.jdftx.jelstep import JElSteps
-    from pymatgen.io.jdftx.jminsettings import (
-        JMinSettingsElectronic,
-        JMinSettingsFluid,
-        JMinSettingsIonic,
-        JMinSettingsLattice,
-    )
     from pymatgen.io.jdftx.joutstructures import JOutStructures
 
 __author__ = "Ben Rich, Jacob Clary"
@@ -96,11 +90,12 @@ class JDFTXOutputs:
         calc_dir (str | Path): The path to the directory containing the JDFTx output files.
         store_vars (list[str]): A list of the names of dump files to read and store.
         paths (dict[str, Path]): A dictionary of the paths to the dump files.
+        outfile_name (str | Path | None): The name of the out file in calc_dir, or None to search calc_dir for it.
         outfile (JDFTXOutfile): The JDFTXOutfile object for the out file.
         bandProjections (np.ndarray): The band projections. Stored in shape (nstates, nbands, nproj) where nstates
             is nspin*nkpts (nkpts may not equal prod(kfolding) if symmetry reduction occurred), nbands is the number of
             bands, and nproj is the number of projections. This shape is chosen instead of the pymatgen convention of
-            (nspin, nkpt, nbands, nion, nionproj) to save on memory as nonionproj is different depending on the ion
+            (nspin, nkpt, nbands, nion, nionproj) to save on memory as nionproj is different depending on the ion
             type. This array may also be complex if specified in 'band-projections-params' in the JDFTx input, allowing
             for pCOHP analysis.
         eigenvals (np.ndarray): The eigenvalues. Stored in shape (nstates, nbands) where nstates is nspin*nkpts (nkpts
@@ -109,14 +104,17 @@ class JDFTXOutputs:
             element describes the i'th orbital. Orbital labels are formatted as "<ion>#<ion-number>(<orbital>)",
             where <ion> is the element symbol of the ion, <ion-number> is the 1-based index of the ion-type in the
             structure (ie C#2 would be the second carbon atom, but not necessarily the second ion in the structure),
-            and <orbital> is a string describing "l" and "ml" quantum numbers (ie "p_x" or "d_yz"). Note that while "z"
+            and <orbital> is a string describing "l" and "ml" quantum numbers (ie "px" or "dyz"). Note that while "z"
             corresponds to the "z" axis, "x" and "y" are arbitrary and may not correspond to the actual x and y axes of
             the structure. In the case where multiple shells of a given "l" are available within the projections, a
-            0-based index will appear mimicking a principle quantum number (ie "0px" for first shell and "1px" for
+            0-based index will appear mimicking a principal quantum number (ie "0px" for first shell and "1px" for
             second shell). The actual principal quantum number is not stored in the JDFTx output files and must be
             inferred by the user.
         kpts (list[np.ndarray]): A list of the k-points used in the calculation. Each k-point is a 3D numpy array.
-        wk_list (list[np.ndarray]): A list of the weights for the k-points used in the calculation.
+        wk_list (list[float]): A list of the weights for the k-points used in the calculation.
+        bandstructure (BandStructure | None): The pymatgen BandStructure built from kpts and eigenvals (with
+            projections if bandProjections is stored). None unless both are stored, which "bandstructure" in
+            store_vars requests.
     """
 
     calc_dir: str | Path = field(init=True)
@@ -141,14 +139,12 @@ class JDFTXOutputs:
 
         Args:
             calc_dir (str | Path): The path to the directory containing the JDFTx out files.
-            is_bgw (bool): Mark True if data must be usable for BGW calculations. This will change the behavior of the
-                parser to be stricter with certain criteria.
-            none_slice_on_error (bool): If True, will return None if an error occurs while parsing a slice instead of
-                halting the parsing process. This can be useful for parsing files with multiple slices where some slices
-                may be incomplete or corrupted.
+            store_vars (list[str] | None): The names of the variables to read from dump files and store (see
+                implemented_store_vars). "bandstructure" stores "kpts" and "eigenvals".
             outfile_name (str | Path): The name of the outfile to use. If None, will search for the outfile in the
                 calc_dir. If provided, will concatenate with calc_dir as the outfile path. Use this if the calc_dir
                 contains multiple files that may be mistaken for the outfile (ie multiple files with the '.out' suffix).
+
         Returns:
             JDFTXOutputs: The JDFTXOutputs object.
         """
@@ -306,7 +302,8 @@ class JDFTXOutputs:
         Converts the bandProjections array to a pymatgen-compatible dictionary
 
         Returns:
-            dict | None:
+            dict | None: The projections for each Spin as an array of shape (nbands, nkpt, norbmax, nions), or None
+            if no bandProjections are available.
         """
         _lmax, norbmax = self._get_lmax()
         if norbmax is None:
@@ -319,6 +316,9 @@ class JDFTXOutputs:
             _proj_tju = np.abs(_proj_tju) ** 2
         # Convert to standard datatype - using np.real to suppress warnings
         proj_tju = np.array(np.real(_proj_tju), dtype=float)
+        if proj_tju.shape[-1] == 2 * len(self.orb_label_list):
+            # Noncollinear runs project onto both spinor components of each orbital (adjacent columns): add them
+            proj_tju = proj_tju.reshape(*proj_tju.shape[:-1], -1, 2).sum(axis=-1)
         proj_skju = proj_tju.reshape([self.outfile.nspin, -1, self.outfile.nbands, len(self.orb_label_list)])
         proj_sjku = np.swapaxes(proj_skju, 1, 2)
         nspin, nbands, nkpt, nproj = proj_sjku.shape
@@ -337,10 +337,6 @@ class JDFTXOutputs:
 _jof_atr_from_last_slice = (
     "prefix",
     "jstrucs",
-    "jsettings_fluid",
-    "jsettings_electronic",
-    "jsettings_lattice",
-    "jsettings_ionic",
     "xc_func",
     "lattice_initial",
     "lattice_final",
@@ -414,9 +410,14 @@ _jof_atr_from_last_slice = (
     "infile",
     "vibrational_modes",
     "vibrational_energy_components",
+    "pe",
+    "ke",
+    "t_k",
+    "p_bar",
+    "tmd_fs",
+    "thermostat_velocity",
 )
 
-# TODO: Remove references to the deprecated 'jsettings_*' attributes in `JDFTXOutfile` and `JDFTXOutfileSlice`
 # TODO: JDFTXOutfile and JDFTXOutfileSlice are VERY bloated. The following attributes are redundant
 # to fields of the `Structure` object and their removal likely won't cause any confusion.
 # - lattice
@@ -472,18 +473,6 @@ class JDFTXOutfile:
             series of JOutStructure objects in its 'slices' attribute, each corresponding to a single structure
             (multiple iff performing a geometric optimization) as well as convergence data for the structures as a
             series.
-        jsettings_fluid (JMinSettingsFluid): The JMinSettingsFluid object from the most recent JDFTx call. This object
-            contains only a 'params' attribute, which is a dictionary of the input parameters for the fluid
-            optimization.
-        jsettings_electronic (JMinSettingsElectronic): The JMinSettingsElectronic object from the most recent JDFTx
-            call. This object contains only a 'params' attribute, which is a dictionary of the input parameters for the
-            electronic optimization.
-        jsettings_lattice (JMinSettingsLattice): The JMinSettingsLattice object from the most recent JDFTx call. This
-            object contains only a 'params' attribute, which is a dictionary of the input parameters for the lattice
-            optimization.
-        jsettings_ionic (JMinSettingsIonic): The JMinSettingsIonic object from the most recent JDFTx call. This object
-            contains only a 'params' attribute, which is a dictionary of the input parameters for the ionic
-            optimization.
         xc_func (str): The exchange-correlation functional used in the most recent JDFTx call. See documentation for
             JDFTx online for a list of available exchange-correlation functionals.
         lattice_initial (np.ndarray): The initial lattice vectors of the most recent JDFTx call as a 3x3 numpy array.
@@ -499,37 +488,42 @@ class JDFTXOutfile:
             densities dumped as binary files.
         geom_opt (bool): True if the most recent JDFTx call was a geometry optimization (lattice or ionic).
         geom_opt_type (str): The type of geometry optimization performed in the most recent JDFTx call. Options are
-            'lattice' or 'ionic' if geom_opt, else "single point". ('lattice' optimizations perform ionic optimizations
-            as well unless ion positions are given in direct coordinates).
+            'lattice' or 'ionic' (also for molecular dynamics) if geom_opt, else "single point". ('lattice'
+            optimizations perform ionic optimizations as well).
         ecomponents (dict): The components of the total energy in eV of the most recent JDFTx call.
-        efermi (float): The Fermi energy in eV of the most recent JDFTx call. Equivalent to "mu".
-        egap (float): The band gap in eV of the most recent JDFTx call. (Only available if eigstats was dumped).
-        emin (float): The minimum energy in eV (smallest Kohn-Sham eigenvalue) of the most recent JDFTx call. (Only
-            available if eigstats was dumped).
-        emax (float): The maximum energy in eV (largest Kohn-Sham eigenvalue) of the most recent JDFTx call. (Only
-            available if eigstats was dumped).
-        homo (float): The energy in eV of the band-gap lower bound (Highest Occupied Molecular Orbital) (Only available
-            if eigstats was dumped).
-        lumo (float): The energy in eV of the band-gap upper bound (Lowest Unoccupied Molecular Orbital) (Only
-            available if eigstats was dumped).
-        homo_filling (float): The electron filling at the homo band-state. (Only available if eigstats was dumped).
-        lumo_filling (float): The electron filling at the lumo band-state. (Only available if eigstats was dumped).
-        is_metal (bool): True if fillings of homo and lumo band-states are off-set by 1 and 0 by at least an arbitrary
-            tolerance of 0.01 (ie 1 - 0.015 and 0.012 for homo/lumo fillings would be metallic, while 1-0.001 and 0
-            would not be). (Only available if eigstats was dumped).
-        converged (bool): True if most recent SCF cycle converged (and geom forces converged is calc is geom_opt)
+        efermi (float | None): The Fermi energy in eV of the most recent JDFTx call. Equivalent to "mu".
+        egap (float | None): The band gap in eV of the most recent JDFTx call. (Only available if eigstats was dumped,
+            and None if JDFTx reports it unavailable, e.g. when there are no empty bands).
+        emin (float | None): The minimum energy in eV (smallest Kohn-Sham eigenvalue) of the most recent JDFTx call.
+            (Only available if eigstats was dumped).
+        emax (float | None): The maximum energy in eV (largest Kohn-Sham eigenvalue) of the most recent JDFTx call.
+            (Only available if eigstats was dumped).
+        homo (float | None): The energy in eV of the band-gap lower bound (Highest Occupied Molecular Orbital) (Only
+            available if eigstats was dumped, and None if JDFTx reports it unavailable).
+        lumo (float | None): The energy in eV of the band-gap upper bound (Lowest Unoccupied Molecular Orbital) (Only
+            available if eigstats was dumped, and None if JDFTx reports it unavailable, e.g. when there are no empty
+            bands).
+        homo_filling (float | None): The electron filling at the homo band-state. (Only available if eigstats was
+            dumped, and None if an energy it needs is unavailable).
+        lumo_filling (float | None): The electron filling at the lumo band-state. (Only available if eigstats was
+            dumped, and None if an energy it needs is unavailable).
+        is_metal (bool | None): True if fillings of homo and lumo band-states are off-set by 1 and 0 by at least an
+            arbitrary tolerance of 0.01 (ie 1 - 0.015 and 0.012 for homo/lumo fillings would be metallic, while 1-0.001
+            and 0 would not be). (Only available if eigstats was dumped and both fillings are available).
+        converged (bool): True if most recent SCF cycle converged (and geom forces converged if calc is geom_opt)
         etype (str): String representation of total energy-type of system. Commonly "G" (grand-canonical potential) for
-            GC calculations, and "F" for canonical (fixed electron count) calculations.
+            GC calculations, "F" for canonical (fixed electron count) calculations with electronic smearing, and
+            "Etot" for those without.
         broadening_type (str): Type of broadening for electronic filling about Fermi-level requested. Either "Fermi",
             "Cold", "MP1", or "Gauss".
-        broadening (float): Magnitude of broadening for electronic filling.
+        broadening (float): Magnitude of broadening for electronic filling, in Hartrees (as given in elec-smearing).
         kgrid (list[int]): Shape of k-point grid used in calculation. (equivalent to k-point folding)
         truncation_type (str): Type of coulomb truncation used to prevent interaction between periodic images along
-            certain directions. "periodic" means no coulomb truncation was used.
+            certain directions ("slab", "wire", "spherical" or "box"). "periodic" means no coulomb truncation was used.
         truncation_radius (float | None): If spherical truncation_type, this is the radius of the coulomb truncation
-            sphere.
-        pwcut (float): The plane-wave cutoff energy in Hartrees used in the most recent JDFTx call.
-        rhocut (float): The density cutoff energy in Hartrees used in the most recent JDFTx call.
+            sphere in Angstroms.
+        pwcut (float): The plane-wave cutoff energy in eV used in the most recent JDFTx call.
+        rhocut (float): The density cutoff energy in eV used in the most recent JDFTx call.
         pp_type (str): The pseudopotential library used in the most recent JDFTx call. Currently only "GBRV" and "SG15"
             are supported by this output parser.
         total_electrons (float): The total number of electrons in the most recent JDFTx call (redundant to nelectrons).
@@ -538,31 +532,42 @@ class JDFTXOutfile:
         total_electrons_uncharged (int): The total number of electrons in the most recent JDFTx call, uncorrected for
             charge. (ie total_electrons + charge)
         semicore_electrons_uncharged (int): The number of semicore electrons in the most recent JDFTx call, uncorrected
-            for charge. (ie semicore_electrons + charge)
+            for charge. (the same as semicore_electrons, as the charge only changes the valence electrons)
         valence_electrons_uncharged (int): The number of valence electrons in the most recent JDFTx call, uncorrected
             for charge. (ie valence_electrons + charge)
         nbands (int): The number of bands used in the most recent JDFTx call.
         atom_elements (list[str]): The list of each ion's element symbol in the most recent JDFTx call.
         atom_elements_int (list[int]): The list of ion's atomic numbers in the most recent JDFTx call.
-        atom_types (list[str]): Non-repeating list of each ion's element symbol in the most recent JDFTx call.
-        spintype (str): The spin type used in the most recent JDFTx call. Options are "none", "collinear",
-        nspin (int): The number of spins used in the most recent JDFTx call.
+        atom_types (list[str]): Non-repeating list of the ions' species names in the most recent JDFTx call. These
+            are element symbols, unless a species is named after its pseudopotential file (e.g. Fe1 for Fe1.upf).
+        spintype (str): The spin type used in the most recent JDFTx call. Options are "no-spin", "z-spin",
+            "vector-spin" and "spin-orbit" (JDFTx's spintype options).
+        nspin (int): The number of spin channels of the states in the most recent JDFTx call (2 for z-spin, otherwise
+            1, as vector-spin and spin-orbit have a single set of spinor states).
         nat (int): The number of atoms in the most recent JDFTx call.
-        atom_coords_initial (list[list[float]]): The initial atomic coordinates of the most recent JDFTx call.
-        atom_coords_final (list[list[float]]): The final atomic coordinates of the most recent JDFTx call.
-        atom_coords (list[list[float]]): The atomic coordinates of the most recent JDFTx call.
+        atom_coords_initial (np.ndarray): The initial atomic coordinates of the most recent JDFTx call, as given in the
+            echoed input (in JDFTx units and the coordinate system of coords-type, unlike atom_coords).
+        atom_coords_final (np.ndarray): The final atomic coordinates of the most recent JDFTx call (Cartesian, in
+            Angstroms).
+        atom_coords (np.ndarray): The atomic coordinates of the most recent JDFTx call (Cartesian, in Angstroms).
         structure (Structure): The updated pymatgen Structure object of the most recent JDFTx call.
-        trajectory (Trajectory): The Trajectory object of the most recent JDFTx call.
+        trajectory (Trajectory): The Trajectory object of every JDFTx call in the out file, joined in order (a
+            property, built on first use).
         has_solvation (bool): True if the most recent JDFTx call included a solvation calculation.
         fluid (str): The fluid used in the most recent JDFTx call.
         is_gc (bool): True if the most recent slice is a grand canonical calculation.
         eopt_type (str): The type of energy iteration used in the most recent JDFTx call.
         elecmindata (JElSteps): The JElSteps object from the most recent JDFTx call. This object contains a series of
-            JElStep objects in its 'steps' attribute, each corresponding to a single energy iteration.
+            JElStep objects in its 'slices' attribute, each corresponding to a single energy iteration.
         stress (np.ndarray): The stress tensor of the most recent JDFTx call as a 3x3 numpy array. In units of
             eV/Angstrom^3.
         strain (np.ndarray): The strain tensor of the most recent JDFTx call as a 3x3 numpy array.
-        nstep (int): The number of geometric optimization steps in the most recent JDFTx call.
+        thermostat_velocity (np.ndarray | None): Nose-Hoover chain thermostat velocities of the most recent JDFTx call
+            (one per chain element, chainLengthT in ionic-dynamics), in JDFTx units (inverse Hartree atomic units of
+            time) so they can be written back unchanged as the thermostat-velocity tag of a restart input. None if not
+            printed.
+        nstep (int): The step number (counted from 0) of the final geometric optimization step in the most recent
+            JDFTx call.
         e (float): The final energy in eV of the most recent JDFTx call (equivalent to the call's etype).
         grad_k (float): The final norm of the preconditioned gradient for geometric optimization of the most recent
             JDFTx call (evaluated as dot(g, Kg), where g is the gradient and Kg is the preconditioned gradient).
@@ -574,7 +579,8 @@ class JDFTXOutfile:
         tot_magneticmoment (float | None): The total magnetic moment of the most recent JDFTx call.
         mu (float): The Fermi energy in eV of the most recent JDFTx call.
         elec_e (float): The final energy in eV of the most recent electronic optimization step.
-        elec_nstep (int): The number of electronic optimization steps in the most recent JDFTx call.
+        elec_nstep (int): The step number (counted from 0) of the final electronic optimization step in the most
+            recent JDFTx call.
         elec_grad_k (float): The final norm of the preconditioned gradient for electronic optimization of the most
             recent JDFTx call (evaluated as dot(g, Kg), where g is the gradient and Kg is the preconditioned gradient).
             (written as "|grad|_K" in JDFTx output).
@@ -582,23 +588,20 @@ class JDFTXOutfile:
         elec_linmin (float): The final normalized projection of the electronic step direction onto the gradient for the
             most recent JDFTx call.
         infile (JDFTXInfile): The JDFTXInfile object representing the input parameters of the JDFTXOutfile.
+        skim_levels (list[str] | None): The skim levels the out file was parsed with (see from_file).
 
     Magic Methods:
         __getitem__(key: str | int) -> Any: Decides behavior of how JDFTXOutfile objects are indexed. If the key is a
             string, it will return the value of the property with the same name. If the key is an integer, it will
             return the slice of the JDFTXOutfile object at that index.
         __len__() -> int: Returns the number of slices in the JDFTXOutfile object.
-        __getattr__(name: str) -> Any: Returns the value of the property with the same name as the input string.
         __str__() -> str: Returns a string representation of the JDFTXOutfile object.
     """
 
     slices: list[JDFTXOutfileSlice | None] = field(default_factory=list)
+    skim_levels: list[str] | None = None
     prefix: str = field(init=False)
     jstrucs: JOutStructures = field(init=False)
-    jsettings_fluid: JMinSettingsFluid = field(init=False)
-    jsettings_electronic: JMinSettingsElectronic = field(init=False)
-    jsettings_lattice: JMinSettingsLattice = field(init=False)
-    jsettings_ionic: JMinSettingsIonic = field(init=False)
     xc_func: str = field(init=False)
     lattice_initial: np.ndarray = field(init=False)
     lattice_final: np.ndarray = field(init=False)
@@ -609,15 +612,15 @@ class JDFTXOutfile:
     fftgrid: list[int] = field(init=False)
     geom_opt: bool = field(init=False)
     geom_opt_type: str = field(init=False)
-    efermi: float = field(init=False)
-    egap: float = field(init=False)
-    emin: float = field(init=False)
-    emax: float = field(init=False)
-    homo: float = field(init=False)
-    lumo: float = field(init=False)
-    homo_filling: float = field(init=False)
-    lumo_filling: float = field(init=False)
-    is_metal: bool = field(init=False)
+    efermi: float | None = field(init=False)
+    egap: float | None = field(init=False)
+    emin: float | None = field(init=False)
+    emax: float | None = field(init=False)
+    homo: float | None = field(init=False)
+    lumo: float | None = field(init=False)
+    homo_filling: float | None = field(init=False)
+    lumo_filling: float | None = field(init=False)
+    is_metal: bool | None = field(init=False)
     converged: bool = field(init=False)
     etype: str = field(init=False)
     broadening_type: str = field(init=False)
@@ -645,7 +648,7 @@ class JDFTXOutfile:
     atom_coords_final: list[list[float]] = field(init=False)
     atom_coords: list[list[float]] = field(init=False)
     structure: Structure = field(init=False)
-    trajectory: Trajectory = field(init=False)
+    _trajectory: Trajectory | None = None
     has_solvation: bool = field(init=False)
     fluid: str = field(init=False)
     is_gc: bool = field(init=False)
@@ -674,7 +677,11 @@ class JDFTXOutfile:
 
     @classmethod
     def from_calc_dir(
-        cls, calc_dir: str | Path, is_bgw: bool = False, none_slice_on_error: bool | None = None
+        cls,
+        calc_dir: str | Path,
+        is_bgw: bool = False,
+        none_slice_on_error: bool = True,
+        skim_levels: list[str] | None = None,
     ) -> JDFTXOutfile:
         """
         Create a JDFTXOutfile object from a directory containing JDFTx out files.
@@ -686,16 +693,30 @@ class JDFTXOutfile:
             none_slice_on_error (bool): If True, will return None if an error occurs while parsing a slice instead of
                 halting the parsing process. This can be useful for parsing files with multiple slices where some slices
                 may be incomplete or corrupted.
+            skim_levels (list[str] | None): A list of depth levels to "skim". This will parse the "slices" in reverse
+                order at the specified depth levels, and stop at the first successful parse. This is useful for quickly
+                parsing large out files where only the most recent data at certain depth levels is desired. Options are
+                - "outfile": Skim to most recent JDFTx call
+                - "geom": Skim to most recent geometric optimization step
+                - "elec": Skim to most recent electronic optimization step
 
         Returns:
             JDFTXOutfile: The JDFTXOutfile object.
         """
         file_path = _find_jdftx_out_file(Path(calc_dir))
-        return cls.from_file(file_path=file_path, is_bgw=is_bgw, none_slice_on_error=none_slice_on_error)
+        return cls.from_file(
+            file_path=file_path, is_bgw=is_bgw, none_slice_on_error=none_slice_on_error, skim_levels=skim_levels
+        )
 
     @classmethod
     def from_file(
-        cls, file_path: str | Path, is_bgw: bool = False, none_slice_on_error: bool | None = None
+        cls,
+        file_path: str | Path,
+        is_bgw: bool = False,
+        none_slice_on_error: bool = True,
+        pop_none_slices: bool = True,
+        skim_levels: list[str] | None = None,
+        skip_props: list[str] | None = None,
     ) -> JDFTXOutfile:
         """
         Create a JDFTXOutfile object from a JDFTx out file.
@@ -704,26 +725,73 @@ class JDFTXOutfile:
             file_path (str | Path): The path to the JDFTx out file.
             is_bgw (bool): Mark True if data must be usable for BGW calculations. This will change the behavior of the
                 parser to be stricter with certain criteria.
-            none_slice_on_error (bool | None): If True, will return None if an error occurs while parsing a slice
-                instead of halting the parsing process. This can be useful for parsing files with multiple slices where
-                some slices may be incomplete or corrupted. If False, all slices may raise errors. If None, only the
-                final slice can raise an error upon parsing (default behavior)
+            none_slice_on_error (bool): If True, a slice that fails to parse becomes None, with a warning, instead of
+                halting the parsing process. This can be useful for parsing files with multiple slices where some
+                slices may be incomplete or corrupted. If False, all slices may raise errors. A file in which no slice
+                parses raises a ValueError either way.
+            pop_none_slices (bool): If True, slices that could not be parsed (None, see none_slice_on_error) are left
+                out of the slices list.
+            skim_levels (list[str] | None): A list of depth levels to "skim". This will parse the "slices" in reverse
+                order at the specified depth levels, and stop at the first successful parse. This is useful for quickly
+                parsing large out files where only the most recent data at certain depth levels is desired. Options are
+                - "outfile": Skim to most recent JDFTx call
+                - "geom": Skim to most recent geometric optimization step
+                - "elec": Skim to most recent electronic optimization step
+            skip_props (list[str] | None): A list of properties to skip when parsing each slice. This can be useful for
+                speeding up the parsing process when certain properties are not needed. Options are:
+                - "struct": Skip parsing the lines for coordinates/lattice vectors.
+                    - This will still result in the same number of `JOutStructure`'s created, but each
+                        `JOutStructure` will have the same coordinates and lattice vectors as the
+                        input structure.
+                    - Forces printed in lattice coordinates (JDFTx's default) are then converted to Cartesian
+                        with the input lattice, so they are off in runs that change the lattice (lattice
+                        minimizations, NPT MD). Skip "forces" too, or don't skip "struct", for such runs.
+                - "forces": Skip parsing the lines for forces.
+                - "charges": Skip parsing the lines for Lowdin charges/magnetic moments.
+
 
         Returns:
             JDFTXOutfile: The JDFTXOutfile object.
-        """
-        texts = read_outfile_slices(str(file_path))
-        if none_slice_on_error is None:
-            none_slice_bools = [i != len(texts) - 1 for i in range(len(texts))]
-        else:
-            none_slice_bools = [none_slice_on_error for i in range(len(texts))]
-        slices = [
-            JDFTXOutfileSlice._from_out_slice(text, is_bgw=is_bgw, none_on_error=none_slice_bools[i])
-            for i, text in enumerate(texts)
-        ]
-        return cls(slices=slices)
 
-    # TODO: Write testing for this function
+        Raises:
+            ValueError: If no slice of the file can be parsed.
+        """
+        _skim_levels: list[str] = list(skim_levels) if skim_levels is not None else []
+        _skip_props: list[str] = list(skip_props) if skip_props is not None else []
+        _valid_skim_options = ["outfile", "geom", "elec"]
+        if any(level not in _valid_skim_options for level in _skim_levels):
+            raise ValueError(f"Invalid skim level(s) found in {skim_levels}. Valid options are: {_valid_skim_options}")
+        texts = read_outfile_slices(str(file_path))
+
+        if "outfile" in _skim_levels:
+            slices: list[JDFTXOutfileSlice | None] = []
+            oslice = None
+            for text in texts[::-1]:
+                oslice = JDFTXOutfileSlice._from_out_slice(
+                    text,
+                    is_bgw=is_bgw,
+                    none_on_error=none_slice_on_error,
+                    skim_levels=_skim_levels,
+                    skip_props=_skip_props,
+                )
+                if oslice is not None:
+                    slices.append(oslice)
+                    break
+            if oslice is None:
+                raise ValueError(f"No JDFTx out file slice in {file_path} could be parsed")
+            return cls(slices=slices, skim_levels=skim_levels)
+        slices = [
+            JDFTXOutfileSlice._from_out_slice(
+                text, is_bgw=is_bgw, none_on_error=none_slice_on_error, skim_levels=_skim_levels, skip_props=_skip_props
+            )
+            for text in texts
+        ]
+        if all(s is None for s in slices):
+            raise ValueError(f"No JDFTx out file slice in {file_path} could be parsed")
+        if pop_none_slices:
+            slices = [s for s in slices if s is not None]
+        return cls(slices=slices, skim_levels=skim_levels)
+
     def to_jdftxinfile(self) -> JDFTXInfile:
         """
         Convert the JDFTXOutfile object to a JDFTXInfile object with the most recent structure.
@@ -735,18 +803,30 @@ class JDFTXOutfile:
         return self.slices[-1].to_jdftxinfile()
 
     def __post_init__(self):
+        if not isinstance(self.slices, list):
+            raise TypeError(
+                "slices must be a list of JDFTXOutfileSlice objects.\n"
+                "hint: use JDFTXOutfile.from_file() or JDFTXOutfile.from_calc_dir()"
+                " to create a JDFTXOutfile object from a file."
+            )
         last_slice = None
         for slc in self.slices[::-1]:
             if slc is not None:
                 last_slice = slc
                 break
-        if last_slice is not None:
-            for var in _jof_atr_from_last_slice:
-                setattr(self, var, getattr(last_slice, var))
-            self.trajectory = self._get_trajectory()
+        # Without any slice the values are None, so that the fields exist (as_dict, repr)
+        for var in _jof_atr_from_last_slice:
+            setattr(self, var, None if last_slice is None else getattr(last_slice, var))
+
+    @property
+    def trajectory(self) -> Trajectory | None:
+        """Return the trajectory attribute of the JDFTXOutfile object."""
+        if self._trajectory is None:
+            self._trajectory = self._get_trajectory()
+        return self._trajectory
 
     def _get_trajectory(self) -> Trajectory | None:
-        """Set the trajectory attribute of the JDFTXOutfile object."""
+        """Return the trajectories of every slice of the JDFTXOutfile object, joined in order."""
         traj = None
         for outfile_slice in self.slices:
             if outfile_slice is not None:
@@ -766,6 +846,8 @@ class JDFTXOutfile:
         """
         dct = {}
         for fld in self.__dataclass_fields__:
+            if fld == "_trajectory":  # A cache the trajectory property fills on first read
+                continue
             if fld == "slices":
                 dct[fld] = [None if slc is None else slc.as_dict() for slc in self.slices]
                 continue
@@ -802,7 +884,7 @@ class JDFTXOutfile:
         """Return length of JDFTXOutfile object.
 
         Returns:
-            int: The number of geometric optimization steps in the JDFTXOutfile object.
+            int: The number of slices (JDFTx calls) in the JDFTXOutfile object.
         """
         return len(self.slices)
 
@@ -827,24 +909,29 @@ def _find_jdftx_out_file(calc_dir: Path) -> Path:
     """
     out_files = _find_jdftx_dump_file(calc_dir, "out")
     if len(out_files) > 1:
-        raise FileNotFoundError("Multiple JDFTx out files found in directory.")
+        raise FileNotFoundError(f"Multiple JDFTx out files found in directory {calc_dir}.")
     return out_files[0]
 
 
 def _find_jdftx_dump_file(calc_dir: Path, dump_fname: str) -> list[Path]:
     """
-    Find the JDFTx out file in a directory.
+    Find the JDFTx dump files of a given name in a directory.
 
     Args:
-        calc_dir (Path): The directory containing the JDFTx out file.
+        calc_dir (Path): The directory containing the JDFTx dump files.
+        dump_fname (str): The name of the dump variable, which is the file's name or suffix (e.g. "eigenvals", or
+            "out" for the out file).
 
     Returns:
-        Path: The path to the JDFTx out file.
+        list[Path]: The paths to the files named "<dump_fname>" or "*.<dump_fname>".
+
+    Raises:
+        FileNotFoundError: If there is no such file.
     """
     dump_files = list(calc_dir.glob(f"*.{dump_fname}")) + list(calc_dir.glob(f"{dump_fname}"))
     dump_files = [f for f in dump_files if f.is_file()]
     if len(dump_files) == 0:
-        raise FileNotFoundError(f"No JDFTx {dump_fname} file found in directory.")
+        raise FileNotFoundError(f"No JDFTx {dump_fname} file found in directory {calc_dir}.")
     return dump_files
 
 
@@ -854,9 +941,14 @@ def _disambiguate_paths(paths: list[Path], dump_fname: str, prefix: str | None) 
 
     Args:
         paths (list[Path]): The paths to disambiguate.
+        dump_fname (str): The name of the dump variable (e.g. "eigenvals").
+        prefix (str | None): The prefix of the calculation's dump files (from its dump-name).
 
     Returns:
         Path: The most relevant path.
+
+    Raises:
+        FileNotFoundError: If there are several paths and none is named after the prefix.
     """
     if len(paths) == 1:
         return paths[0]
