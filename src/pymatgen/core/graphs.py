@@ -25,7 +25,7 @@ from scipy.stats import describe
 
 from pymatgen.core import Lattice, Molecule, PeriodicSite, Structure
 from pymatgen.core.sites import _decode_properties
-from pymatgen.core.structure import FunctionalGroups
+from pymatgen.core.structure import FunctionalGroups, _site_indices
 from pymatgen.util.coord import lattice_points_in_supercell
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1428,7 +1428,10 @@ class StructureGraph(MSONable):
         # sort for consistent node indices
         # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
         try:
-            mapping = {tuple(site.frac_coords): self.structure.index(site) for site in other.structure}
+            mapping = {
+                tuple(site.frac_coords): idx
+                for site, idx in zip(other.structure, _site_indices(other.structure, self.structure), strict=True)
+            }
         except ValueError:  # a site of other is not in self.structure
             return False
         other_sorted = other.__copy__()
@@ -1473,7 +1476,10 @@ class StructureGraph(MSONable):
         if strict:
             # sort for consistent node indices
             # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
-            mapping = {tuple(site.frac_coords): self.structure.index(site) for site in other.structure}
+            mapping = {
+                tuple(site.frac_coords): idx
+                for site, idx in zip(other.structure, _site_indices(other.structure, self.structure), strict=True)
+            }
             other_sorted = copy.copy(other)
             other_sorted.sort(key=lambda site: mapping[tuple(site.frac_coords)])
 
@@ -2621,7 +2627,10 @@ class MoleculeGraph(MSONable):
         # sort for consistent node indices
         # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
         try:
-            mapping = {tuple(site.coords): self.molecule.index(site) for site in other.molecule}
+            mapping = {
+                tuple(site.coords): idx
+                for site, idx in zip(other.molecule, _site_indices(other.molecule, self.molecule), strict=True)
+            }
         except ValueError:
             return False
         other_sorted = other.__copy__()
@@ -2684,7 +2693,10 @@ class MoleculeGraph(MSONable):
 
         if strict:
             # sort for consistent node indices, using Cartesian coords as a convenient key
-            mapping = {tuple(site.coords): self.molecule.index(site) for site in other.molecule}
+            mapping = {
+                tuple(site.coords): idx
+                for site, idx in zip(other.molecule, _site_indices(other.molecule, self.molecule), strict=True)
+            }
             other_sorted = copy.copy(other)
             other_sorted.sort(key=lambda site: mapping[tuple(site.coords)])
 

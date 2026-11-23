@@ -1714,3 +1714,33 @@ def test_molecule_graph_draw_graph_to_file_diff(fake_graphviz, tmp_path):
     (graph,) = fake_graphviz["graphs"]
     assert graph.edges[0, 1, 0]["color_uv"] == "#000000"
     assert graph.edges[0, 2, 0]["color_uv"] == "#ff0000"
+
+
+@pytest.mark.parametrize("periodic", [True, False])
+def test_eq_and_diff_do_not_compare_every_pair_of_sites(periodic, monkeypatch):
+    n_sites = 200
+    if periodic:
+        struct = Structure(
+            Lattice.cubic(2 * n_sites), ["C"] * n_sites, [[idx / n_sites, 0, 0] for idx in range(n_sites)]
+        )
+        graph = StructureGraph.from_edges(
+            struct, {(idx, idx + 1, (0, 0, 0), (0, 0, 0)): None for idx in range(n_sites - 1)}
+        )
+    else:
+        mol = Molecule(["C"] * n_sites, [[1.5 * idx, 0, 0] for idx in range(n_sites)])
+        graph = MoleculeGraph.from_edges(mol, {(idx, idx + 1): None for idx in range(n_sites - 1)})
+    other = copy.deepcopy(graph)
+
+    site_cls = PeriodicSite if periodic else Site
+    site_eq = site_cls.__eq__
+    n_comparisons = 0
+
+    def counting_eq(self, other):
+        nonlocal n_comparisons
+        n_comparisons += 1
+        return site_eq(self, other)
+
+    monkeypatch.setattr(site_cls, "__eq__", counting_eq)
+    assert graph == other
+    assert graph.diff(other)["dist"] == 0
+    assert n_comparisons < 10 * n_sites
