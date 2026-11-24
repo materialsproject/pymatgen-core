@@ -96,7 +96,8 @@ def _candidate_matches(sites: Sequence[Site], others: Sequence[Site]) -> list[li
     can't be used to narrow them down.
 
     Site equality requires np.allclose Cartesian coords, so only the sites of ``others`` found within a
-    generous coordinate tolerance by a cKDTree can be equal.
+    generous coordinate tolerance by a cKDTree can be equal. Sites at (nearly) the same position are all
+    candidates for each other, so with many of them the search tends towards O(N^2) again.
     """
     try:
         coords = np.array([site.coords for site in sites], dtype=np.float64)
@@ -126,7 +127,7 @@ def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
     """Equivalent to ``all(site in others for site in sites)``, but in O(N log N) instead of O(N^2).
 
     Each site is only compared (with ==, as ``in`` does) against the sites of ``others`` that
-    _candidate_matches finds for it.
+    _candidate_matches finds for it (so it is O(N^2) again if most sites coincide).
 
     Args:
         sites: Sites that must all be present in others.
@@ -145,13 +146,14 @@ def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
 
 
 def _site_indices(sites: Sequence[Site], others: Sequence[Site]) -> list[int]:
-    """Equivalent to ``[others.index(site) for site in sites]``, but in O(N log N) instead of O(N^2).
+    """Equivalent to ``[others.index(site) for site in sites]``, but in O(N log N) instead of O(N^2)
+    (unless most sites coincide, see _candidate_matches).
 
     Raises:
         ValueError: If a site is not in others.
     """
-    candidates = _candidate_matches(sites, others)
-    if candidates is None:
+    # Brute force is faster for a few sites
+    if len(sites) <= 4 or (candidates := _candidate_matches(sites, others)) is None:
         return [others.index(site) for site in sites]
     indices = []
     for site, cand in zip(sites, candidates, strict=True):
