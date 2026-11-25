@@ -13,6 +13,7 @@ fluid_solvent_options = [
     "CCl4",
     "CH2Cl2",
     "CH3CN",
+    "CHCl3",
     "Chlorobenzene",
     "DMC",
     "DMF",
@@ -733,6 +734,7 @@ jdftxdumpvaroptions = [
     "FluidDensity",  # Fluid densities (NO,NH,nWater for explicit fluids, cavity function for PCMs)
     "Forces",  # Forces on the ions in the coordinate system selected by command forces-output-coords
     "Gvectors",  # List of G vectors in reciprocal lattice basis, for each k-point
+    "HC",  # Hamiltonian applied on wavefunctions for non self-consistent forces
     "IonicDensity",  # Nuclear charge density (with gaussians)
     "IonicPositions",  # Ionic positions in the same format (and coordinate system) as the input file
     "KEdensity",  # Kinetic energy density of the valence electrons
@@ -814,9 +816,10 @@ jdftxfluid_subtagdict = {
         },
     ),
     "Pvap": FloatTag(lb=0.0, lb_incl=False),
-    "quad_nAlpha": FloatTag(),
-    "quad_nBeta": FloatTag(),
-    "quad_nGamma": FloatTag(),
+    # Unsigned in JDFTx, which echoes them (only for ClassicalDFT) as 0 when unset; quad_nBeta 0 is refused as input
+    "quad_nAlpha": IntTag(lb=0),
+    "quad_nBeta": IntTag(lb=0, lb_incl=False),
+    "quad_nGamma": IntTag(lb=0),
     "representation": TagContainer(subtags={"MuEps": FloatTag(), "Pomega": FloatTag(), "PsiAlpha": FloatTag()}),
     "Res": FloatTag(lb=0.0, lb_incl=False),
     "Rvdw": FloatTag(lb=0.0, lb_incl=False),

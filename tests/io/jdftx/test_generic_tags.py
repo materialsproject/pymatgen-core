@@ -105,6 +105,8 @@ def test_str_tag():
         ValueError, match=re.escape(f"The string value '{value}' must be one of {str_tag.options} for tag '{tag}'")
     ):
         str_tag.read(tag, value)
+    # Options match ignoring case, as in JDFTx, and read as the option's own spelling
+    assert StrTag(options=["Ken"]).read(tag, "kEN") == "Ken"
     # If both the tagname and value are written, two tokens are to be written
     str_tag = StrTag(write_tagname=True, write_value=True)
     assert str_tag.get_token_len() == 2
@@ -151,6 +153,36 @@ def test_float_tag():
     value = "1.2.3"  # (1.2.3 cannot be a float)
     with pytest.raises(ValueError, match=f"Could not set value '{value}' to a float for tag '{tag}'!"):
         float_tag.read("barbie", "1.2.3")
+    # A bare tag is only valid if it has a value to read it as
+    with pytest.raises(ValueError, match="Could not set value '' to a float for tag 'barbie'!"):
+        float_tag.read("barbie", "")
+    assert FloatTag(value_if_bare=0.0).read("barbie", "") == 0.0
+    assert FloatTag(value_if_bare=0.0).read("barbie", "1.5") == 1.5
+
+
+def test_multiformat_tag_validate_value_bounds():
+    """Bounds are checked with the format option the value matches."""
+    tag = MultiformatTag(format_options=[StrTag(options=["D3"]), FloatTag(lb=0.0)])
+    assert tag.validate_value_bounds("barbie", 0.5) == (True, "")
+    assert tag.validate_value_bounds("barbie", "D3") == (True, "")
+    is_valid, err = tag.validate_value_bounds("barbie", -0.5)
+    assert not is_valid
+    assert "not within bounds" in err
+    # A nan is an unset value, not an out-of-bounds one
+    assert tag.validate_value_bounds("barbie", float("nan")) == (True, "")
+    # Each entry of a repeated tag is checked with its own format option
+    tag = MultiformatTag(
+        can_repeat=True,
+        format_options=[
+            TagContainer(can_repeat=True, subtags={"a": FloatTag(write_tagname=False, lb=0.0)}),
+            TagContainer(can_repeat=True, subtags={"b": IntTag(write_tagname=False, ub=1)}),
+        ],
+    )
+    assert tag.validate_value_bounds("barbie", [{"a": 1.0}, {"b": 0}]) == (True, "")
+    with pytest.warns(UserWarning, match="Invalid value"):
+        is_valid, err = tag.validate_value_bounds("barbie", [{"a": 1.0}, {"b": 2}])
+    assert not is_valid
+    assert "'b'" in err
 
 
 def test_initmagmomtag():

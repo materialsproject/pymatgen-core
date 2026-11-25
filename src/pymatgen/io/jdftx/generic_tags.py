@@ -421,11 +421,14 @@ class StrTag(AbstractTag):
             value (str): The value string to read.
 
         Returns:
-            str: The parsed string value.
+            str: The parsed string value (corrected for case-sensitivity if StrTag's `options` is not None).
         """
         self._single_value_read_validate(tag, value)
-        if self.options is None or value in self.options:
-            return value
+        compare_value = value.strip().lower()
+        compare_options = [x.strip().lower() for x in self.options] if self.options is not None else None
+        if compare_options is None or compare_value in compare_options:
+            # JDFTx matches options ignoring case: store its spelling, which code comparing values relies on
+            return value if compare_options is None else self.options[compare_options.index(compare_value)]
         raise ValueError(f"The string value '{value}' must be one of {self.options} for tag '{tag}'")
 
     def write(self, tag: str, value: Any) -> str:
@@ -501,6 +504,9 @@ class AbstractNumericTag(AbstractTag):
         tag: str,
         value: Any,
     ) -> tuple[bool, str]:
+        # A nan marks an unset value (which JDFTx out files can dump), to be stripped before writing
+        if isinstance(value, float | np.floating) and np.isnan(value):
+            return True, ""
         if not self.val_is_within_bounds(value):
             return False, self.get_invalid_value_error_str(tag, value)
         return True, ""
@@ -587,9 +593,15 @@ class FloatTag(AbstractNumericTag):
     """Tag for float values in JDFTx input files.
 
     Tag for float values in JDFTx input files.
+
+    Attributes:
+        prec (int | None): Number of decimals to write the value with.
+        value_if_bare (float | None): Value read when the tag is given without a value, for tags whose value is an
+            optional argument that JDFTx defaults when omitted. A bare tag is not valid if this is None.
     """
 
     prec: int | None = None
+    value_if_bare: float | None = None
 
     def validate_value_type(self, tag: str, value: Any, try_auto_type_fix: bool = False) -> tuple[str, bool, Any]:
         """Validate the type of the value for this tag.
@@ -616,6 +628,8 @@ class FloatTag(AbstractNumericTag):
             float: The parsed float value.
         """
         self._single_value_read_validate(tag, value)
+        if self.value_if_bare is not None and not value.strip():
+            return self.value_if_bare
         try:
             value_float = float(value)
         except (ValueError, TypeError) as err:
@@ -1168,6 +1182,26 @@ class MultiformatTag(AbstractTag):
         format_index, value = self._determine_format_option(tag, value, try_auto_type_fix=try_auto_type_fix)
         is_valid = format_index is not None
         return tag, is_valid, value
+
+    def validate_value_bounds(self, tag: str, value: Any) -> tuple[bool, str]:
+        """Validate the bounds of the value with the format option it matches.
+
+        Args:
+            tag (str): The tag to validate the bounds of the value for.
+            value (Any): The value to validate the bounds of.
+
+        Returns:
+            tuple[bool, str]: Whether the value is within bounds, and the error string if it is not.
+        """
+        if self.can_repeat and isinstance(value, list) and all(option.can_repeat for option in self.format_options):
+            # Entries of a repeated tag can each use a different format (e.g. ion tags with different constraints)
+            results = [self._validate_format_option_bounds(tag, [entry]) for entry in value]
+            return all(is_valid for is_valid, _ in results), "\n".join(err for is_valid, err in results if not is_valid)
+        return self._validate_format_option_bounds(tag, value)
+
+    def _validate_format_option_bounds(self, tag: str, value: Any) -> tuple[bool, str]:
+        format_index, value = self._determine_format_option(tag, value)
+        return self.format_options[format_index].validate_value_bounds(tag, value)
 
     def read(self, tag: str, value: str) -> None:
         """Read the value string for this tag.
