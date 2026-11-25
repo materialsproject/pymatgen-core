@@ -1,0 +1,806 @@
+
+*************** JDFTx 1.7.0 (git hash 965f8c0b) ***************
+
+Start date and time: Wed Sep  3 14:59:23 2025
+Executable /nopt/nrel/apps/gpu_stack/software/jdftx/builds/JDFTx-1.7.0-gpu/jdftx/build/jdftx_gpu with command-line: -i in
+Running on hosts (process indices):  x3113c0s25b0n0 (0)
+Divided in process groups (process indices):  0 (0)
+gpuInit: Found compatible cuda device 0 'NVIDIA H100 80GB HBM3'
+gpuInit: Selected device 0
+Resource initialization completed at t[s]:      2.88
+Run totals: 1 processes, 1 threads, 1 GPUs
+Memory pool size: 70000 MB (per process)
+
+
+Input parsed successfully to the following command list (including defaults):
+
+basis kpoint-dependent
+coords-type Lattice
+core-overlap-check none
+coulomb-interaction Periodic
+davidson-band-ratio 1.1
+dump End IonicPositions Lattice ElecDensity BandEigs EigStats Ecomponents
+dump Ionic State IonicPositions Lattice EigStats Ecomponents
+dump 
+dump 
+dump 
+dump 
+dump 
+dump 
+dump 
+dump 
+dump 
+dump-name jdftx.$VAR
+elec-cutoff 30
+elec-eigen-algo Davidson
+elec-ex-corr mgga-x-r2scan mgga-c-r2scan
+elec-initial-magnetization 2.000000 no
+elec-smearing Gauss 0.000918733
+electronic-minimize  \
+	dirUpdateScheme      FletcherReeves \
+	linminMethod         DirUpdateRecommended \
+	nIterations          500 \
+	history              15 \
+	knormThreshold       0 \
+	maxThreshold         no \
+	energyDiffThreshold  1e-06 \
+	nEnergyDiff          2 \
+	convergeAll          no \
+	alphaTstart          1 \
+	alphaTmin            1e-10 \
+	updateTestStepSize   yes \
+	alphaTreduceFactor   0.1 \
+	alphaTincreaseFactor 3 \
+	nAlphaAdjustMax      3 \
+	wolfeEnergy          0.0001 \
+	wolfeGradient        0.9 \
+	abortOnFailedStep    no \
+	fdTest               no
+exchange-regularization WignerSeitzTruncated
+fluid None
+fluid-ex-corr lda-TF lda-PZ
+fluid-gummel-loop 10 1.000000e-05
+fluid-minimize  \
+	dirUpdateScheme      PolakRibiere \
+	linminMethod         DirUpdateRecommended \
+	nIterations          100 \
+	history              15 \
+	knormThreshold       0 \
+	maxThreshold         no \
+	energyDiffThreshold  0 \
+	nEnergyDiff          2 \
+	convergeAll          no \
+	alphaTstart          1 \
+	alphaTmin            1e-10 \
+	updateTestStepSize   yes \
+	alphaTreduceFactor   0.1 \
+	alphaTincreaseFactor 3 \
+	nAlphaAdjustMax      3 \
+	wolfeEnergy          0.0001 \
+	wolfeGradient        0.9 \
+	abortOnFailedStep    no \
+	fdTest               no
+fluid-solvent H2O 55.338 ScalarEOS \
+	epsBulk 78.4 \
+	pMol 0.92466 \
+	epsInf 1.77 \
+	Pvap 1.06736e-10 \
+	sigmaBulk 4.62e-05 \
+	Rvdw 2.61727 \
+	Res 1.42 \
+	tauNuc 343133 \
+	poleEl 15 7 1
+forces-output-coords Positions
+ion H   0.459072825017723   0.883719798490106   0.958578578141066 1
+ion H   0.447627017315902   0.628508110627333   0.172519000067878 1
+ion H   0.562400228071372   0.878804448660668   0.358898118086325 1
+ion H   0.511524457993079   0.249255121120355   0.385248886933205 1
+ion H   0.587350055558275   0.287588202470899   0.149584698937395 1
+ion H   0.132355880122001   0.541772464170848   0.793516352307493 1
+ion-species SG15/$ID_ONCV_PBE.upf
+ion-width 0
+ionic-minimize  \
+	dirUpdateScheme      L-BFGS \
+	linminMethod         DirUpdateRecommended \
+	nIterations          1000 \
+	history              15 \
+	knormThreshold       0.0001 \
+	maxThreshold         no \
+	energyDiffThreshold  1e-05 \
+	nEnergyDiff          2 \
+	convergeAll          no \
+	alphaTstart          1 \
+	alphaTmin            1e-10 \
+	updateTestStepSize   yes \
+	alphaTreduceFactor   0.1 \
+	alphaTincreaseFactor 3 \
+	nAlphaAdjustMax      3 \
+	wolfeEnergy          0.0001 \
+	wolfeGradient        0.9 \
+	abortOnFailedStep    no \
+	fdTest               no
+kpoint   0.000000000000   0.000000000000   0.000000000000  1.00000000000000
+kpoint-folding 1 1 1 
+latt-move-scale 1 1 1
+latt-scale 1 1 1 
+lattice  \
+	  15.860399208264200    0.000000000000000    0.000000000000000  \
+	   0.000000000000000   12.988960329869887    0.000000000000000  \
+	   0.000000000000000    0.000000000000000   18.178356634733454 
+lattice-minimize  \
+	dirUpdateScheme      L-BFGS \
+	linminMethod         DirUpdateRecommended \
+	nIterations          0 \
+	history              15 \
+	knormThreshold       0 \
+	maxThreshold         no \
+	energyDiffThreshold  1e-06 \
+	nEnergyDiff          2 \
+	convergeAll          no \
+	alphaTstart          1 \
+	alphaTmin            1e-10 \
+	updateTestStepSize   yes \
+	alphaTreduceFactor   0.1 \
+	alphaTincreaseFactor 3 \
+	nAlphaAdjustMax      3 \
+	wolfeEnergy          0.0001 \
+	wolfeGradient        0.9 \
+	abortOnFailedStep    no \
+	fdTest               no
+lcao-params 100 1e-06 0.000918733
+pcm-variant GLSSA13
+perturb-minimize  \
+	nIterations            0 \
+	algorithm              MINRES \
+	residualTol            0.0001 \
+	residualDiffThreshold  0.0001 \
+	CGBypass               no \
+	recomputeResidual      no
+spintype z-spin
+subspace-rotation-factor 1 yes
+symmetries manual
+symmetry-matrix  \
+	1 0 0  \
+	0 1 0  \
+	0 0 1  \
+	0 0 0 
+symmetry-threshold 0.0001
+
+
+
+---------- Setting up symmetries ----------
+Checking manually specified symmetry matrices.
+Applied RMS atom displacement 0 bohrs to make symmetries exact.
+
+---------- Initializing the Grid ----------
+R = 
+[      15.8604            0            0  ]
+[            0       12.989            0  ]
+[            0            0      18.1784  ]
+unit cell volume = 3744.92
+G =
+[   0.396156          0          0  ]
+[          0   0.483733          0  ]
+[          0          0   0.345641  ]
+Minimum fftbox size, Smin = [  80  68  92  ]
+Chosen fftbox size, S = [  80  70  96  ]
+
+---------- Exchange Correlation functional ----------
+Initialized LibXC exchange functional 'Re-regularized SCAN exchange by Furness et al'
+Initialized LibXC correlation functional 'Re-regularized SCAN correlation by Furness et al'
+
+---------- Setting up pseudopotentials ----------
+Width of ionic core gaussian charges (only for fluid interactions / plotting) set to 0
+
+Reading pseudopotential file '/nopt/nrel/apps/gpu_stack/software/jdftx/builds/JDFTx-1.7.0-gpu/jdftx/build/pseudopotentials/SG15/H_ONCV_PBE.upf':
+  'H' pseudopotential, 'PBE' functional
+  Generated using ONCVPSP code by D. R. Hamann
+  Author: Martin Schlipf and Francois Gygi  Date: 150915.
+  1 valence electrons, 1 orbitals, 2 projectors, 1166 radial grid points, with lMax = 0
+  Transforming local potential to a uniform radial grid of dG=0.02 with 1431 points.
+  Transforming nonlocal projectors to a uniform radial grid of dG=0.02 with 528 points.
+    1S    l: 0   occupation:  1.0   eigenvalue: -0.238602
+  Transforming atomic orbitals to a uniform radial grid of dG=0.02 with 528 points.
+  Core radius for overlap checks: 1.01 bohrs.
+  Reading pulay file /nopt/nrel/apps/gpu_stack/software/jdftx/builds/JDFTx-1.7.0-gpu/jdftx/build/pseudopotentials/SG15/H_ONCV_PBE.pulay ... using dE_dnG = -8.245991e-05 computed for Ecut = 30.
+
+Initialized 1 species with 6 total atoms.
+
+Folded 1 k-points by 1x1x1 to 1 k-points.
+
+---------- Setting up k-points, bands, fillings ----------
+No reducable k-points. 
+Computing the number of bands and number of electrons
+Calculating initial fillings.
+nElectrons:   6.000000   nBands: 6   nStates: 2
+
+----- Setting up reduced wavefunction bases (one per k-point) -----
+average nbasis = 29403.000 , ideal nbasis = 29391.314
+
+---------- Setting up ewald sum ----------
+Optimum gaussian width for ewald sums = 4.595851 bohr.
+Real space sum over 891 unit cells with max indices [  4  5  4  ]
+Reciprocal space sum over 2925 terms with max indices [  7  6  7  ]
+
+---------- Allocating electronic variables ----------
+Initializing wave functions:  linear combination of atomic orbitals
+Initializing semi-local functional for LCAO:
+Initalized PBE GGA exchange.
+Initalized PBE GGA correlation.
+H pseudo-atom occupations:   s ( 1 )
+	FillingsUpdate:  mu: -0.139377942  nElectrons: 6.000000  magneticMoment: [ Abs: 2.66898  Tot: +2.00000 ]
+LCAOMinimize: Iter:   0  F: -2.7050817503775635  |grad|_K:  9.795e-02  alpha:  1.000e+00
+LCAOMinimize: 	Step increased F by 4.816233e-02, reducing alpha to 4.684345e-02.
+	FillingsUpdate:  mu: -0.138905827  nElectrons: 6.000000  magneticMoment: [ Abs: 2.71898  Tot: +2.00000 ]
+LCAOMinimize: Iter:   1  F: -2.7679762144136424  |grad|_K:  1.271e-01  alpha:  4.684e-02  linmin: -5.463e-01  cgtest:  6.447e-01  t[s]:     17.82
+LCAOMinimize: 	Wrong curvature in test step, increasing alphaT to 1.405304e-01.
+	FillingsUpdate:  mu: -0.222261210  nElectrons: 6.000000  magneticMoment: [ Abs: 2.75589  Tot: +2.00000 ]
+LCAOMinimize: Iter:   2  F: -2.9282459764190119  |grad|_K:  2.307e-02  alpha: -2.866e-01  linmin:  4.536e-01  cgtest: -1.675e-01  t[s]:     17.82
+	FillingsUpdate:  mu: -0.207291537  nElectrons: 6.000000  magneticMoment: [ Abs: 2.80018  Tot: +2.00000 ]
+LCAOMinimize: Iter:   3  F: -2.9283709163787202  |grad|_K:  3.598e-02  alpha:  7.480e-02  linmin:  4.502e-02  cgtest:  8.883e-01  t[s]:     17.83
+	FillingsUpdate:  mu: -0.229334146  nElectrons: 6.000000  magneticMoment: [ Abs: 3.03835  Tot: +2.00000 ]
+LCAOMinimize: Iter:   4  F: -2.9368371236358914  |grad|_K:  1.861e-02  alpha:  1.456e-01  linmin: -4.864e-02  cgtest: -5.815e-02  t[s]:     17.84
+LCAOMinimize: 	Predicted alpha/alphaT>3.000000, increasing alphaT to 4.368812e-01.
+	FillingsUpdate:  mu: -0.221291811  nElectrons: 6.000000  magneticMoment: [ Abs: 3.72557  Tot: +2.00000 ]
+LCAOMinimize: Iter:   5  F: -2.9506924318428678  |grad|_K:  1.713e-02  alpha:  6.382e-01  linmin: -5.244e-02  cgtest:  6.999e-01  t[s]:     17.85
+	FillingsUpdate:  mu: -0.213722999  nElectrons: 6.000000  magneticMoment: [ Abs: 4.23797  Tot: +2.00000 ]
+LCAOMinimize: Iter:   6  F: -2.9556211073058098  |grad|_K:  4.725e-02  alpha:  4.217e-01  linmin: -1.319e-03  cgtest: -7.083e-02  t[s]:     17.85
+	FillingsUpdate:  mu: -0.114982409  nElectrons: 6.000000  magneticMoment: [ Abs: 5.42981  Tot: +2.00000 ]
+LCAOMinimize: Iter:   7  F: -2.9954855906226334  |grad|_K:  1.331e-02  alpha:  3.707e-01  linmin: -3.000e-02  cgtest:  2.673e+00  t[s]:     17.86
+LCAOMinimize: Encountered beta<0, resetting CG.
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49077  Tot: +2.00000 ]
+LCAOMinimize: Iter:   8  F: -2.9993666597052666  |grad|_K:  5.688e-03  alpha:  4.238e-01  linmin: -1.024e-01  cgtest:  1.542e+00  t[s]:     17.87
+LCAOMinimize: Encountered beta<0, resetting CG.
+	FillingsUpdate:  mu: -0.081783251  nElectrons: 6.000000  magneticMoment: [ Abs: 5.50599  Tot: +2.00000 ]
+LCAOMinimize: Iter:   9  F: -3.0007888555747946  |grad|_K:  2.040e-03  alpha:  7.797e-01  linmin: -7.361e-02  cgtest:  1.251e+00  t[s]:     17.88
+LCAOMinimize: Encountered beta<0, resetting CG.
+	FillingsUpdate:  mu: -0.076518511  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49817  Tot: +2.00000 ]
+LCAOMinimize: Iter:  10  F: -3.0010651946816922  |grad|_K:  2.487e-04  alpha:  1.304e+00  linmin: -2.774e-02  cgtest:  6.722e-01  t[s]:     17.89
+LCAOMinimize: Encountered beta<0, resetting CG.
+	FillingsUpdate:  mu: -0.078198013  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49686  Tot: +2.00000 ]
+LCAOMinimize: Iter:  11  F: -3.0010689546239941  |grad|_K:  5.764e-05  alpha:  1.238e+00  linmin:  4.336e-03  cgtest: -6.087e-02  t[s]:     17.90
+	FillingsUpdate:  mu: -0.078479669  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49644  Tot: +2.00000 ]
+LCAOMinimize: Iter:  12  F: -3.0010691316960374  |grad|_K:  6.758e-06  alpha:  1.109e+00  linmin:  2.845e-04  cgtest:  1.740e-01  t[s]:     17.90
+LCAOMinimize: Encountered beta<0, resetting CG.
+	FillingsUpdate:  mu: -0.078459289  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49640  Tot: +2.00000 ]
+LCAOMinimize: Iter:  13  F: -3.0010691342523423  |grad|_K:  8.492e-07  alpha:  1.142e+00  linmin:  2.775e-05  cgtest: -3.232e-03  t[s]:     17.91
+LCAOMinimize: Converged (|Delta F|<1.000000e-06 for 2 iters).
+
+
+---- Citations for features of the code used in this run ----
+
+   Software package:
+      R. Sundararaman, K. Letchworth-Weaver, K.A. Schwarz, D. Gunceler, Y. Ozhabes and T.A. Arias, 'JDFTx: software for joint density-functional theory', SoftwareX 6, 278 (2017)
+
+   LibXC library of exchange-correlation functions:
+      M. A. L. Marques, M. J. T. Oliveira and T. Burnus, Comput. Phys. Commun. 183, 2272 (2012)
+
+   Re-regularized SCAN exchange by Furness et al exchange functional:
+   Re-regularized SCAN correlation by Furness et al correlation functional:
+      J. W. Furness, A. D. Kaplan, J. Ning, J. P. Perdew, and J. Sun.,  J. Phys. Chem. Lett. 11, 8208-8215 (2020)
+
+   Pseudopotentials:
+      M Schlipf and F Gygi, Comput. Phys. Commun. 196, 36 (2015)
+
+   gga-PBE exchange-correlation functional:
+      J.P. Perdew, K. Burke and M. Ernzerhof, Phys. Rev. Lett. 77, 3865 (1996)
+
+   Total energy minimization with Auxiliary Hamiltonian:
+      C. Freysoldt, S. Boeck, and J. Neugebauer, Phys. Rev. B 79, 241103(R) (2009)
+
+This list may not be complete. Please suggest additional citations or
+report any other bugs at https://github.com/shankar1729/jdftx/issues
+
+Initialization completed successfully at t[s]:     17.91
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.087841331  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49640  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.010295937505232  |grad|_K:  1.102e-04  alpha:  1.000e+00
+	FillingsUpdate:  mu: -0.099399028  nElectrons: 6.000000  magneticMoment: [ Abs: 5.43900  Tot: +2.00000 ]
+	SubspaceRotationAdjust: set factor to -nan
+ElecMinimize: Iter:   1  F: -3.018425965201787  |grad|_K:       -nan  alpha:  1.878e+00  linmin:       -nan  t[s]:    443.30
+ElecMinimize: |grad|_K=-nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+
+# Ionic positions in lattice coordinates:
+ion H   0.459072825017723   0.883719798490106   0.958578578141066 1
+ion H   0.447627017315902   0.628508110627333   0.172519000067878 1
+ion H   0.562400228071372   0.878804448660668   0.358898118086325 1
+ion H   0.511524457993079   0.249255121120355   0.385248886933205 1
+ion H   0.587350055558275   0.287588202470899   0.149584698937395 1
+ion H   0.132355880122001   0.541772464170848   0.793516352307493 1
+
+# Forces in Lattice coordinates:
+force H  -0.003620795451520  -0.030276380501677   0.040189619419379 1
+force H   0.037927823876851   0.022070507786086  -0.022920034798545 1
+force H  -0.025801133977912   0.021061789865823  -0.024284531373213 1
+force H   0.050108625730451  -0.040688063981002  -0.152057742970020 1
+force H  -0.053908660383106   0.025335769555804   0.156280041481983 1
+force H  -0.001366131006316  -0.000439291991192   0.000358956640504 1
+
+# Energy components:
+   Eewald =       -0.5678091178189232
+       EH =        1.3068504636087985
+     Eloc =       -4.5106880577315227
+      Enl =       -0.2150534807881388
+   Epulay =        0.0000015438787105
+      Exc =       -1.8045050408994292
+       KE =        2.7727777245487180
+-------------------------------------
+     Etot =       -3.0184259652017871
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304656 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282676 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.099399
+	LUMO: -0.088951 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.285065 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.193725
+	Optical gap  : +0.193725 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   0  F: -3.018425965201787  |grad|_K:  3.388e-03  t[s]:    443.66
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.000 +0.003 +0.002 +0.002 +0.003 +0.002
+# magnetic-moments H +0.978 -0.938 +0.951 -0.916 +0.923 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096808822  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45849  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.018719427350973  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 1  (E-E0)/|gdotd0|: -1.4201  gdotd/gdotd0: 0.910506 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096327450  nElectrons: 6.000000  magneticMoment: [ Abs: 5.46203  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.018778452832960  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+
+# Ionic positions in lattice coordinates:
+ion H   0.459052002676721   0.883498423049700   0.958732611852471 1
+ion H   0.447813294131423   0.628675773212026   0.172433571824207 1
+ion H   0.562268847799097   0.878964614531796   0.358807512425324 1
+ion H   0.511771450034050   0.248956366853599   0.384673461264320 1
+ion H   0.587078573277689   0.287780132228521   0.150179223723856 1
+ion H   0.132346296159372   0.541772835664568   0.793519253383183 1
+
+# Forces in Lattice coordinates:
+force H  -0.003188497636278  -0.026533056752362   0.034139445616700 1
+force H   0.032801883090570   0.017344950346967  -0.021476211287869 1
+force H  -0.022308293933831   0.019326882995086  -0.019835928143128 1
+force H   0.044627815184048  -0.033664766431010  -0.136696350271407 1
+force H  -0.048798367127403   0.022820738632445   0.142850276965000 1
+force H  -0.001294431889003  -0.000566126281774   0.000134187222045 1
+
+# Energy components:
+   Eewald =       -0.5658839531243698
+       EH =        1.3105186396034179
+     Eloc =       -4.5200691531463404
+      Enl =       -0.2155216693594706
+   Epulay =        0.0000015438787105
+      Exc =       -1.8085827426639680
+       KE =        2.7807588819790601
+-------------------------------------
+     Etot =       -3.0187784528329598
+       TS =        0.0000000000000000
+-------------------------------------
+        F =       -3.0187784528329598
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304738 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282807 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.096327
+	LUMO: -0.085879 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.284306 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.196927
+	Optical gap  : +0.196927 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   1  F: -3.018778452832960  |grad|_K:  3.037e-03  alpha:  1.254e+00  linmin: -9.996e-01  t[s]:    444.75
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.000 +0.003 +0.002 +0.002 +0.003 +0.002
+# magnetic-moments H +0.979 -0.940 +0.952 -0.917 +0.923 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096479955  nElectrons: 6.000000  magneticMoment: [ Abs: 5.46277  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.012591447631306  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.805167  (E-E0)/|gdotd0|: 2.87875  gdotd/gdotd0: -8.0791 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.102362706  nElectrons: 6.000000  magneticMoment: [ Abs: 5.44930  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.011568012802778  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.086851  (E-E0)/|gdotd0|: 3.35494  gdotd/gdotd0: -7.60624 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45566  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.011434721832267  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.000395506  (E-E0)/|gdotd0|: 3.41696  gdotd/gdotd0: -7.61006 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45815  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.011435920622910  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 7.63165e-09  (E-E0)/|gdotd0|: 3.4164  gdotd/gdotd0: -7.62911 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45879  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.011436026628726  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Undoing step.
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45896  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.011436033061044  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Step failed: resetting history.
+
+# Ionic positions in lattice coordinates:
+ion H   0.459052002676721   0.883498423049700   0.958732611852471 1
+ion H   0.447813294131423   0.628675773212026   0.172433571824207 1
+ion H   0.562268847799097   0.878964614531796   0.358807512425324 1
+ion H   0.511771450034050   0.248956366853599   0.384673461264320 1
+ion H   0.587078573277689   0.287780132228521   0.150179223723856 1
+ion H   0.132346296159372   0.541772835664568   0.793519253383183 1
+
+# Forces in Lattice coordinates:
+force H   0.011627579721655   0.174766033051164  -0.129958829801444 1
+force H  -0.177082898497040   0.043220505766149   0.218961196288431 1
+force H   0.099407406834096  -0.164421293056701   0.051875908393780 1
+force H  -0.311627097649597   0.078673768808829   1.028642839830369 1
+force H   0.366709472408248  -0.150771216633709  -1.183327225285885 1
+force H   0.004596990773899   0.026791518827684   0.021100416881337 1
+
+# Energy components:
+   Eewald =       -0.5658839531243700
+       EH =        1.2994521358031974
+     Eloc =       -4.5110316291992243
+      Enl =       -0.2161759022097388
+   Epulay =        0.0000015438787105
+      Exc =       -1.8075263620297293
+       KE =        2.7897281338201108
+-------------------------------------
+     Etot =       -3.0114360330610435
+       TS =        0.0000000000000008
+-------------------------------------
+        F =       -3.0114360330610443
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.305610 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282652 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.100000
+	LUMO: -0.090385 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.283813 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.192268
+	Optical gap  : +0.192268 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   2  F: -3.011436033061044  |grad|_K:  2.268e-02  alpha:  2.841e-18  t[s]:    447.87
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.001 +0.002 +0.002 +0.002 +0.005 +0.002
+# magnetic-moments H +0.979 -0.939 +0.952 -0.910 +0.916 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.100000000  nElectrons: 6.000000  magneticMoment: [ Abs: 5.45901  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016680853290572  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+
+# Ionic positions in lattice coordinates:
+ion H   0.459102445491147   0.884526141051865   0.958335657712315 1
+ion H   0.447113552964461   0.628923791625182   0.173092502774256 1
+ion H   0.562668243256801   0.877981893834738   0.358960817870704 1
+ion H   0.510536853018352   0.249414524639745   0.387782612067924 1
+ion H   0.588540579193903   0.286878318569480   0.146594616539679 1
+ion H   0.132368790153689   0.541923475819199   0.793579427508485 1
+
+# Forces in Lattice coordinates:
+force H  -0.000476729115817   0.025090678785241  -0.013560676290473 1
+force H  -0.028329036114942   0.002106665801178   0.043410797612776 1
+force H   0.018063494980922  -0.019997359663924  -0.000726038185453 1
+force H  -0.043767947839273   0.013787610834904   0.135214376627005 1
+force H   0.047382400211444  -0.021735397127267  -0.148661628005891 1
+force H  -0.000247426681700   0.005945101122365   0.005895225944824 1
+
+# Energy components:
+   Eewald =       -0.5751938919471626
+       EH =        1.2994541549443119
+     Eloc =       -4.5059726290776378
+      Enl =       -0.2171777203167369
+   Epulay =        0.0000015438787105
+      Exc =       -1.8075325146869794
+       KE =        2.7897402039149224
+-------------------------------------
+     Etot =       -3.0166808532905716
+       TS =        0.0000000000000007
+-------------------------------------
+        F =       -3.0166808532905720
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304585 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282713 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.100000
+	LUMO: -0.091500 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.283965 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.191213
+	Optical gap  : +0.191213 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   3  F: -3.016680853290572  |grad|_K:  2.977e-03  alpha:  1.000e+00  linmin: -9.951e-01  t[s]:    448.43
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.000 +0.003 +0.002 +0.001 +0.002 +0.002
+# magnetic-moments H +0.979 -0.940 +0.952 -0.922 +0.928 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.097835517  nElectrons: 6.000000  magneticMoment: [ Abs: 5.48421  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016640958517604  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 1  (E-E0)/|gdotd0|: 0.21677  gdotd/gdotd0: 1.08758 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096538168  nElectrons: 6.000000  magneticMoment: [ Abs: 5.48929  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016797900994951  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.159505  (E-E0)/|gdotd0|: -0.635983  gdotd/gdotd0: 1.18809 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096386940  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49024  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016796295764987  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.169862  (E-E0)/|gdotd0|: -0.627261  gdotd/gdotd0: 1.19118 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096340975  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49048  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016797905946833  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.160639  (E-E0)/|gdotd0|: -0.63601  gdotd/gdotd0: 1.19321 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096330169  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49055  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016798060355018  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+
+# Ionic positions in lattice coordinates:
+ion H   0.459102897404884   0.884552817403633   0.958326102821888 1
+ion H   0.447093282566921   0.628924458718246   0.173115615918925 1
+ion H   0.562683027258174   0.877959267607966   0.358957505100740 1
+ion H   0.510505521685848   0.249429075910264   0.387855688024336 1
+ion H   0.588576200429450   0.286853225239652   0.146510039094257 1
+ion H   0.132369534733075   0.541929300660448   0.793580683513217 1
+
+# Forces in Lattice coordinates:
+force H   0.000040979174269   0.026682283247090  -0.015852157914239 1
+force H  -0.028442594275569   0.005011243589427   0.045118684325636 1
+force H   0.017675625463661  -0.022846491352138  -0.001292217843475 1
+force H  -0.052173290581348   0.013944796073127   0.165623561772350 1
+force H   0.057110758062288  -0.023107047348576  -0.180041877199095 1
+force H  -0.000222677344406   0.005860599148291   0.005783247984378 1
+
+# Energy components:
+   Eewald =       -0.5754096409634862
+       EH =        1.3004925456489016
+     Eloc =       -4.5107657406839410
+      Enl =       -0.2177050955367225
+   Epulay =        0.0000015438787105
+      Exc =       -1.8118693499736984
+       KE =        2.7984576772752190
+-------------------------------------
+     Etot =       -3.0167980603550175
+       TS =        0.0000000000000000
+-------------------------------------
+        F =       -3.0167980603550175
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304440 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282627 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.096330
+	LUMO: -0.085882 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.284017 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.196745
+	Optical gap  : +0.196745 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   4  F: -3.016798060355018  |grad|_K:  3.560e-03  alpha:  1.598e-01  linmin: -9.976e-01  t[s]:    451.04
+IonicMinimize: 	Bad step direction: g.d > 0.
+IonicMinimize: 	Undoing step.
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.000 +0.003 +0.002 +0.001 +0.003 +0.002
+# magnetic-moments H +0.979 -0.940 +0.952 -0.925 +0.932 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096327321  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49056  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016798060409261  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Step failed: resetting history.
+
+# Ionic positions in lattice coordinates:
+ion H   0.459102897404884   0.884552817403633   0.958326102821888 1
+ion H   0.447093282566921   0.628924458718246   0.173115615918925 1
+ion H   0.562683027258174   0.877959267607966   0.358957505100740 1
+ion H   0.510505521685848   0.249429075910264   0.387855688024336 1
+ion H   0.588576200429450   0.286853225239652   0.146510039094257 1
+ion H   0.132369534733075   0.541929300660448   0.793580683513217 1
+
+# Forces in Lattice coordinates:
+force H   0.000041005511437   0.026682452288472  -0.015852637235769 1
+force H  -0.028444147559636   0.005012850542879   0.045118615753906 1
+force H   0.017676682545788  -0.022849984627482  -0.001291978610784 1
+force H  -0.052177161225228   0.013948172740627   0.165635440042291 1
+force H   0.057114633974271  -0.023107847627390  -0.180053698821801 1
+force H  -0.000222614588681   0.005860607488899   0.005783249108076 1
+
+# Energy components:
+   Eewald =       -0.5754096409634862
+       EH =        1.3004934808929103
+     Eloc =       -4.5107689777414812
+      Enl =       -0.2177053958543747
+   Epulay =        0.0000015438787105
+      Exc =       -1.8118718526066528
+       KE =        2.7984627819851138
+-------------------------------------
+     Etot =       -3.0167980604092612
+       TS =        0.0000000000000000
+-------------------------------------
+        F =       -3.0167980604092612
+
+
+Dumping 'jdftx.fillings' ... done
+Dumping 'jdftx.wfns' ... done
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304440 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282627 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.096327
+	LUMO: -0.085879 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.284018 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.196748
+	Optical gap  : +0.196748 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+IonicMinimize: Iter:   5  F: -3.016798060409261  |grad|_K:  3.560e-03  t[s]:    451.61
+
+#--- Lowdin population analysis ---
+# oxidation-state H +0.000 +0.003 +0.002 +0.001 +0.003 +0.002
+# magnetic-moments H +0.979 -0.940 +0.952 -0.925 +0.932 +0.998
+
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096408445  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49281  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016621669619249  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 1  (E-E0)/|gdotd0|: 0.773145  gdotd/gdotd0: 0.937992 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096107749  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49201  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016779010912552  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.106346  (E-E0)/|gdotd0|: 0.0834966  gdotd/gdotd0: 1.00136 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096237981  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49108  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016796068017294  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.0110811  (E-E0)/|gdotd0|: 0.00873293  gdotd/gdotd0: 1.00212 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096298446  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49073  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016797859555370  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Wolfe criterion not satisfied: alpha: 0.00115231  (E-E0)/|gdotd0|: 0.00088037  gdotd/gdotd0: 1.00078 (taking cubic step)
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096318059  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49062  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016798045330144  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Undoing step.
+
+-------- Electronic minimization -----------
+	FillingsUpdate:  mu: -0.096323850  nElectrons: 6.000000  magneticMoment: [ Abs: 5.49058  Tot: +2.00000 ]
+ElecMinimize: Iter:   0  F: -3.016798067160173  |grad|_K:        nan  alpha:  1.000e+00
+ElecMinimize: |grad|_K=nan. Stopping ...
+Setting wave functions to eigenvectors of Hamiltonian
+IonicMinimize: 	Step failed along negative gradient direction.
+IonicMinimize: Probably at roundoff error limit. (Stopping)
+
+Dumping 'jdftx.ionpos' ... done
+Dumping 'jdftx.lattice' ... done
+Dumping 'jdftx.n_up' ... done
+Dumping 'jdftx.n_dn' ... done
+Dumping 'jdftx.tau_up' ... done
+Dumping 'jdftx.tau_dn' ... done
+Dumping 'jdftx.eigenvals' ... done
+Dumping 'jdftx.eigStats' ... 
+	eMin: -0.304440 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	HOMO: -0.282628 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	mu  : -0.096324
+	LUMO: -0.085876 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+	eMax: +0.284018 at state 1 ( [ +0.000000 +0.000000 +0.000000 ] spin -1 )
+	HOMO-LUMO gap: +0.196752
+	Optical gap  : +0.196752 at state 0 ( [ +0.000000 +0.000000 +0.000000 ] spin 1 )
+Dumping 'jdftx.Ecomponents' ... done
+End date and time: Wed Sep  3 15:06:57 2025  (Duration: 0-0:07:34.71)
+Done!
+
+PROFILER:        ColumnBundle::randomize     0.002203 +/-     0.000054 s,    2 calls,      0.004405 s total
+PROFILER:                     diagouterI     0.000238 +/-     0.000093 s,  252 calls,      0.059878 s total
+PROFILER:              EdensityAndVscloc     1.631987 +/-    10.457694 s,   55 calls,     89.759295 s total
+PROFILER:                     EnlAndGrad     0.018116 +/-     0.117670 s,   94 calls,      1.702859 s total
+PROFILER:            ExCorrCommunication     0.000232 +/-     0.002347 s,  330 calls,      0.076603 s total
+PROFILER:               ExCorrFunctional     1.111715 +/-     8.585834 s,   79 calls,     87.825516 s total
+PROFILER:                    ExCorrTotal     1.630099 +/-    10.447853 s,   55 calls,     89.655470 s total
+PROFILER:                   Idag_DiagV_I     0.008662 +/-     0.042459 s,  218 calls,      1.888345 s total
+PROFILER:                    inv(matrix)     0.001244 +/-     0.005712 s,   40 calls,      0.049744 s total
+PROFILER:            matrix::diagonalize     2.248005 +/-    19.523963 s,  152 calls,    341.696797 s total
+PROFILER:                    matrix::set     0.000223 +/-     0.001462 s,  568 calls,      0.126702 s total
+PROFILER:            orthoMatrix(matrix)     0.002456 +/-     0.015589 s,   48 calls,      0.117866 s total
+PROFILER:     RadialFunctionR::transform     0.016389 +/-     0.009550 s,    6 calls,      0.098337 s total
+PROFILER:                    reduceKmesh     0.000007 +/-     0.000000 s,    1 calls,      0.000007 s total
+PROFILER:               WavefunctionDrag     0.002153 +/-     0.004494 s,   22 calls,      0.047356 s total
+PROFILER:                            Y*M     0.000140 +/-     0.001180 s,  369 calls,      0.051564 s total
+PROFILER:                          Y1^Y2     0.000297 +/-     0.003337 s,  444 calls,      0.131710 s total
+
+MEMUSAGE:                   ColumnBundle     0.028917 GB
+MEMUSAGE:        complexScalarFieldTilde     0.008011 GB
+MEMUSAGE:                    IndexArrays     0.000876 GB
+MEMUSAGE:                         matrix     0.000017 GB
+MEMUSAGE:                           misc     0.112152 GB
+MEMUSAGE:                    ScalarField     0.120163 GB
+MEMUSAGE:               ScalarFieldTilde     0.036800 GB
+MEMUSAGE:                          Total     0.270674 GB
