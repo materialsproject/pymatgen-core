@@ -1,0 +1,48 @@
+coords-type Lattice 
+lattice \
+    23.329800006521 -11.664930002663 0.000002135391 \
+    0.000000000000 20.204282000370 -0.000004270781 \
+    0.000000000000 0.000000000000 30.231655258838 
+ion O 0.491484521224 0.443837974048 0.684914964167 1 
+ion H 0.505686908044 0.374214287136 0.682642704484 1 
+ion H 0.570287021706 0.520355051712 0.687555534622 1 
+ion O 0.352822619884 0.450955779161 0.574139879458 1 
+ion H 0.430583127062 0.450955779161 0.574139879458 1 
+ion H 0.369185502148 0.535595306574 0.574139879458 1 
+core-overlap-check none 
+ion-species /global/homes/b/beri9208/pseudopotentials/GBRV/O.uspp 
+ion-species /global/homes/b/beri9208/pseudopotentials/GBRV/H.uspp 
+
+symmetries none 
+
+kpoint-folding 2 2 1 
+
+van-der-waals D3 
+elec-cutoff 20.0 
+elec-smearing Fermi 0.001 
+spintype z-spin 
+elec-initial-magnetization 0.0 no 
+converge-empty-states yes 
+
+initial-state $VAR 
+
+ionic-minimize \
+    nIterations  1000 
+
+fluid LinearPCM 
+fluid-solvent H2O 
+fluid-anion F- 0.1 
+fluid-cation K+ 0.1 
+pcm-variant CANDLE 
+
+ionic-dynamics \
+    nSteps  1000 \
+    statMethod  NoseHoover 
+
+dump-name $VAR 
+band-projection-params yes no 
+dump End  State 
+dump End  BandEigs  BandProjections  Fillings  Kpoints 
+dump End  EigStats 
+dump End  ElecDensity 
+
