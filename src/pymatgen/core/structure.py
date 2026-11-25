@@ -92,34 +92,26 @@ FileFormats: TypeAlias = Literal[
 ]
 
 
-def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
-    """Equivalent to ``all(site in others for site in sites)``, but in O(N log N) instead of O(N^2).
+def _candidate_matches(sites: Sequence[Site], others: Sequence[Site]) -> list[list[int]] | None:
+    """For each site, the indices of the sites in others that could be equal to it, or None if the coordinates
+    can't be used to narrow them down.
 
-    Site equality requires np.allclose Cartesian coords, so each site is only compared (with ==, as
-    ``in`` does) against the sites of ``others`` found within a generous coordinate tolerance by a cKDTree.
-
-    Args:
-        sites: Sites that must all be present in others.
-        others: Sites to search.
-
-    Returns:
-        bool: True if every site in sites is equal to (or is) some site in others.
+    Site equality requires np.allclose Cartesian coords, so only the sites of ``others`` found within a
+    generous coordinate tolerance by a cKDTree can be equal. Sites at (nearly) the same position are all
+    candidates for each other, so with many of them the search tends towards O(N^2) again.
     """
-    # Brute force is faster for a few sites
-    if len(sites) <= 4:
-        return all(site in others for site in sites)
     try:
         coords = np.array([site.coords for site in sites], dtype=np.float64)
         other_coords = np.array([site.coords for site in others], dtype=np.float64)
     except (AttributeError, TypeError, ValueError):
-        coords = other_coords = np.empty(0)
+        return None
     if (
         len(others) == 0
         or coords.shape != (len(sites), 3)
         or other_coords.shape != (len(others), 3)
         or not (np.isfinite(coords).all() and np.isfinite(other_coords).all())
     ):
-        return all(site in others for site in sites)
+        return None
 
     from scipy.spatial import cKDTree
 
@@ -129,11 +121,49 @@ def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
         getattr(cls, "position_atol", Site.position_atol) for cls in {Site, *map(type, sites), *map(type, others)}
     )
     radii = 2 * (atol + 1e-5 * np.abs(coords).max(axis=1))
-    candidates = cKDTree(other_coords).query_ball_point(coords, radii, p=np.inf)
+    return cKDTree(other_coords).query_ball_point(coords, radii, p=np.inf)
+
+
+def _all_sites_in(sites: Sequence[Site], others: Sequence[Site]) -> bool:
+    """Equivalent to ``all(site in others for site in sites)``, but in O(N log N) instead of O(N^2).
+
+    Each site is only compared (with ==, as ``in`` does) against the sites of ``others`` that
+    _candidate_matches finds for it (so it is O(N^2) again if most sites coincide).
+
+    Args:
+        sites: Sites that must all be present in others.
+        others: Sites to search.
+
+    Returns:
+        bool: True if every site in sites is equal to (or is) some site in others.
+    """
+    # Brute force is faster for a few sites
+    if len(sites) <= 4 or (candidates := _candidate_matches(sites, others)) is None:
+        return all(site in others for site in sites)
     return all(
         any(others[idx] is site or others[idx] == site for idx in cand)
         for site, cand in zip(sites, candidates, strict=True)
     )
+
+
+def _site_indices(sites: Sequence[Site], others: Sequence[Site]) -> list[int]:
+    """Equivalent to ``[others.index(site) for site in sites]``, but in O(N log N) instead of O(N^2)
+    (unless most sites coincide, see _candidate_matches).
+
+    Raises:
+        ValueError: If a site is not in others.
+    """
+    # Brute force is faster for a few sites
+    if len(sites) <= 4 or (candidates := _candidate_matches(sites, others)) is None:
+        return [others.index(site) for site in sites]
+    indices = []
+    for site, cand in zip(sites, candidates, strict=True):
+        # The first equal site, as index() gives
+        idx = next((idx for idx in sorted(cand) if others[idx] is site or others[idx] == site), None)
+        if idx is None:
+            raise ValueError(f"{site!r} is not in others")
+        indices.append(idx)
+    return indices
 
 
 def _stack_coords(arrays: Sequence[NDArray[np.float64]]) -> NDArray[np.float64]:

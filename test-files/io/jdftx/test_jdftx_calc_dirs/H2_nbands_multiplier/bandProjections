@@ -1,0 +1,7 @@
+1 states, 3 bands, 2 orbital-projections, 1 species
+# Symbol nAtoms nOrbitalsPerAtom lMax nShells(l=0) ... nShells(l=lMax)
+H 2 1 0 1
+#     0  [ +0.0000000 +0.0000000 +0.0000000 ]  2.000000000; lines per band, with |projection|^2 per orbital:
+0.8709816 0.8709810 
+0.0950279 0.0889791 
+0.0092958 0.0174607 
