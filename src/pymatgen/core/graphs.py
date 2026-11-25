@@ -25,7 +25,7 @@ from scipy.stats import describe
 
 from pymatgen.core import Lattice, Molecule, PeriodicSite, Structure
 from pymatgen.core.sites import _decode_properties
-from pymatgen.core.structure import FunctionalGroups
+from pymatgen.core.structure import FunctionalGroups, _site_indices
 from pymatgen.util.coord import lattice_points_in_supercell
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
     from pymatgen.core import Species
     from pymatgen.core.local_env import NearNeighbors
+    from pymatgen.core.sites import Site
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,16 @@ class ConnectedSite(NamedTuple):
     index: Any  # TODO: use more specific type
     weight: float
     dist: float
+
+
+def _site_index_mapping(sites: Sequence[Site], others: Sequence[Site], key: str) -> dict[tuple[float, ...], int]:
+    """Map the coordinates ``key`` ("coords" or "frac_coords") of each site to the index of the first equal
+    site in others.
+
+    Raises:
+        ValueError: If a site is not in others.
+    """
+    return {tuple(getattr(site, key)): idx for site, idx in zip(sites, _site_indices(sites, others), strict=True)}
 
 
 def _sort_sites(sites: Sequence, key: Callable | None, reverse: bool) -> tuple[list, dict[int, int]]:
@@ -1426,9 +1437,8 @@ class StructureGraph(MSONable):
         if not isinstance(other, StructureGraph):
             return NotImplemented
         # sort for consistent node indices
-        # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
         try:
-            mapping = {tuple(site.frac_coords): self.structure.index(site) for site in other.structure}
+            mapping = _site_index_mapping(other.structure, self.structure, "frac_coords")
         except ValueError:  # a site of other is not in self.structure
             return False
         other_sorted = other.__copy__()
@@ -1472,8 +1482,7 @@ class StructureGraph(MSONable):
 
         if strict:
             # sort for consistent node indices
-            # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
-            mapping = {tuple(site.frac_coords): self.structure.index(site) for site in other.structure}
+            mapping = _site_index_mapping(other.structure, self.structure, "frac_coords")
             other_sorted = copy.copy(other)
             other_sorted.sort(key=lambda site: mapping[tuple(site.frac_coords)])
 
@@ -2619,9 +2628,8 @@ class MoleculeGraph(MSONable):
             return NotImplemented
 
         # sort for consistent node indices
-        # PeriodicSite should have a proper __hash__() value, using its frac_coords as a convenient key
         try:
-            mapping = {tuple(site.coords): self.molecule.index(site) for site in other.molecule}
+            mapping = _site_index_mapping(other.molecule, self.molecule, "coords")
         except ValueError:
             return False
         other_sorted = other.__copy__()
@@ -2684,7 +2692,7 @@ class MoleculeGraph(MSONable):
 
         if strict:
             # sort for consistent node indices, using Cartesian coords as a convenient key
-            mapping = {tuple(site.coords): self.molecule.index(site) for site in other.molecule}
+            mapping = _site_index_mapping(other.molecule, self.molecule, "coords")
             other_sorted = copy.copy(other)
             other_sorted.sort(key=lambda site: mapping[tuple(site.coords)])
 
