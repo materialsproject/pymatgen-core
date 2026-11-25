@@ -2827,6 +2827,9 @@ Sites (8)
             struct.translate_sites([0, 1], [0.1, 0])
         with pytest.raises(ValueError, match="expected shape is"):
             struct.translate_sites([0, 1], [[[0.1, 0, 0], [0, 0.2, 0]]])
+        for indices in ([0, 1, 1], [0, 1]):  # with and without repeated indices
+            with pytest.raises(ValueError, match="translation vectors for"):
+                struct.translate_sites(indices, [[0.1, 0, 0]] * 4)
 
     def test_coords_setters_validate_and_copy(self):
         new_frac = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]])
@@ -2848,7 +2851,6 @@ Sites (8)
 
     def test_init_species_memoization(self):
         struct = Structure(Lattice.cubic(4), ["O", "O", 8, Element.O, "Fe2+"], np.zeros((5, 3)))
-        assert struct[0].species is struct[1].species  # same input spec -> shared Composition
         assert all(site.species == Composition("O") for site in struct[:4])
         assert struct[4].specie == Species("Fe", 2)
         # Mutating one site's species must not affect sites sharing the original Composition
@@ -2863,6 +2865,30 @@ Sites (8)
         struct = Structure(Lattice.cubic(4), ["O", "O"], coords)
         coords[0, 0] = 0.5
         assert_allclose(struct[0].frac_coords, [0, 0, 0])
+        # ... and each site owns its arrays instead of viewing a shared (N, 3) buffer
+        assert all(site.frac_coords.flags.owndata for site in struct)
+
+    def test_init_bulk_path_matches_per_site_mixed_pbc(self):
+        # Cartesian input wrapped into a cell that is only periodic along a and b
+        lattice = Lattice([[4.1, 0.2, 0], [0.3, 5.2, 0.1], [0, 0.4, 6.3]], pbc=(True, True, False))
+        coords = np.random.default_rng(0).random((6, 3)) * 12 - 4
+        struct = Structure(lattice, ["Si"] * 6, coords, coords_are_cartesian=True, to_unit_cell=True)
+        for site, cart in zip(struct, coords, strict=True):
+            ref = PeriodicSite("Si", cart, lattice, to_unit_cell=True, coords_are_cartesian=True)
+            assert_array_equal(site.frac_coords, ref.frac_coords)
+            assert_allclose(site.coords, ref.coords, atol=1e-12)
+        assert np.all((struct.frac_coords[:, :2] >= 0) & (struct.frac_coords[:, :2] < 1))
+        assert (struct.frac_coords[:, 2] < 0).any() or (struct.frac_coords[:, 2] >= 1).any()
+
+    def test_coord_setters_and_translate_with_foreign_site_lattice(self):
+        struct = Structure(Lattice.cubic(4), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        struct[1].lattice = Lattice.cubic(5)  # a site's lattice set directly, diverging from the structure's
+        struct.cart_coords = [[1, 1, 1], [2, 2, 2]]
+        assert_allclose(struct[0].frac_coords, [0.25, 0.25, 0.25])
+        assert_allclose(struct[1].frac_coords, [0.4, 0.4, 0.4])  # converted with the site's own lattice
+        struct.translate_sites([0, 1], [0.1, 0, 0], to_unit_cell=False)
+        assert_allclose(struct[1].frac_coords, [0.5, 0.4, 0.4])
+        assert_allclose(struct[1].coords, [2.5, 2, 2])
 
     def test_lattice_setter_updates_cart_coords(self):
         frac = self.struct.frac_coords

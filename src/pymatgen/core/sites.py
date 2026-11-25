@@ -51,6 +51,31 @@ def _to_unit_cell(frac_coords: ArrayLike, pbc: tuple[bool, bool, bool]) -> NDArr
     return np.where(pbc, np.mod(frac_coords, 1, dtype=np.float64), frac_coords).astype(np.float64, copy=False)
 
 
+def _to_composition(species: SpeciesLike | CompositionLike) -> Composition:
+    """Normalize a site species spec into a validated Composition.
+
+    Single source of truth for Site/PeriodicSite construction, Site.species assignment and the
+    bulk path in IStructure.__init__.
+
+    Args:
+        species: Symbol, Z, Element/Species/DummySpecies, dict of species to occupancy, or Composition.
+
+    Raises:
+        ValueError: If the occupancies sum to more than 1.
+
+    Returns:
+        Composition: The site's species and occupancies.
+    """
+    if not isinstance(species, Composition):
+        try:
+            species = Composition({get_el_sp(species): 1})  # type: ignore[arg-type]
+        except TypeError:
+            species = Composition(species)
+    if species.num_atoms > 1 + Composition.amount_tolerance:
+        raise ValueError("Species occupancies sum to more than 1!")
+    return species
+
+
 class Site(collections.abc.Hashable, MSONable):
     """A generalized *non-periodic* site. This is essentially a composition
     at a point in space, with some optional properties associated with it. A
@@ -89,14 +114,7 @@ class Site(collections.abc.Hashable, MSONable):
                 manner and speed is desired.
         """
         if not skip_checks:
-            if not isinstance(species, Composition):
-                try:
-                    species = Composition({get_el_sp(species): 1})  # type: ignore[arg-type]
-                except TypeError:
-                    species = Composition(species)
-            total_occu = species.num_atoms
-            if total_occu > 1 + Composition.amount_tolerance:
-                raise ValueError("Species occupancies sum to more than 1!")
+            species = _to_composition(species)
             coords = np.array(coords)
 
         self._species = species
@@ -193,17 +211,7 @@ class Site(collections.abc.Hashable, MSONable):
 
     @species.setter
     def species(self, species: SpeciesLike | CompositionLike) -> None:
-        if not isinstance(species, Composition):
-            try:
-                species = Composition({get_el_sp(species): 1})  # type: ignore[arg-type]
-            except TypeError:
-                species = Composition(species)
-
-        total_occu = species.num_atoms
-        if total_occu > 1 + Composition.amount_tolerance:
-            raise ValueError("Species occupancies sum to more than 1!")
-
-        self._species = cast("Composition", species)
+        self._species = _to_composition(species)
 
     @property
     def label(self) -> str:
@@ -391,15 +399,7 @@ class PeriodicSite(Site, MSONable):
                 raise ValueError(
                     f"Coordinates {frac_coords} for species {species} are not xyz-shaped (shape {frac_coords.shape})."
                 )
-            if not isinstance(species, Composition):
-                try:
-                    species = Composition({get_el_sp(species): 1})  # type: ignore[arg-type]
-                except TypeError:
-                    species = Composition(species)
-
-            total_occu = species.num_atoms
-            if total_occu > 1 + Composition.amount_tolerance:
-                raise ValueError("Species occupancies sum to more than 1!")
+            species = _to_composition(species)
 
         self._lattice: Lattice
         self._frac_coords: NDArray[np.float64]
