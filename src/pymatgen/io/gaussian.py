@@ -13,7 +13,7 @@ from scipy.stats import norm
 from pymatgen.core import Composition, Element, Molecule
 from pymatgen.core import constants as cst
 from pymatgen.core.operations import SymmOp
-from pymatgen.core.units import Ha_to_eV
+from pymatgen.core.units import Ha_to_eV, bohr_to_ang, eV_to_Ha
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.util.coord import get_angle
 from pymatgen.util.plotting import pretty_plot
@@ -1369,7 +1369,7 @@ def _traj_to_gaussian_log(traj: Trajectory, do_cell: bool, energies: list[float]
     dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
     for i in range(len(traj)):
         dump_lines += [
-            *[*_log_input_orientation(traj[i], do_cell=do_cell), f"SCF Done:  E =  {energies[i]:.6f}  "],
+            *[*_log_input_orientation(traj[i], do_cell=do_cell), f"SCF Done:  E =  {energies[i] * eV_to_Ha:.6f}  "],
             *_log_mulliken(traj[i], sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
             *_log_esp(traj[i], sp_map.get("esp charges")),
             *_log_nbo(traj[i], sp_map.get("nbo charges"), sp_map.get("nbo spin")),
@@ -1420,7 +1420,8 @@ def _log_esp(frame: Structure | Molecule, charge_key: str | None) -> list[str]:
         charges = np.array(frame.site_properties[charge_key])
         dump_lines += ["", " Charges from ESP fit", "  ESP charges:", "               1"]
         dump_lines += [f"     {i + 1} {sp.symbol} {charges[i]:.6f}" for i, sp in enumerate(frame.species)]
-        dipole = np.sum(frame.cart_coords * charges[:, np.newaxis], axis=0)
+        # e*A to Debye (1 D = 1e-21 / c C*m)
+        dipole = np.sum(frame.cart_coords * charges[:, np.newaxis], axis=0) * cst.e * cst.c * 1e11
         tot = np.linalg.norm(dipole)
         dump_lines.append(f" Charge= {np.sum(charges)} Dipole= {' '.join(str(v) for v in dipole)} Tot=   {tot}")
     return dump_lines
@@ -1461,7 +1462,7 @@ def _log_forces(frame: Structure | Molecule, do_cell: bool = True) -> list[str]:
     # TODO: Find the trick for getting Gaussview to read forces on PBC calculations
     dump_lines = []
     if "forces" in frame.site_properties:
-        forces = np.array(frame.site_properties["forces"])
+        forces = np.array(frame.site_properties["forces"]) * eV_to_Ha * bohr_to_ang  # eV/A to Ha/Bohr
         dump_lines = [
             *["-" * 67, " Center     Atomic" + " " * 19 + "Forces (Hartrees/Bohr)"],
             *[" Number     " + (" " * 14).join(["Number", "X", "Y", "Z"]), "-" * 67],

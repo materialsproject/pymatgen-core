@@ -496,7 +496,8 @@ class Trajectory(MSONable):
     ) -> None:
         """Write Trajectory object to a Gaussian-formatted log file.
 
-        The produced file will be readable by Gaussview.
+        The produced file will be readable by Gaussview. Frame energies ("energy", eV) and site forces ("forces",
+        eV/Angstrom) are converted to Gaussian's units (Hartree, Hartree/Bohr).
 
         Args:
             filename: File to write. File does not need to end with '.log' to be readable by Gaussview.

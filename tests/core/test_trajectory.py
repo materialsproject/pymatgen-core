@@ -492,18 +492,18 @@ class TestTrajectory(MatSciTest):
             [[0, 0, 0], [0, 0, 1], [0, 1, 0]],
             site_properties={"charges": [-1.0, 0.5, 0.5], "magmom": [0.5, 0.0, 0.0], "forces": [[0, 0, 0.1]] * 3},
         )
-        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"energy": None}, {"energy": -1.0}])
+        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"energy": None}, {"energy": -27.211386}])
         traj.write_Gaussian_log("mol.logx", {"mulliken charges": "charges", "mulliken spin": "magmom"})
         with open("mol.logx") as file:
             text = file.read()
         assert "SCF Done:  E =  0.000000" in text
-        assert "SCF Done:  E =  -1.000000" in text
+        assert "SCF Done:  E =  -1.000000" in text  # eV to Hartree
         assert " -2 " not in text  # no lattice for a Molecule, so no lattice lines in coordinates or forces
         assert "1 O -1.0 0.5 \n2 H 0.5 0.0 \n" in text
         assert "Sum of Mulliken charges = 0.0 0.5" in text
         assert "ESP charges" not in text  # unmapped properties are not written
         assert "Natural Population" not in text
-        assert "Max 0.100000000 RMS 0.057735027" in text
+        assert "Max 0.001944690 RMS 0.001122768" in text  # 0.1 eV/A in Hartree/Bohr
 
     def test_from_file(self):
         try:
