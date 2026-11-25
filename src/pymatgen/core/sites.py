@@ -266,8 +266,9 @@ class Site(collections.abc.Hashable, MSONable):
     @property
     def species_string(self) -> str:
         """String representation of species on the site."""
-        if self.is_ordered:
-            return str(next(iter(self.species)))
+        species = cast("Composition", self._species)
+        if len(species) == 1 and species.num_atoms == 1:  # inlined self.is_ordered
+            return str(next(iter(species)))
         return ", ".join(f"{sp}:{self.species[sp]:.3}" for sp in sorted(self.species))
 
     @property
@@ -400,12 +401,22 @@ class PeriodicSite(Site, MSONable):
             if total_occu > 1 + Composition.amount_tolerance:
                 raise ValueError("Species occupancies sum to more than 1!")
 
-        self._lattice: Lattice = lattice
-        self._frac_coords: NDArray[np.float64] = frac_coords
-        self._species: Composition = cast("Composition", species)
-        self._coords: NDArray[np.float64] | None = None
-        self.properties: dict = properties or {}
-        self._label = label
+        self._lattice: Lattice
+        self._frac_coords: NDArray[np.float64]
+        self._species: Composition
+        self._coords: NDArray[np.float64] | None
+        self.properties: dict
+        self._label: str | None
+        # Set the instance attributes directly in one call, bypassing the slow Site.__setattr__ (all of these
+        # would take its plain-assignment branch anyway). Same approach as PeriodicNeighbor.__init__.
+        vars(self).update(
+            _lattice=lattice,
+            _frac_coords=frac_coords,
+            _species=species,
+            _coords=None,
+            properties=properties or {},
+            _label=label,
+        )
 
     def __hash__(self) -> int:
         """Minimally effective hash function that just distinguishes between Sites

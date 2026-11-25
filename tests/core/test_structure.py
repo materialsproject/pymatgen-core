@@ -2806,6 +2806,89 @@ Sites (8)
         assert_allclose(self.struct[1].frac_coords, orig + np.array([0.1, 0, 0]))
         assert_allclose(self.struct[0].frac_coords, [0, 0, 0])
 
+    def test_translate_sites_duplicate_and_negative_indices(self):
+        struct = Structure(Lattice.cubic(4), ["Na", "Cl", "Cl"], [[0, 0, 0], [0.1, 0.2, 0.3], [0.5, 0.5, 0.5]])
+        # Repeated indices (incl. a negative alias of the same site) translate that site repeatedly
+        struct.translate_sites([1, 1, -2], [0.1, 0, 0], to_unit_cell=False)
+        assert_allclose(struct[1].frac_coords, [0.4, 0.2, 0.3])
+        assert_allclose(struct[0].frac_coords, [0, 0, 0])
+        assert_allclose(struct[1].coords, [1.6, 0.8, 1.2])
+        with pytest.raises(IndexError):
+            struct.translate_sites([3], [0.1, 0, 0])
+        with pytest.raises(TypeError):
+            struct.translate_sites([1.0], [0.1, 0, 0])  # type: ignore[list-item]
+
+    def test_translate_sites_per_site_vectors(self):
+        struct = Structure(Lattice.cubic(4), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
+        struct.translate_sites([0, 1], [[0.1, 0, 0], [0, 0.2, 0]])
+        assert_allclose(struct.frac_coords, [[0.1, 0, 0], [0.5, 0.7, 0.5]])
+        assert_allclose(struct.cart_coords, struct.frac_coords * 4)
+        with pytest.raises(ValueError, match="could not be broadcast"):
+            struct.translate_sites([0, 1], [0.1, 0])
+        with pytest.raises(ValueError, match="expected shape is"):
+            struct.translate_sites([0, 1], [[[0.1, 0, 0], [0, 0.2, 0]]])
+
+    def test_coords_setters_validate_and_copy(self):
+        new_frac = np.array([[0.1, 0.2, 0.3], [0.6, 0.5, 0.4]])
+        self.struct.frac_coords = new_frac
+        new_frac[0, 0] = 0.9  # mutating the input must not leak into the structure
+        assert_allclose(self.struct[0].frac_coords, [0.1, 0.2, 0.3])
+        assert_allclose(self.struct.cart_coords, self.struct.lattice.get_cartesian_coords(self.struct.frac_coords))
+
+        new_cart = np.array([[1.0, 0.5, 0.25], [2.0, 1.0, 0.5]])
+        self.struct.cart_coords = new_cart
+        assert_allclose(self.struct.cart_coords, new_cart)
+        assert_allclose(self.struct.frac_coords, self.struct.lattice.get_fractional_coords(new_cart))
+
+        for bad in ([[0, 0, 0]], [[0, 0], [0, 0]]):
+            with pytest.raises(ValueError, match=r"A Structure must have|expected shape is"):
+                self.struct.frac_coords = bad
+            with pytest.raises(ValueError, match=r"A Structure must have|expected shape is"):
+                self.struct.cart_coords = bad
+
+    def test_init_species_memoization(self):
+        struct = Structure(Lattice.cubic(4), ["O", "O", 8, Element.O, "Fe2+"], np.zeros((5, 3)))
+        assert struct[0].species is struct[1].species  # same input spec -> shared Composition
+        assert all(site.species == Composition("O") for site in struct[:4])
+        assert struct[4].specie == Species("Fe", 2)
+        # Mutating one site's species must not affect sites sharing the original Composition
+        struct[0].species = "S"
+        assert struct[1].species == Composition("O")
+        with pytest.raises(ValueError, match="Species occupancies sum to more than 1"):
+            Structure(Lattice.cubic(4), [{"Fe": 0.6, "Mn": 0.6}], [[0, 0, 0]])
+        with pytest.raises(ValueError, match="not xyz-shaped"):
+            Structure(Lattice.cubic(4), ["O", "O"], [[0, 0, 0], [0, 0]])
+        # Coordinates are copied, never aliased
+        coords = np.zeros((2, 3))
+        struct = Structure(Lattice.cubic(4), ["O", "O"], coords)
+        coords[0, 0] = 0.5
+        assert_allclose(struct[0].frac_coords, [0, 0, 0])
+
+    def test_lattice_setter_updates_cart_coords(self):
+        frac = self.struct.frac_coords
+        new_lattice = Lattice.cubic(5)
+        self.struct.lattice = new_lattice
+        assert all(site.lattice is new_lattice for site in self.struct)
+        assert_allclose(self.struct.frac_coords, frac)
+        assert_allclose(self.struct.cart_coords, frac * 5)
+
+    def test_mul_site_properties_and_labels(self):
+        struct = Structure(
+            Lattice.cubic(3),
+            ["Na", "Cl"],
+            [[0, 0, 0], [0.5, 0.5, 0.5]],
+            labels=["Na1", "Cl1"],
+        )
+        struct[0].properties["magmom"] = 1.0
+        with pytest.warns(UserWarning, match="Not all sites have property magmom"):
+            supercell = struct * (2, 1, 1)
+        assert supercell.formula == "Na2 Cl2"
+        assert supercell.site_properties["magmom"] == [1.0, 1.0, None, None]
+        assert supercell.labels == ["Na1_1", "Na1_2", "Cl1_1", "Cl1_2"]
+        assert_allclose(supercell.frac_coords, [[0, 0, 0], [0.5, 0, 0], [0.25, 0.5, 0.5], [0.75, 0.5, 0.5]])
+        with pytest.raises(ValueError, match="at least 1 site"):
+            Structure(Lattice.cubic(3), [], []) * 2
+
     def test_rotate_sites_all_indices(self):
         struct = Structure(Lattice.cubic(4), ["Na", "Cl"], [[0, 0, 0], [0.5, 0.5, 0.5]])
         struct.rotate_sites(theta=np.pi / 2, axis=[0, 0, 1], anchor=[0, 0, 0], to_unit_cell=False)
