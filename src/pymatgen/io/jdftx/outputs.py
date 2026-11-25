@@ -21,10 +21,14 @@ from pymatgen.core.units import Ha_to_eV
 from pymatgen.electronic_structure.bandstructure import BandStructure
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.io.jdftx._output_utils import (
+    _dataclass_from_dict,
     _get_nbands_from_bandfile_filepath,
     _get_orb_label_list,
     _get_u_to_oa_map,
+    _json_dict,
+    _OutputMSONable,
     _parse_kptsfrom_bandprojections_file,
+    _vibrational_modes_as_dict,
     get_proj_tju_from_file,
     orb_ref_list,
     read_outfile_slices,
@@ -453,7 +457,7 @@ _jof_atr_from_last_slice = (
 
 
 @dataclass
-class JDFTXOutfile:
+class JDFTXOutfile(_OutputMSONable):
     """
     JDFTx out file parsing class.
 
@@ -844,16 +848,26 @@ class JDFTXOutfile:
         Returns:
             dict: A dictionary representation of the JDFTXOutfile object.
         """
-        dct = {}
+        # MSONable (and MatSciTest.assert_msonable) needs "@module"/"@class", but atomate2 stores this dict in a plain
+        # `parameters: dict` that jobflow then decodes into a JDFTXOutfile, which breaks chained atomate2 JDFTx flows.
+        # Fix in atomate2, not here: CalculationOutput.from_jdftxoutput (atomate2/jdftx/schemas/calculation.py) must
+        # leave the top-level "@" keys out of `parameters`. Delete this comment once that is merged.
+        dct: dict[str, Any] = {"@module": self.__class__.__module__, "@class": self.__class__.__name__}
         for fld in self.__dataclass_fields__:
             if fld == "_trajectory":  # A cache the trajectory property fills on first read
                 continue
             if fld == "slices":
                 dct[fld] = [None if slc is None else slc.as_dict() for slc in self.slices]
                 continue
-            value = getattr(self, fld)
-            dct[fld] = value
-        return dct
+            dct[fld] = (
+                _vibrational_modes_as_dict(self.vibrational_modes) if fld == "vibrational_modes" else getattr(self, fld)
+            )
+        return _json_dict(dct)
+
+    @classmethod
+    def from_dict(cls, dct: dict[str, Any]) -> JDFTXOutfile:
+        """Return a JDFTXOutfile from the dictionary as_dict gives (its values are recomputed from its slices)."""
+        return _dataclass_from_dict(cls, dct)
 
     ###########################################################################
     # Magic methods

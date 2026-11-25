@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import pprint
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Self
 
     from numpy.typing import ArrayLike, NDArray
 
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 from pymatgen.core.structure import Element, Lattice, Species, Structure
 from pymatgen.core.units import Ha_to_eV, bohr_to_ang
-from pymatgen.io.jdftx._output_utils import _brkt_list_of_3x3_to_nparray, get_colon_val
+from pymatgen.io.jdftx._output_utils import _brkt_list_of_3x3_to_nparray, _decode_value, _json_dict, get_colon_val
 from pymatgen.io.jdftx.inputs import (
     JDFTX_SPECIES_SITE_PROPERTY,
     JDFTX_TIME_UNIT_TO_FS,
@@ -122,7 +123,14 @@ class JOutStructure(Structure):
     elec_linmin: float | np.float64 | None = None
     _structure: Structure | None = None
     is_md: bool = False
-    thermostat_velocity: np.ndarray | None = None
+    # MD data (and IGP forces), set while parsing; annotated so that as_dict keeps them
+    pe: float | None = None
+    ke: float | None = None
+    t_k: float | None = None
+    p_bar: float | None = None
+    tmd_fs: float | None = None
+    thermostat_velocity: NDArray[np.float64] | None = None
+    igp_forces: NDArray[np.float64] | None = None
     _velocities: list[NDArray[np.float64] | None] | None = None
     _constraint_vectors: list[NDArray[np.float64] | list[NDArray[np.float64]] | None] | None = None
     _constraint_types: list[str | None] | None = None
@@ -630,8 +638,9 @@ class JOutStructure(Structure):
         r = None
         if len(lattice_lines) >= 5:
             r = _brkt_list_of_3x3_to_nparray(lattice_lines, i_start=2)
-            r = r.T * bohr_to_ang
-            self.lattice = Lattice(np.array(r))
+            # C-ordered, like any Lattice made from lists (else Cartesian coordinates computed from it can differ in
+            # the last digit from those of the same structure loaded from JSON)
+            self.lattice = Lattice(np.ascontiguousarray(r.T) * bohr_to_ang)
 
     def _parse_strain_lines(self, strain_lines: list[str]) -> None:
         """Parse strain lines.
@@ -1082,21 +1091,36 @@ class JOutStructure(Structure):
             properties=self.properties,
         )
 
-    def as_dict(self) -> dict:
+    def as_dict(self, verbosity: Literal[0, 1] = 1, fmt: Literal["abivars"] | None = None, **kwargs) -> dict[str, Any]:
         """
-        Convert the JOutStructure object to a dictionary.
+        Convert the JOutStructure object to a dictionary: the Structure's, plus the step data.
+
+        Args:
+            verbosity (0 | 1): As for Structure.as_dict.
+            fmt ("abivars" | None): As for Structure.as_dict; "abivars" gives only the Structure's ABINIT variables.
+            **kwargs: Passed to Structure.as_dict.
 
         Returns:
             dict: A dictionary representation of the JOutStructure object.
         """
-        dct = {}
+        dct = super().as_dict(verbosity=verbosity, fmt=fmt, **kwargs)
+        if fmt == "abivars":
+            return dct
         for fld in self.__dict__:
-            value = getattr(self, fld)
-            if hasattr(value, "as_dict"):
-                dct[fld] = value.as_dict()
-            else:
-                dct[fld] = value
-        return dct
+            # Step data, as opposed to the Structure's own attributes (_structure is the structure property's cache)
+            if fld in JOutStructure.__annotations__ and fld != "_structure":
+                value = getattr(self, fld)
+                dct[fld] = value.as_dict() if hasattr(value, "as_dict") else value
+        return _json_dict(dct)
+
+    @classmethod
+    def from_dict(cls, dct: dict[str, Any], fmt: Literal["abivars"] | None = None) -> Self:
+        """Return a JOutStructure from the dictionary as_dict gives."""
+        instance = _decode_value(super().from_dict(dct, fmt=fmt))  # Decodes the arrays in its properties
+        for key, value in dct.items():
+            if key in JOutStructure.__annotations__:
+                setattr(instance, key, _decode_value(value))
+        return instance
 
     # TODO: Add string representation for JOutStructure-specific meta-data
     # This method currently only returns the Structure Summary as inherited from

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import warnings
 from itertools import combinations
@@ -10,13 +11,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from monty.json import MontyDecoder, MontyEncoder, jsanitize
 
+from pymatgen.core import Structure
 from pymatgen.core.units import Ha_to_eV, bohr_to_ang
 from pymatgen.io.jdftx._output_utils import read_outfile_slices
 from pymatgen.io.jdftx.generic_tags import JDFTXOptionWarning
 from pymatgen.io.jdftx.inputs import JDFTXInfile
 from pymatgen.io.jdftx.jdftxoutfileslice import JDFTXOutfileSlice
+from pymatgen.io.jdftx.joutstructures import JOutStructures
 from pymatgen.io.jdftx.outputs import JDFTXOutfile, _jof_atr_from_last_slice
+from pymatgen.util.testing import MatSciTest
 
 from .inputs_test_utils import aimd_infile_fname
 from .outputs_test_utils import (
@@ -825,6 +830,62 @@ def test_noncollinear_spin(spintype: str, tmp_path: Path):
         theta, phi = np.radians(theta), np.radians(phi)
         expected = m[:, None] * np.array([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]).T
         assert np.array(outfile.structure.site_properties["magmom"]) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("outfile_path", sorted(ex_out_files_dir.glob("*.out")), ids=lambda path: path.name)
+def test_msonable(outfile_path: Path):
+    """Parsed output follows pymatgen's MSONable contract, and loading its JSON (which used to raise) gives the same
+    JSON again, without warnings."""
+    outfile = JDFTXOutfile.from_file(outfile_path)
+    jstrucs = outfile.slices[-1].jstrucs
+    steps = jstrucs[-1].elecmindata
+    text = json.dumps(outfile, cls=MontyEncoder)
+    _ = outfile.trajectory  # Fills lazy caches (trajectories, step structures), which the JSON must leave out
+    unchanged = json.dumps(outfile, cls=MontyEncoder) == text  # Not in the assert: pytest would diff megabytes of JSON
+    assert unchanged
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for obj in (outfile, outfile.slices[-1], jstrucs, jstrucs[-1], steps, steps and steps.slices[-1]):
+            if obj is not None:
+                MatSciTest.assert_msonable(obj)
+        loaded = json.loads(text, cls=MontyDecoder)
+    assert json.dumps(loaded, cls=MontyEncoder) == text
+    if outfile.vibrational_modes is not None:  # Imaginary frequencies are complex
+        assert_same_value(loaded.vibrational_modes, outfile.vibrational_modes)
+
+
+def test_jsanitize_round_trip():
+    """jobflow stores output with jsanitize: arrays, also those inside structures, load back as arrays, and MD steps
+    keep their data."""
+    outfile = JDFTXOutfile.from_file(nolowdin_md_outfile_path)
+    loaded = MontyDecoder().process_decoded(jsanitize(outfile, strict=True, allow_bson=True))
+    step, loaded_step = outfile.slices[-1].jstrucs[-1], loaded.slices[-1].jstrucs[-1]
+    for original, reloaded in [(outfile, loaded), (step, loaded_step)]:
+        assert isinstance(reloaded.forces, np.ndarray)
+        assert reloaded.forces == pytest.approx(original.forces)
+    assert isinstance(loaded.structure.site_properties["velocities"][0], np.ndarray)
+    assert loaded_step.t_k == step.t_k
+    latmin = MontyDecoder().process_decoded(jsanitize(JDFTXOutfile.from_file(example_latmin_outfile_path), strict=True))
+    assert isinstance(latmin.structure.properties["stress"], np.ndarray)
+    # A step's dictionary is also a Structure's
+    assert Structure.from_dict(step.as_dict()) == outfile.structure
+
+
+def test_pydantic_round_trip():
+    """Pydantic models (as in emmet and atomate2) can hold parsed output: their python and JSON dumps load back."""
+    pydantic = pytest.importorskip("pydantic")
+
+    class Doc(pydantic.BaseModel):
+        outfile: JDFTXOutfile
+
+    # MD: JDFTx echoes unset pressures as nan, which pydantic's JSON dumps write as null by default
+    outfile = JDFTXOutfile.from_file(nolowdin_md_outfile_path)
+    doc = Doc(outfile=outfile)
+    for dumped in (doc.model_dump(), json.loads(doc.model_dump_json())):
+        loaded = Doc.model_validate(dumped).outfile
+        assert isinstance(loaded.slices[-1].jstrucs, JOutStructures)
+        assert loaded.e == outfile.e
+        assert np.isnan(loaded.slices[-1].infile["ionic-dynamics"]["P0"])
 
 
 @pytest.mark.parametrize("skim_levels", [None, ["outfile", "geom"]])
