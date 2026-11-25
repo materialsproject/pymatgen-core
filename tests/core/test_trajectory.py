@@ -479,6 +479,32 @@ class TestTrajectory(MatSciTest):
         written_traj = Trajectory.from_file(f"{self.tmp_path}/traj_test_XDATCAR")
         self._check_traj_equality(self.traj, written_traj)
 
+    def test_write_gaussian_log(self):
+        # Reading by GaussView can't be tested, so check the lines it parses
+        self.traj[:2].write_Gaussian_log("struct.logx")
+        with open("struct.logx") as file:
+            text = file.read()
+        assert text.count("SCF Done:  E =  0.000000") == 2
+        assert " -2 0 " in text  # lattice vectors written
+
+        mol = Molecule(
+            ["O", "H", "H"],
+            [[0, 0, 0], [0, 0, 1], [0, 1, 0]],
+            site_properties={"charges": [-1.0, 0.5, 0.5], "magmom": [0.5, 0.0, 0.0], "forces": [[0, 0, 0.1]] * 3},
+        )
+        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"energy": None}, {"energy": -1.0}])
+        traj.write_Gaussian_log("mol.logx", {"mulliken charges": "charges", "mulliken spin": "magmom"})
+        with open("mol.logx") as file:
+            text = file.read()
+        assert "SCF Done:  E =  0.000000" in text
+        assert "SCF Done:  E =  -1.000000" in text
+        assert " -2 " not in text  # no lattice for a Molecule, so no lattice lines in coordinates or forces
+        assert "1 O -1.0 0.5 \n2 H 0.5 0.0 \n" in text
+        assert "Sum of Mulliken charges = 0.0 0.5" in text
+        assert "ESP charges" not in text  # unmapped properties are not written
+        assert "Natural Population" not in text
+        assert "Max 0.100000000 RMS 0.057735027" in text
+
     def test_from_file(self):
         try:
             traj = Trajectory.from_file(f"{TEST_DIR}/LiMnO2_chgnet_relax.traj")
