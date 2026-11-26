@@ -1486,7 +1486,7 @@ def _log_forces(frame: Structure | Molecule, do_cell: bool = True) -> list[str]:
     return dump_lines
 
 
-def _log_vib_helper(modes: list[dict], idx_offset: int = 0):
+def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: int = 0):
     frequencies = []
     IR_intensities = []
     disp_str = "Displacements"
@@ -1525,7 +1525,9 @@ def _log_vib_helper(modes: list[dict], idx_offset: int = 0):
         displacements_slice = displacements[start_idx:end_idx, :, :]
         freqs_slice = frequencies[start_idx:end_idx]
         ir_intensities_slice = IR_intensities[start_idx:end_idx]
-        log_lines += _log_vib_helper_helper(displacements_slice, mod_idcs, freqs_slice, ir_intensities_slice, nAtoms)
+        log_lines += _log_vib_helper_helper(
+            displacements_slice, mod_idcs, freqs_slice, ir_intensities_slice, nAtoms, atomic_numbers
+        )
     return log_lines
 
 
@@ -1535,6 +1537,7 @@ def _log_vib_helper_helper(
     freqs: list[float],
     ir_intensities: list[float],
     nAtoms: int,
+    atomic_numbers: list[int],
 ):
     nModes = len(mod_idcs)
     log_lines = [
@@ -1547,7 +1550,7 @@ def _log_vib_helper_helper(
     for iAtom in range(nAtoms):
         idisps = displacements_slice[:, iAtom, :]
         log_lines.append(
-            f"     {iAtom + 1}   1 "
+            f"     {iAtom + 1}   {atomic_numbers[iAtom]} "
             + " ".join(" ".join([f"{idisps[i][j]:.2f}" for j in range(3)]) + " " for i in range(nModes))
         )
     return log_lines
@@ -1557,7 +1560,7 @@ def _log_vibrations(frame: Structure | Molecule, do_cell=True, idx_offset: int =
     if do_cell or ("vibrational_modes" not in frame.properties):
         return []
     modes = frame.properties["vibrational_modes"]
-    return _log_vib_helper(modes, idx_offset=idx_offset)
+    return _log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=idx_offset)
 
 
 def _struc_to_vib_traj(structure: Structure) -> Trajectory:
