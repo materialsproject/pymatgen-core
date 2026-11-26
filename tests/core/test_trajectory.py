@@ -510,6 +510,23 @@ class TestTrajectory(MatSciTest):
         assert "Natural Population" not in text
         assert "Max 0.001944690 RMS 0.001122768" in text  # 0.1 eV/A in Hartree/Bohr
 
+    def test_write_gaussian_log_vib_modes(self):
+        mol = Molecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+        modes = [{"cm^-1": 100.0 * (k + 1), "Displacements": [[1, 0, 0]] * 3} for k in range(9)]  # 9 > 3N - 3 = 6
+        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"vibrational_modes": modes}] * 2)
+        traj.write_Gaussian_log("vib.logx")
+        with open("vib.logx") as file:
+            text = file.read()
+        assert text.count("Harmonic frequencies") == 2  # one block per frame
+        assert "\n16 17 18\n" in text  # mode numbers run on into the second frame
+
+        traj.write_Gaussian_log("vib_split.logx", split_vib_modes=True)
+        with open("vib_split.logx") as file:
+            text = file.read()
+        assert text.count("Harmonic frequencies") == 4  # 6 + 3 modes for each frame
+        assert "Step number 4" in text
+        assert "\n16 17 18\n" in text
+
     def test_from_file(self):
         try:
             traj = Trajectory.from_file(f"{TEST_DIR}/LiMnO2_chgnet_relax.traj")

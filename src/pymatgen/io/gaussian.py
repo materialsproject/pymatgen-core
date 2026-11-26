@@ -1370,21 +1370,32 @@ def _traj_to_gaussian_log(
     do_cell: bool,
     energies: list[float],
     sp_map: dict[str, str],
-    vib_idx_offsets: list[int] | None = None,
+    split_vib_modes: bool = False,
 ) -> str:
-    dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
-    if vib_idx_offsets is None:
-        vib_idx_offsets = [0] * len(traj)
+    # (frame, energy, vibrational modes) to write; with split_vib_modes, a frame with more than 3N - 3 modes is
+    # written once for each 3N - 3 of them
+    write_frames = []
     for i in range(len(traj)):
+        frame = traj[i]
+        modes = [] if do_cell else frame.properties.get("vibrational_modes") or []
+        n_max = 3 * len(frame) - 3
+        if split_vib_modes and len(modes) > n_max:
+            write_frames += [(frame, energies[i], modes[j : j + n_max]) for j in range(0, len(modes), n_max)]
+        else:
+            write_frames.append((frame, energies[i], modes))
+    dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
+    n_modes_written = 0  # mode numbers run on through the file, not from 1 in each frame
+    for step, (frame, energy, modes) in enumerate(write_frames, start=1):
         dump_lines += [
-            *[*_log_input_orientation(traj[i], do_cell=do_cell), f"SCF Done:  E =  {energies[i] * eV_to_Ha:.6f}  "],
-            *_log_mulliken(traj[i], sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
-            *_log_esp(traj[i], sp_map.get("esp charges")),
-            *_log_nbo(traj[i], sp_map.get("nbo charges"), sp_map.get("nbo spin")),
-            *_log_vibrations(traj[i], do_cell=do_cell, idx_offset=vib_idx_offsets[i]),
-            *_log_forces(traj[i], do_cell),
-            *["", " " + "Grad" * 18, "", f" Step number {i + 1}", "", " " + "Grad" * 18],
+            *[*_log_input_orientation(frame, do_cell=do_cell), f"SCF Done:  E =  {energy * eV_to_Ha:.6f}  "],
+            *_log_mulliken(frame, sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
+            *_log_esp(frame, sp_map.get("esp charges")),
+            *_log_nbo(frame, sp_map.get("nbo charges"), sp_map.get("nbo spin")),
+            *(_log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=n_modes_written) if modes else []),
+            *_log_forces(frame, do_cell),
+            *["", " " + "Grad" * 18, "", f" Step number {step}", "", " " + "Grad" * 18],
         ]
+        n_modes_written += len(modes)
     dump_lines[-2:-2] = [" Optimization completed.", "    -- Stationary point found."]
     dump_lines += [*_log_input_orientation(traj[-1], do_cell=do_cell), " Normal termination of Gaussian 16"]
     return "\n".join(dump_lines)
@@ -1557,46 +1568,6 @@ def _log_vib_helper_helper(
     return log_lines
 
 
-def _log_vibrations(frame: Structure | Molecule, do_cell=True, idx_offset: int = 0) -> list[str]:
-    if do_cell or ("vibrational_modes" not in frame.properties):
-        return []
-    modes = frame.properties["vibrational_modes"]
-    return _log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=idx_offset)
-
-
-def _struc_to_vib_traj(structure: Structure) -> Trajectory:
-    from pymatgen.core.trajectory import Trajectory  # added in port: runtime import
-
-    frame = structure
-    nModes = len(frame.properties["vibrational_modes"])
-    nAtoms = len(frame)
-    nModesPerFrame = 3 * nAtoms - 3
-    nFramesTot = int(np.ceil(nModes / nModesPerFrame))
-    base_properties = frame.properties.copy()
-    all_modes = base_properties.pop("vibrational_modes")
-    base_frame = frame.copy()
-    frames = []
-    for iFrame in range(nFramesTot):
-        start_idx = iFrame * nModesPerFrame
-        end_idx = min(start_idx + nModesPerFrame, nModes)
-        frame = base_frame.copy()
-        frame.properties = base_properties.copy()
-        frame.properties["vibrational_modes"] = all_modes[start_idx:end_idx]
-        frames.append(frame)
-    return Trajectory.from_structures(
-        structures=frames,
-        frame_properties=[frame.properties for frame in frames],
-    )
-
-
-def _struc_to_gaussian_vib_log(structure: Structure, sp_map: dict[str, str]) -> str:
-    write_traj = _struc_to_vib_traj(structure)
-    vib_idx_offsets = [i * (3 * len(structure) - 3) for i in range(len(write_traj))]
-    return _traj_to_gaussian_log(
-        write_traj, do_cell=False, energies=[0] * len(write_traj), sp_map=sp_map, vib_idx_offsets=vib_idx_offsets
-    )
-
-
 def write_Gaussian_vib_log(
     structure: Structure,
     filename: PathLike = "calc.log",
@@ -1621,15 +1592,10 @@ def write_Gaussian_vib_log(
             not write the lattice information in the log file, but will enable the "forces" site properties
             to be readable by Gaussview.
     """
-    # Import inside function as this is an expensive import
-    # (causes import time for Trajectory to surpass threshold for 3 test setups)
-    # from pymatgen.io.gaussian import _traj_to_gaussian_log
-    # structure.to_positions()
-    _sp_map = site_property_map or {}
-    lines = _struc_to_gaussian_vib_log(structure, _sp_map)
-    with open(filename, "w") as file:
-        file.write(lines)
-    file.close()
+    from pymatgen.core.trajectory import Trajectory
+
+    traj = Trajectory.from_structures([structure], frame_properties=[structure.properties])
+    traj.write_Gaussian_log(filename, site_property_map, write_lattice=False, split_vib_modes=True)
 
 
 # ----------------------------------------------------------------------------

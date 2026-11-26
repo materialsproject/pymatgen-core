@@ -493,6 +493,7 @@ class Trajectory(MSONable):
         filename: PathLike = "calc.log",
         site_property_map: dict[str, str] | None = None,
         write_lattice: bool = True,
+        split_vib_modes: bool = False,
     ) -> None:
         """Write Trajectory object to a Gaussian-formatted log file.
 
@@ -514,6 +515,9 @@ class Trajectory(MSONable):
                 not write the lattice information in the log file, but will enable the "forces" site properties
                 to be readable by Gaussview, and the vibrational modes to be written. Ignored for trajectories
                 without a lattice.
+            split_vib_modes: Whether to write at most 3N - 3 vibrational modes per frame (N atoms), inserting a
+                copy of the frame for each further 3N - 3 modes. Off by default, so that each frame in the log
+                file is a frame of the trajectory. Mode numbers run on through the whole file.
         """
         # Import inside function as this is an expensive import
         # (causes import time for Trajectory to surpass threshold for 3 test setups)
@@ -532,7 +536,7 @@ class Trajectory(MSONable):
                 "Call write_Gaussian_log with write_lattice=False to write them.",
                 stacklevel=2,
             )
-        lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {})
+        lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {}, split_vib_modes)
         with open(filename, "w") as file:
             file.write(lines)
 
