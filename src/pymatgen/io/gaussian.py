@@ -1380,6 +1380,8 @@ def _traj_to_gaussian_log(
         modes = [] if do_cell else frame.properties.get("vibrational_modes") or []
         n_max = 3 * len(frame) - 3
         if split_vib_modes and len(modes) > n_max:
+            if n_max < 1:
+                raise ValueError("Cannot split the vibrational modes of a 1-atom frame, which holds 3N - 3 = 0 modes")
             write_frames += [(frame, energies[i], modes[j : j + n_max]) for j in range(0, len(modes), n_max)]
         else:
             write_frames.append((frame, energies[i], modes))
@@ -1504,10 +1506,13 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
     freq_str = "cm^-1"
     ir_str = "IR intensity"
     nModes = len(modes)
-    nAtoms = len(modes[0].get(disp_str, [])) if nModes > 0 else 0
+    nAtoms = len(atomic_numbers)
     displacements = np.zeros((nModes, nAtoms, 3))
     for i, mode in enumerate(modes):
-        freq = mode.get(freq_str, 0.0)
+        mode_name = f"Vibrational mode {idx_offset + i + 1}"  # numbered as in the log file
+        if freq_str not in mode:
+            raise ValueError(f"{mode_name} has no frequency ({freq_str!r}): {mode}")
+        freq = mode[freq_str]
         if np.imag(freq) != 0.0:
             freq = np.abs(freq) * -1.0
         frequencies.append(freq)
@@ -1516,11 +1521,14 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
         IR_intensities.append(ir)
         disp = mode.get(disp_str, [])
         if not len(disp):
-            raise ValueError(f"No displacements found in mode {i} ({mode})")
-        # add atom displacements individually in case of missing atoms
-        for j, atom_disp in enumerate(disp):
-            displacements[i, j] += np.array(atom_disp)
-        displacements[i] /= np.linalg.norm(displacements[i])
+            raise ValueError(f"{mode_name} has no displacements ({disp_str!r}): {mode}")
+        if len(disp) != nAtoms:
+            raise ValueError(f"{mode_name} has displacements for {len(disp)} sites, but the frame has {nAtoms}")
+        displacements[i] = disp
+        norm = np.linalg.norm(displacements[i])
+        if norm == 0:
+            raise ValueError(f"{mode_name} has all-zero displacements, so it cannot be normalized")
+        displacements[i] /= norm
     # log_str = " ".join([f"{i+1}" for i in range(nModes)]) + " \n"
     log_lines = [
         " Harmonic frequencies (cm**-1), IR intensities (KM/Mole), Raman scattering",
@@ -1593,6 +1601,15 @@ def write_Gaussian_vib_log(
             property keys are "mulliken charges", "mulliken spin", "nbo charges", "nbo spin", and "esp charges".
             Properties without a mapping are not written.
     """
+    if isinstance(structure, Molecule):
+        raise TypeError(
+            "write_Gaussian_vib_log takes a Structure. For a Molecule, call Trajectory.from_molecules([molecule], "
+            "frame_properties=[molecule.properties]).write_Gaussian_log(filename, split_vib_modes=True)"
+        )
+    if not structure.properties.get("vibrational_modes"):
+        raise ValueError(
+            'structure.properties["vibrational_modes"] is missing or empty, so there are no modes to write'
+        )
     from pymatgen.core.trajectory import Trajectory
 
     traj = Trajectory.from_structures([structure], frame_properties=[structure.properties])
