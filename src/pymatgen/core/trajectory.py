@@ -512,7 +512,8 @@ class Trajectory(MSONable):
                 to site properties of `list[float]`
             write_lattice: Whether to write the lattice information in the log file. Setting this to false will
                 not write the lattice information in the log file, but will enable the "forces" site properties
-                to be readable by Gaussview. Ignored for trajectories without a lattice.
+                to be readable by Gaussview, and the vibrational modes to be written. Ignored for trajectories
+                without a lattice.
         """
         # Import inside function as this is an expensive import
         # (causes import time for Trajectory to surpass threshold for 3 test setups)
@@ -525,6 +526,12 @@ class Trajectory(MSONable):
             energies = [0] * len(self)
         self.to_positions()
         do_cell = write_lattice and self.lattice is not None
+        if do_cell and any(fp.get("vibrational_modes") for fp in self.frame_properties or []):
+            warnings.warn(
+                "Vibrational modes are not written to the log file when the lattice is written. "
+                "Call write_Gaussian_log with write_lattice=False to write them.",
+                stacklevel=2,
+            )
         lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {})
         with open(filename, "w") as file:
             file.write(lines)

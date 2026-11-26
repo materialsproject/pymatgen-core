@@ -486,6 +486,11 @@ class TestTrajectory(MatSciTest):
             text = file.read()
         assert text.count("SCF Done:  E =  0.000000") == 2
         assert " -2 0 " in text  # lattice vectors written
+        vib_traj = Trajectory.from_structures(
+            [self.traj[0]], frame_properties=[{"vibrational_modes": [{"cm^-1": 1.0}]}]
+        )
+        with pytest.warns(UserWarning, match="write_lattice=False"):
+            vib_traj.write_Gaussian_log("vib.logx")
 
         mol = Molecule(
             ["O", "H", "H"],
