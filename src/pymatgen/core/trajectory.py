@@ -497,7 +497,9 @@ class Trajectory(MSONable):
         """Write Trajectory object to a Gaussian-formatted log file.
 
         The produced file will be readable by Gaussview. Frame energies ("energy", eV) and site forces ("forces",
-        eV/Angstrom) are converted to Gaussian's units (Hartree, Hartree/Bohr).
+        eV/Angstrom) are converted to Gaussian's units (Hartree, Hartree/Bohr). The IR intensity of each
+        vibrational mode (the "IR intensity" key of each dict in the "vibrational_modes" frame property) is
+        expected in e^2/amu, and is converted to km/mol.
 
         Args:
             filename: File to write. File does not need to end with '.log' to be readable by Gaussview.

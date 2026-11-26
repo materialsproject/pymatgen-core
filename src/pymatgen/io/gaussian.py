@@ -13,7 +13,7 @@ from scipy.stats import norm
 from pymatgen.core import Composition, Element, Molecule
 from pymatgen.core import constants as cst
 from pymatgen.core.operations import SymmOp
-from pymatgen.core.units import Ha_to_eV, bohr_to_ang, eV_to_Ha
+from pymatgen.core.units import Ha_to_eV, amu_to_kg, bohr_to_ang, eV_to_Ha
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.util.coord import get_angle
 from pymatgen.util.plotting import pretty_plot
@@ -1500,7 +1500,8 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
         if np.imag(freq) != 0.0:
             freq = np.abs(freq) * -1.0
         frequencies.append(freq)
-        ir = mode.get(ir_str, 0.0)
+        # e^2/amu to km/mol: A = N_A / (12 eps_0 c^2) * |dmu/dQ|^2
+        ir = mode.get(ir_str, 0.0) * cst.N_A * cst.e**2 / (12 * cst.epsilon_0 * cst.c**2 * amu_to_kg) / 1e3
         IR_intensities.append(ir)
         disp = mode.get(disp_str, [])
         if not len(disp):
@@ -1603,7 +1604,9 @@ def write_Gaussian_vib_log(
 ) -> None:
     """Write Trajectory object to a Gaussian-formatted log file.
 
-    The produced file will be readable by Gaussview.
+    The produced file will be readable by Gaussview. The IR intensity of each mode (the "IR intensity" key of each
+    dict in `structure.properties["vibrational_modes"]`) is expected in e^2/amu, and is converted to Gaussian's
+    km/mol.
 
     Args:
         filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
