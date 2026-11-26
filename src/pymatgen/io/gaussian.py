@@ -1365,14 +1365,23 @@ class GaussianOutput:
         )
 
 
-def _traj_to_gaussian_log(traj: Trajectory, do_cell: bool, energies: list[float], sp_map: dict[str, str]) -> str:
+def _traj_to_gaussian_log(
+    traj: Trajectory,
+    do_cell: bool,
+    energies: list[float],
+    sp_map: dict[str, str],
+    vib_idx_offsets: list[int] | None = None,
+) -> str:
     dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
+    if vib_idx_offsets is None:
+        vib_idx_offsets = [0] * len(traj)
     for i in range(len(traj)):
         dump_lines += [
             *[*_log_input_orientation(traj[i], do_cell=do_cell), f"SCF Done:  E =  {energies[i] * eV_to_Ha:.6f}  "],
             *_log_mulliken(traj[i], sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
             *_log_esp(traj[i], sp_map.get("esp charges")),
             *_log_nbo(traj[i], sp_map.get("nbo charges"), sp_map.get("nbo spin")),
+            *_log_vibrations(traj[i], do_cell=do_cell, idx_offset=vib_idx_offsets[i]),
             *_log_forces(traj[i], do_cell),
             *["", " " + "Grad" * 18, "", f" Step number {i + 1}", "", " " + "Grad" * 18],
         ]
@@ -1475,6 +1484,146 @@ def _log_forces(frame: Structure | Molecule, do_cell: bool = True) -> list[str]:
         max_f, rms_f = np.abs(forces).max(), np.sqrt(np.mean(forces**2))
         dump_lines += [" " + "-" * 67, f" Cartesian Forces:  Max {max_f:.9f} RMS {rms_f:.9f}"]
     return dump_lines
+
+
+def _log_vib_helper(modes: list[dict], idx_offset: int = 0):
+    frequencies = []
+    IR_intensities = []
+    disp_str = "Displacements"
+    freq_str = "cm^-1"
+    ir_str = "IR intensity"
+    nModes = len(modes)
+    nAtoms = len(modes[0].get(disp_str, [])) if nModes > 0 else 0
+    displacements = np.zeros((nModes, nAtoms, 3))
+    for i, mode in enumerate(modes):
+        freq = mode.get(freq_str, 0.0)
+        if np.imag(freq) != 0.0:
+            freq = np.abs(freq) * -1.0
+        frequencies.append(freq)
+        ir = mode.get(ir_str, 0.0)
+        IR_intensities.append(ir)
+        disp = mode.get(disp_str, [])
+        if not len(disp):
+            raise ValueError(f"No displacements found in mode {i} ({mode})")
+        # add atom displacements individually in case of missing atoms
+        for j, atom_disp in enumerate(disp):
+            displacements[i, j] += np.array(atom_disp)
+        displacements[i] /= np.linalg.norm(displacements[i])
+    # log_str = " ".join([f"{i+1}" for i in range(nModes)]) + " \n"
+    log_lines = [
+        " Harmonic frequencies (cm**-1), IR intensities (KM/Mole), Raman scattering",
+        " activities (A**4/AMU), depolarization ratios for plane and unpolarized",
+        " incident light, reduced masses (AMU), force constants (mDyne/A),",
+        " and normal coordinates:",
+    ]
+    # nSlices = nModes // 3
+    nSlices = int(np.ceil(nModes / 3))
+    for iSlice in range(nSlices):
+        start_idx = iSlice * 3
+        end_idx = min(start_idx + 3, nModes)
+        mod_idcs = list(range(start_idx + 1 + idx_offset, idx_offset + min(end_idx + 1, nModes + 1)))
+        displacements_slice = displacements[start_idx:end_idx, :, :]
+        freqs_slice = frequencies[start_idx:end_idx]
+        ir_intensities_slice = IR_intensities[start_idx:end_idx]
+        log_lines += _log_vib_helper_helper(displacements_slice, mod_idcs, freqs_slice, ir_intensities_slice, nAtoms)
+    return log_lines
+
+
+def _log_vib_helper_helper(
+    displacements_slice: NDArray[np.float64],
+    mod_idcs: list[int],
+    freqs: list[float],
+    ir_intensities: list[float],
+    nAtoms: int,
+):
+    nModes = len(mod_idcs)
+    log_lines = [
+        " ".join([f"{idx}" for idx in mod_idcs]),
+        " ".join(["A1" for _ in range(nModes)]),
+        " Frequencies -- " + " ".join([f"{f:.4f}" for f in freqs]),
+        " IR Inten    -- " + " ".join([f"{ir:.4f}" for ir in ir_intensities]),
+        "  Atom  AN " + "X Y Z " * len(mod_idcs),
+    ]
+    for iAtom in range(nAtoms):
+        idisps = displacements_slice[:, iAtom, :]
+        log_lines.append(
+            f"     {iAtom + 1}   1 "
+            + " ".join(" ".join([f"{idisps[i][j]:.2f}" for j in range(3)]) + " " for i in range(nModes))
+        )
+    return log_lines
+
+
+def _log_vibrations(frame: Structure | Molecule, do_cell=True, idx_offset: int = 0) -> list[str]:
+    if do_cell or ("vibrational_modes" not in frame.properties):
+        return []
+    modes = frame.properties["vibrational_modes"]
+    return _log_vib_helper(modes, idx_offset=idx_offset)
+
+
+def _struc_to_vib_traj(structure: Structure) -> Trajectory:
+    from pymatgen.core.trajectory import Trajectory  # added in port: runtime import
+
+    frame = structure
+    nModes = len(frame.properties["vibrational_modes"])
+    nAtoms = len(frame)
+    nModesPerFrame = 3 * nAtoms - 3
+    nFramesTot = int(np.ceil(nModes / nModesPerFrame))
+    base_properties = frame.properties.copy()
+    all_modes = base_properties.pop("vibrational_modes")
+    base_frame = frame.copy()
+    frames = []
+    for iFrame in range(nFramesTot):
+        start_idx = iFrame * nModesPerFrame
+        end_idx = min(start_idx + nModesPerFrame, nModes)
+        frame = base_frame.copy()
+        frame.properties = base_properties.copy()
+        frame.properties["vibrational_modes"] = all_modes[start_idx:end_idx]
+        frames.append(frame)
+    return Trajectory.from_structures(
+        structures=frames,
+        frame_properties=[frame.properties for frame in frames],
+    )
+
+
+def _struc_to_gaussian_vib_log(structure: Structure, sp_map: dict[str, str]) -> str:
+    write_traj = _struc_to_vib_traj(structure)
+    vib_idx_offsets = [i * (3 * len(structure) - 3) for i in range(len(write_traj))]
+    return _traj_to_gaussian_log(
+        write_traj, do_cell=False, energies=[0] * len(write_traj), sp_map=sp_map, vib_idx_offsets=vib_idx_offsets
+    )
+
+
+def write_Gaussian_vib_log(
+    structure: Structure,
+    filename: PathLike = "calc.log",
+    site_property_map: dict[str, str] | None = None,
+) -> None:
+    """Write Trajectory object to a Gaussian-formatted log file.
+
+    The produced file will be readable by Gaussview.
+
+    Args:
+        filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
+            The suffix ".logx" is recommended to distinguish from real Gaussian log files.
+        site_property_map: A mapping between implemented Gaussian properties and pymatgen properties.
+            i.e. providing {"mulliken charges": "charges"} will write the data stored in
+            `Trajectory[i].site_properties["charges"]` as Gaussian logs the Mulliken charges for each site.
+            The currently implemented property keys are "mulliken charges", "mulliken spin", "nbo charges",
+            "nbo spin", and "esp charges". By default all charge keys are mapped to "charges", and all spin
+            keys are mapped to "magmom". All keys must map to site properties of `list[float]`
+        write_lattice: Whether to write the lattice information in the log file. Setting this to false will
+            not write the lattice information in the log file, but will enable the "forces" site properties
+            to be readable by Gaussview.
+    """
+    # Import inside function as this is an expensive import
+    # (causes import time for Trajectory to surpass threshold for 3 test setups)
+    # from pymatgen.io.gaussian import _traj_to_gaussian_log
+    # structure.to_positions()
+    _sp_map = site_property_map or {}
+    lines = _struc_to_gaussian_vib_log(structure, _sp_map)
+    with open(filename, "w") as file:
+        file.write(lines)
+    file.close()
 
 
 # ----------------------------------------------------------------------------
