@@ -649,7 +649,6 @@ class TestGaussianInputSerialization:
     [
         (["H", "H"], [], "no modes to write"),
         (["H"], [{"cm^-1": 100.0, "Displacements": [[1, 0, 0]]}], "1-atom"),
-        (["H", "H"], [{"Displacements": [[1, 0, 0]] * 2}], "has no frequency"),
         (["H", "H"], [{"cm^-1": 100.0}], "has no displacements"),
         (["H", "H"], [{"cm^-1": 100.0, "Displacements": [[0, 0, 0]] * 2}], "all-zero displacements"),
         (["H", "H"], [{"cm^-1": 100.0, "Displacements": [[1, 0, 0]] * 3}], "for 3 sites, but the frame has 2"),

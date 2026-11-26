@@ -1510,9 +1510,7 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
     displacements = np.zeros((nModes, nAtoms, 3))
     for i, mode in enumerate(modes):
         mode_name = f"Vibrational mode {idx_offset + i + 1}"  # numbered as in the log file
-        if freq_str not in mode:
-            raise ValueError(f"{mode_name} has no frequency ({freq_str!r}): {mode}")
-        freq = mode[freq_str]
+        freq = mode.get(freq_str, 0.0)
         frequencies.append(-np.abs(freq) if np.imag(freq) != 0.0 else np.real(freq))
         # e^2/amu to km/mol: A = N_A / (12 eps_0 c^2) * |dmu/dQ|^2
         ir = mode.get(ir_str, 0.0) * cst.N_A * cst.e**2 / (12 * cst.epsilon_0 * cst.c**2 * amu_to_kg) / 1e3
@@ -1589,10 +1587,8 @@ def write_Gaussian_vib_log(
     The produced file will be readable by Gaussview. The structure is written without its lattice, once for every
     3N - 3 modes (N atoms), as `Trajectory.write_Gaussian_log` does with `split_vib_modes=True`.
 
-    Each dict in `structure.properties["vibrational_modes"]` is one mode, with the keys "cm^-1" (frequency in cm^-1;
-    one with a nonzero imaginary part is written as minus its magnitude), "Displacements" (a vector per site,
-    normalized before writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). Every
-    mode gets the symmetry label "A1", which is only a placeholder. An "energy" in `structure.properties` (eV) is
+    The modes in `structure.properties["vibrational_modes"]` take the form described in
+    `Trajectory.write_Gaussian_log`: only "Displacements" is required. An "energy" in `structure.properties` (eV) is
     written as the energy of every frame.
 
     Args:
