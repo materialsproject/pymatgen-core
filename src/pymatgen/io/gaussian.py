@@ -1573,24 +1573,25 @@ def write_Gaussian_vib_log(
     filename: PathLike = "calc.log",
     site_property_map: dict[str, str] | None = None,
 ) -> None:
-    """Write Trajectory object to a Gaussian-formatted log file.
+    """Write the vibrational modes of a Structure to a Gaussian-formatted log file.
 
-    The produced file will be readable by Gaussview. The IR intensity of each mode (the "IR intensity" key of each
-    dict in `structure.properties["vibrational_modes"]`) is expected in e^2/amu, and is converted to Gaussian's
-    km/mol.
+    The produced file will be readable by Gaussview. The structure is written without its lattice, once for every
+    3N - 3 modes (N atoms), as `Trajectory.write_Gaussian_log` does with `split_vib_modes=True`.
+
+    Each dict in `structure.properties["vibrational_modes"]` is one mode, with the keys "cm^-1" (frequency in cm^-1;
+    a complex frequency is written as a negative one), "Displacements" (a vector per site, normalized before
+    writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). An "energy" in
+    `structure.properties` (eV) is written as the energy of every frame.
 
     Args:
+        structure: Structure whose `properties["vibrational_modes"]` holds the modes to write.
         filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
             The suffix ".logx" is recommended to distinguish from real Gaussian log files.
-        site_property_map: A mapping between implemented Gaussian properties and pymatgen properties.
-            i.e. providing {"mulliken charges": "charges"} will write the data stored in
-            `Trajectory[i].site_properties["charges"]` as Gaussian logs the Mulliken charges for each site.
-            The currently implemented property keys are "mulliken charges", "mulliken spin", "nbo charges",
-            "nbo spin", and "esp charges". By default all charge keys are mapped to "charges", and all spin
-            keys are mapped to "magmom". All keys must map to site properties of `list[float]`
-        write_lattice: Whether to write the lattice information in the log file. Setting this to false will
-            not write the lattice information in the log file, but will enable the "forces" site properties
-            to be readable by Gaussview.
+        site_property_map: A mapping between implemented Gaussian properties and site properties of `structure`,
+            as in `Trajectory.write_Gaussian_log`, i.e. providing {"mulliken charges": "charges"} will write
+            `structure.site_properties["charges"]` as the Mulliken charges of each site. The currently implemented
+            property keys are "mulliken charges", "mulliken spin", "nbo charges", "nbo spin", and "esp charges".
+            Properties without a mapping are not written.
     """
     from pymatgen.core.trajectory import Trajectory
 
