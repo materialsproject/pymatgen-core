@@ -2886,9 +2886,16 @@ Sites (8)
         struct.cart_coords = [[1, 1, 1], [2, 2, 2]]
         assert_allclose(struct[0].frac_coords, [0.25, 0.25, 0.25])
         assert_allclose(struct[1].frac_coords, [0.4, 0.4, 0.4])  # converted with the site's own lattice
+        assert all(site.coords.flags.owndata for site in struct)
         struct.translate_sites([0, 1], [0.1, 0, 0], to_unit_cell=False)
         assert_allclose(struct[1].frac_coords, [0.5, 0.4, 0.4])
         assert_allclose(struct[1].coords, [2.5, 2, 2])
+        # A Cartesian translation is converted to fractional coords with the structure's lattice (as before
+        # vectorization), while the site's Cartesian coords follow from its own lattice
+        struct.translate_sites([0, 1], [1, 0, 0], frac_coords=False, to_unit_cell=False)
+        assert_allclose(struct[0].frac_coords, [0.6, 0.25, 0.25])
+        assert_allclose(struct[1].frac_coords, [(2.5 + 1) / 4, 0.5, 0.5])
+        assert_allclose(struct[1].coords, np.array([(2.5 + 1) / 4, 0.5, 0.5]) * 5)
 
     def test_lattice_setter_updates_cart_coords(self):
         frac = self.struct.frac_coords

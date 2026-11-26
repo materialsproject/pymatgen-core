@@ -4346,7 +4346,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         if not self._sites_share_lattice():
             # Each site converts with its own lattice, as before
             for site, c_coords in zip(self._sites, cartesian_coords, strict=True):
-                site.coords = c_coords
+                site.coords = c_coords.copy()  # the coords setter does not copy; keep sites owning their arrays
             return
         frac_coords = self._lattice.get_fractional_coords(cartesian_coords)
         self._set_site_coords(range(len(self._sites)), frac_coords, cartesian_coords)
@@ -4728,8 +4728,8 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         Args:
             indices: Integer or iterable of site indices on which to perform the
                 translation.
-            vector: Translation vector for sites, or an array of per-site vectors that broadcasts to
-                (len(indices), 3).
+            vector: Translation vector for sites: a (3,) vector applied to every site, or a 2D array
+                with one row per site that broadcasts to (len(indices), 3).
             frac_coords (bool): Whether the vector corresponds to fractional or
                 Cartesian coordinates.
             to_unit_cell (bool): Whether the new coordinates are transformed to the unit
@@ -4750,8 +4750,10 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         if vectors.ndim == 2 and len(vectors) != len(idx_list):
             raise ValueError(f"Got {len(vectors)} translation vectors for {len(idx_list)} sites.")
         if len(set(idx_list)) != len(idx_list) or not self._sites_share_lattice(idx_list):
-            # Repeated indices translate the same site several times; sites with a foreign lattice need their
-            # own conversion. Apply such translations one site at a time (the pre-vectorization algorithm).
+            # Repeated indices translate the same site several times, and sites whose lattice is not the
+            # structure's must recompute their Cartesian coords from their own lattice. Apply such translations
+            # one site at a time with the pre-vectorization algorithm, which (as on main) converts a Cartesian
+            # translation to fractional coords with the structure's lattice.
             for pos, idx in enumerate(idx_list):
                 vec = vectors[pos] if vectors.ndim == 2 else vectors
                 site = self._sites[idx]
