@@ -1513,9 +1513,7 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
         if freq_str not in mode:
             raise ValueError(f"{mode_name} has no frequency ({freq_str!r}): {mode}")
         freq = mode[freq_str]
-        if np.imag(freq) != 0.0:
-            freq = np.abs(freq) * -1.0
-        frequencies.append(freq)
+        frequencies.append(-np.abs(freq) if np.imag(freq) != 0.0 else np.real(freq))
         # e^2/amu to km/mol: A = N_A / (12 eps_0 c^2) * |dmu/dQ|^2
         ir = mode.get(ir_str, 0.0) * cst.N_A * cst.e**2 / (12 * cst.epsilon_0 * cst.c**2 * amu_to_kg) / 1e3
         IR_intensities.append(ir)
@@ -1587,9 +1585,9 @@ def write_Gaussian_vib_log(
     3N - 3 modes (N atoms), as `Trajectory.write_Gaussian_log` does with `split_vib_modes=True`.
 
     Each dict in `structure.properties["vibrational_modes"]` is one mode, with the keys "cm^-1" (frequency in cm^-1;
-    a complex frequency is written as a negative one), "Displacements" (a vector per site, normalized before
-    writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). An "energy" in
-    `structure.properties` (eV) is written as the energy of every frame.
+    one with a nonzero imaginary part is written as minus its magnitude), "Displacements" (a vector per site,
+    normalized before writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). An "energy"
+    in `structure.properties` (eV) is written as the energy of every frame.
 
     Args:
         structure: Structure whose `properties["vibrational_modes"]` holds the modes to write.
