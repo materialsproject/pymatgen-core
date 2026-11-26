@@ -520,9 +520,10 @@ class Trajectory(MSONable):
                 not write the lattice information in the log file, but will enable the "forces" site properties
                 to be readable by Gaussview, and the vibrational modes to be written. Ignored for trajectories
                 without a lattice.
-            split_vib_modes: Whether to write at most 3N - 3 vibrational modes per frame (N atoms), inserting a
-                copy of the frame for each further 3N - 3 modes. Off by default, so that each frame in the log
-                file is a frame of the trajectory. Mode numbers run on through the whole file.
+            split_vib_modes: Whether to write at most 3N - 3 vibrational modes per frame (N atoms), the most
+                GaussView reads from one frame, inserting a copy of the frame for each further 3N - 3 modes. Off by
+                default, so that each frame in the log file is a frame of the trajectory. Mode numbers start from 1
+                in each trajectory frame and run on through its inserted copies.
         """
         # Import inside function as this is an expensive import
         # (causes import time for Trajectory to surpass threshold for 3 test setups)
@@ -539,6 +540,15 @@ class Trajectory(MSONable):
             warnings.warn(
                 "Vibrational modes are not written to the log file when the lattice is written. "
                 "Call write_Gaussian_log with write_lattice=False to write them.",
+                stacklevel=2,
+            )
+        n_max = 3 * len(self.species) - 3
+        if not (do_cell or split_vib_modes) and any(
+            len(fp.get("vibrational_modes") or []) > n_max for fp in self.frame_properties or []
+        ):
+            warnings.warn(
+                f"A frame has more than 3N - 3 = {n_max} vibrational modes, the most GaussView reads from one frame. "
+                "Call write_Gaussian_log with split_vib_modes=True to write the rest in inserted copies of the frame.",
                 stacklevel=2,
             )
         lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {}, split_vib_modes)

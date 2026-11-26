@@ -1372,8 +1372,8 @@ def _traj_to_gaussian_log(
     sp_map: dict[str, str],
     split_vib_modes: bool = False,
 ) -> str:
-    # (frame, energy, vibrational modes) to write; with split_vib_modes, a frame with more than 3N - 3 modes is
-    # written once for each 3N - 3 of them
+    # (frame, energy, vibrational modes, number of the frame's modes before them) to write; with split_vib_modes,
+    # a frame with more than 3N - 3 modes is written once for each 3N - 3 of them
     write_frames = []
     for i in range(len(traj)):
         frame = traj[i]
@@ -1382,22 +1382,20 @@ def _traj_to_gaussian_log(
         if split_vib_modes and len(modes) > n_max:
             if n_max < 1:
                 raise ValueError("Cannot split the vibrational modes of a 1-atom frame, which holds 3N - 3 = 0 modes")
-            write_frames += [(frame, energies[i], modes[j : j + n_max]) for j in range(0, len(modes), n_max)]
+            write_frames += [(frame, energies[i], modes[j : j + n_max], j) for j in range(0, len(modes), n_max)]
         else:
-            write_frames.append((frame, energies[i], modes))
+            write_frames.append((frame, energies[i], modes, 0))
     dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
-    n_modes_written = 0  # mode numbers run on through the file, not from 1 in each frame
-    for step, (frame, energy, modes) in enumerate(write_frames, start=1):
+    for step, (frame, energy, modes, idx_offset) in enumerate(write_frames, start=1):
         dump_lines += [
             *[*_log_input_orientation(frame, do_cell=do_cell), f"SCF Done:  E =  {energy * eV_to_Ha:.6f}  "],
             *_log_mulliken(frame, sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
             *_log_esp(frame, sp_map.get("esp charges")),
             *_log_nbo(frame, sp_map.get("nbo charges"), sp_map.get("nbo spin")),
-            *(_log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=n_modes_written) if modes else []),
+            *(_log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=idx_offset) if modes else []),
             *_log_forces(frame, do_cell),
             *["", " " + "Grad" * 18, "", f" Step number {step}", "", " " + "Grad" * 18],
         ]
-        n_modes_written += len(modes)
     dump_lines[-2:-2] = [" Optimization completed.", "    -- Stationary point found."]
     dump_lines += [*_log_input_orientation(traj[-1], do_cell=do_cell), " Normal termination of Gaussian 16"]
     return "\n".join(dump_lines)

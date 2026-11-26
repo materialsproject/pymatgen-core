@@ -514,18 +514,21 @@ class TestTrajectory(MatSciTest):
         mol = Molecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 1], [0, 1, 0]])
         modes = [{"cm^-1": 100.0 * (k + 1), "Displacements": [[1, 0, 0]] * 3} for k in range(9)]  # 9 > 3N - 3 = 6
         traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"vibrational_modes": modes}] * 2)
-        traj.write_Gaussian_log("vib.logx")
+        with pytest.warns(UserWarning, match="split_vib_modes=True"):  # 9 modes > 3N - 3 = 6
+            traj.write_Gaussian_log("vib.logx")
         with open("vib.logx") as file:
             text = file.read()
         assert text.count("Harmonic frequencies") == 2  # one block per frame
-        assert "\n16 17 18\n" in text  # mode numbers run on into the second frame
+        assert text.count("\n7 8 9\n") == 2  # mode numbers start from 1 in each frame
+        assert "\n10 11 12\n" not in text
 
         traj.write_Gaussian_log("vib_split.logx", split_vib_modes=True)
         with open("vib_split.logx") as file:
             text = file.read()
         assert text.count("Harmonic frequencies") == 4  # 6 + 3 modes for each frame
         assert "Step number 4" in text
-        assert "\n16 17 18\n" in text
+        assert text.count("\n7 8 9\n") == 2  # numbers run on through the inserted copies, then start again
+        assert "\n10 11 12\n" not in text
 
     def test_from_file(self):
         try:
