@@ -2875,7 +2875,9 @@ Sites (8)
         struct = Structure(lattice, ["Si"] * 6, coords, coords_are_cartesian=True, to_unit_cell=True)
         for site, cart in zip(struct, coords, strict=True):
             ref = PeriodicSite("Si", cart, lattice, to_unit_cell=True, coords_are_cartesian=True)
-            assert_array_equal(site.frac_coords, ref.frac_coords)
+            # Not bit-for-bit: the bulk (N, 3) @ (3, 3) product may round differently from the per-site
+            # (3,) @ (3, 3) one depending on the BLAS backend (seen as a 1-ULP difference on lowest-direct CI)
+            assert_allclose(site.frac_coords, ref.frac_coords, rtol=0, atol=1e-12)
             assert_allclose(site.coords, ref.coords, atol=1e-12)
         assert np.all((struct.frac_coords[:, :2] >= 0) & (struct.frac_coords[:, :2] < 1))
         assert (struct.frac_coords[:, 2] < 0).any() or (struct.frac_coords[:, 2] >= 1).any()
