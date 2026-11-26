@@ -1528,6 +1528,9 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
             raise ValueError(f"{mode_name} has all-zero displacements, so it cannot be normalized")
         displacements[i] /= norm
     # log_str = " ".join([f"{i+1}" for i in range(nModes)]) + " \n"
+    # GaussView reads the block by this header, so it stays as Gaussian prints it.
+    # TODO: write the reduced masses, force constants, Raman activities and depolarization ratios it announces, so
+    # that GaussView can show them.
     log_lines = [
         " Harmonic frequencies (cm**-1), IR intensities (KM/Mole), Raman scattering",
         " activities (A**4/AMU), depolarization ratios for plane and unpolarized",
@@ -1539,7 +1542,7 @@ def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: in
     for iSlice in range(nSlices):
         start_idx = iSlice * 3
         end_idx = min(start_idx + 3, nModes)
-        mod_idcs = list(range(start_idx + 1 + idx_offset, idx_offset + min(end_idx + 1, nModes + 1)))
+        mod_idcs = list(range(idx_offset + start_idx + 1, idx_offset + end_idx + 1))
         displacements_slice = displacements[start_idx:end_idx, :, :]
         freqs_slice = frequencies[start_idx:end_idx]
         ir_intensities_slice = IR_intensities[start_idx:end_idx]
@@ -1560,7 +1563,9 @@ def _log_vib_helper_helper(
     nModes = len(mod_idcs)
     log_lines = [
         " ".join([f"{idx}" for idx in mod_idcs]),
-        " ".join(["A1" for _ in range(nModes)]),
+        # TODO: label each mode with its irreducible representation from a symmetry analysis (PointGroupAnalyzer in
+        # pymatgen.symmetry.analyzer finds the point group, but does not assign modes to representations)
+        " ".join(["A1" for _ in range(nModes)]),  # placeholder symmetry label
         " Frequencies -- " + " ".join([f"{f:.4f}" for f in freqs]),
         " IR Inten    -- " + " ".join([f"{ir:.4f}" for ir in ir_intensities]),
         "  Atom  AN " + "X Y Z " * len(mod_idcs),
@@ -1586,8 +1591,9 @@ def write_Gaussian_vib_log(
 
     Each dict in `structure.properties["vibrational_modes"]` is one mode, with the keys "cm^-1" (frequency in cm^-1;
     one with a nonzero imaginary part is written as minus its magnitude), "Displacements" (a vector per site,
-    normalized before writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). An "energy"
-    in `structure.properties` (eV) is written as the energy of every frame.
+    normalized before writing) and, optionally, "IR intensity" (e^2/amu, converted to Gaussian's km/mol). Every
+    mode gets the symmetry label "A1", which is only a placeholder. An "energy" in `structure.properties` (eV) is
+    written as the energy of every frame.
 
     Args:
         structure: Structure whose `properties["vibrational_modes"]` holds the modes to write.
