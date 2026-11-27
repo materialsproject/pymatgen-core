@@ -481,7 +481,7 @@ class TestTrajectory(MatSciTest):
 
     def test_write_gaussian_log(self):
         # Reading by GaussView can't be tested, so check the lines it parses
-        self.traj[:2].write_Gaussian_log("struct.logx")
+        self.traj[:2].write_gaussian_log("struct.logx")
         with open("struct.logx") as file:
             text = file.read()
         assert text.count("SCF Done:  E =  0.000000") == 2
@@ -490,7 +490,7 @@ class TestTrajectory(MatSciTest):
             [self.traj[0]], frame_properties=[{"vibrational_modes": [{"cm^-1": 1.0}]}]
         )
         with pytest.warns(UserWarning, match="write_lattice=False"):
-            vib_traj.write_Gaussian_log("vib.logx")
+            vib_traj.write_gaussian_log("vib.logx")
 
         mol = Molecule(
             ["O", "H", "H"],
@@ -498,7 +498,7 @@ class TestTrajectory(MatSciTest):
             site_properties={"charges": [-1.0, 0.5, 0.5], "magmom": [0.5, 0.0, 0.0], "forces": [[0, 0, 0.1]] * 3},
         )
         traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"energy": None}, {"energy": -27.211386}])
-        traj.write_Gaussian_log("mol.logx", {"mulliken charges": "charges", "mulliken spin": "magmom"})
+        traj.write_gaussian_log("mol.logx", {"mulliken charges": "charges", "mulliken spin": "magmom"})
         with open("mol.logx") as file:
             text = file.read()
         assert "SCF Done:  E =  0.000000" in text
@@ -515,14 +515,14 @@ class TestTrajectory(MatSciTest):
         modes = [{"cm^-1": 100.0 * (k + 1), "Displacements": [[1, 0, 0]] * 3} for k in range(9)]  # 9 > 3N - 3 = 6
         traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"vibrational_modes": modes}] * 2)
         with pytest.warns(UserWarning, match="split_vib_modes=True"):  # 9 modes > 3N - 3 = 6
-            traj.write_Gaussian_log("vib.logx")
+            traj.write_gaussian_log("vib.logx")
         with open("vib.logx") as file:
             text = file.read()
         assert text.count("Harmonic frequencies") == 2  # one block per frame
         assert text.count("\n7 8 9\n") == 2  # mode numbers start from 1 in each frame
         assert "\n10 11 12\n" not in text
 
-        traj.write_Gaussian_log("vib_split.logx", split_vib_modes=True)
+        traj.write_gaussian_log("vib_split.logx", split_vib_modes=True)
         with open("vib_split.logx") as file:
             text = file.read()
         assert text.count("Harmonic frequencies") == 4  # 6 + 3 modes for each frame

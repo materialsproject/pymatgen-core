@@ -5,7 +5,7 @@ from pytest import approx
 
 from pymatgen.core.structure import Lattice, Molecule, Structure
 from pymatgen.electronic_structure.core import Spin
-from pymatgen.io.gaussian import GaussianInput, GaussianOutput, write_Gaussian_vib_log
+from pymatgen.io.gaussian import GaussianInput, GaussianOutput, write_gaussian_vib_log
 from pymatgen.util.testing import TEST_FILES_DIR
 
 TEST_DIR = f"{TEST_FILES_DIR}/io/gaussian"
@@ -658,11 +658,11 @@ def test_write_gaussian_vib_log_errors(species, modes, match):
     coords = [[0, 0, 0], [0, 0, 0.7]][: len(species)]
     structure = Structure(Lattice.cubic(5), species, coords, properties={"vibrational_modes": modes})
     with pytest.raises(ValueError, match=match):
-        write_Gaussian_vib_log(structure, "vib.logx")
+        write_gaussian_vib_log(structure, "vib.logx")
 
 
 def test_write_gaussian_vib_log_molecule():
     mode = {"cm^-1": 100.0, "Displacements": [[1, 0, 0]] * 2}
     molecule = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.7]], properties={"vibrational_modes": [mode]})
     with pytest.raises(TypeError, match="from_molecules"):
-        write_Gaussian_vib_log(molecule, "vib.logx")
+        write_gaussian_vib_log(molecule, "vib.logx")

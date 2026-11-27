@@ -488,7 +488,7 @@ class Trajectory(MSONable):
         with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(xdatcar_str)  # type:ignore[arg-type]
 
-    def write_Gaussian_log(
+    def write_gaussian_log(
         self,
         filename: PathLike = "calc.log",
         site_property_map: dict[str, str] | None = None,
@@ -539,7 +539,7 @@ class Trajectory(MSONable):
         if do_cell and any(fp.get("vibrational_modes") for fp in self.frame_properties or []):
             warnings.warn(
                 "Vibrational modes are not written to the log file when the lattice is written. "
-                "Call write_Gaussian_log with write_lattice=False to write them.",
+                "Call write_gaussian_log with write_lattice=False to write them.",
                 stacklevel=2,
             )
         n_max = 3 * len(self.species) - 3
@@ -548,7 +548,7 @@ class Trajectory(MSONable):
         ):
             warnings.warn(
                 f"A frame has more than 3N - 3 = {n_max} vibrational modes, the most GaussView reads from one frame. "
-                "Call write_Gaussian_log with split_vib_modes=True to write the rest in inserted copies of the frame.",
+                "Call write_gaussian_log with split_vib_modes=True to write the rest in inserted copies of the frame.",
                 stacklevel=2,
             )
         lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {}, split_vib_modes)

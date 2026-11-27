@@ -1575,7 +1575,7 @@ def _log_vib_helper_helper(
     return log_lines
 
 
-def write_Gaussian_vib_log(
+def write_gaussian_vib_log(
     structure: Structure,
     filename: PathLike = "calc.log",
     site_property_map: dict[str, str] | None = None,
@@ -1583,10 +1583,10 @@ def write_Gaussian_vib_log(
     """Write the vibrational modes of a Structure to a Gaussian-formatted log file.
 
     The produced file will be readable by Gaussview. The structure is written without its lattice, once for every
-    3N - 3 modes (N atoms), as `Trajectory.write_Gaussian_log` does with `split_vib_modes=True`.
+    3N - 3 modes (N atoms), as `Trajectory.write_gaussian_log` does with `split_vib_modes=True`.
 
     The modes in `structure.properties["vibrational_modes"]` take the form described in
-    `Trajectory.write_Gaussian_log`: only "Displacements" is required. An "energy" in `structure.properties` (eV) is
+    `Trajectory.write_gaussian_log`: only "Displacements" is required. An "energy" in `structure.properties` (eV) is
     written as the energy of every frame.
 
     Args:
@@ -1594,15 +1594,15 @@ def write_Gaussian_vib_log(
         filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
             The suffix ".logx" is recommended to distinguish from real Gaussian log files.
         site_property_map: A mapping between implemented Gaussian properties and site properties of `structure`,
-            as in `Trajectory.write_Gaussian_log`, i.e. providing {"mulliken charges": "charges"} will write
+            as in `Trajectory.write_gaussian_log`, i.e. providing {"mulliken charges": "charges"} will write
             `structure.site_properties["charges"]` as the Mulliken charges of each site. The currently implemented
             property keys are "mulliken charges", "mulliken spin", "nbo charges", "nbo spin", and "esp charges".
             Properties without a mapping are not written.
     """
     if isinstance(structure, Molecule):
         raise TypeError(
-            "write_Gaussian_vib_log takes a Structure. For a Molecule, call Trajectory.from_molecules([molecule], "
-            "frame_properties=[molecule.properties]).write_Gaussian_log(filename, split_vib_modes=True)"
+            "write_gaussian_vib_log takes a Structure. For a Molecule, call Trajectory.from_molecules([molecule], "
+            "frame_properties=[molecule.properties]).write_gaussian_log(filename, split_vib_modes=True)"
         )
     if not structure.properties.get("vibrational_modes"):
         raise ValueError(
@@ -1611,7 +1611,7 @@ def write_Gaussian_vib_log(
     from pymatgen.core.trajectory import Trajectory
 
     traj = Trajectory.from_structures([structure], frame_properties=[structure.properties])
-    traj.write_Gaussian_log(filename, site_property_map, write_lattice=False, split_vib_modes=True)
+    traj.write_gaussian_log(filename, site_property_map, write_lattice=False, split_vib_modes=True)
 
 
 # ----------------------------------------------------------------------------
