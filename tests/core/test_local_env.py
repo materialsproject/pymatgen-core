@@ -1196,6 +1196,22 @@ class TestLocalStructOrderParams(MatSciTest):
             ops_101.get_order_parameters(self.bcc, 0, indices_neighs=[2])
 
 
+def _summarize_nn_info(info):
+    return [
+        (
+            e["site_index"],
+            tuple(e["image"]),
+            e["weight"],
+            tuple(e["site"].coords),
+            type(e["site"]),
+            e["site"].index,
+            tuple(e["site"].image),
+            round(e["site"].nn_distance, 8),
+        )
+        for e in info
+    ]
+
+
 class TestCrystalNN(MatSciTest):
     def setup_method(self):
         self.lifepo4 = self.get_structure("LiFePO4")
@@ -1273,16 +1289,26 @@ class TestCrystalNN(MatSciTest):
 
     @pytest.mark.parametrize("kwargs", [{}, {"weighted_cn": True}, {"cation_anion": True}])
     def test_get_all_nn_info_matches_get_nn_info(self, kwargs):
-        # get_all_nn_info determines the bond targets once for all sites: results (including
-        # neighbor order and exact weights) must be identical to calling get_nn_info per site
-        def summarize(info):
-            return [(e["site_index"], tuple(e["image"]), e["weight"], tuple(e["site"].coords)) for e in info]
-
+        # get_all_nn_info determines the bond targets once for all sites and, without cation_anion,
+        # tessellates the whole structure once: here the results (including neighbor order, exact
+        # weights and the neighbor sites) must be identical to calling get_nn_info per site
         cnn = CrystalNN(**kwargs)
         all_nn_info = cnn.get_all_nn_info(self.lifepo4)
         assert len(all_nn_info) == len(self.lifepo4)
         for idx, info in enumerate(all_nn_info):
-            assert summarize(info) == summarize(cnn.get_nn_info(self.lifepo4, idx))
+            assert _summarize_nn_info(info) == _summarize_nn_info(cnn.get_nn_info(self.lifepo4, idx))
+
+    def test_get_all_nn_info_falls_back_to_per_site_tessellation(self, monkeypatch):
+        # if the tessellation of the whole structure fails (e.g. too small a cutoff),
+        # each site is tessellated on its own, which enlarges the cutoff as needed
+        cnn = CrystalNN()
+        expected = [_summarize_nn_info(info) for info in cnn.get_all_nn_info(self.lifepo4)]
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("This structure is pathological, infinite vertex in the Voronoi construction")
+
+        monkeypatch.setattr(VoronoiNN, "get_all_nn_info", fail)
+        assert [_summarize_nn_info(info) for info in cnn.get_all_nn_info(self.lifepo4)] == expected
 
     def test_get_all_nn_info_respects_subclass_override(self):
         class CappedCrystalNN(CrystalNN):
