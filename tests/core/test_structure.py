@@ -2892,8 +2892,10 @@ Sites (8)
         struct.translate_sites([0, 1], [0.1, 0, 0], to_unit_cell=False)
         assert_allclose(struct[1].frac_coords, [0.5, 0.4, 0.4])
         assert_allclose(struct[1].coords, [2.5, 2, 2])
-        # A Cartesian translation is converted to fractional coords with the structure's lattice (as before
-        # vectorization), while the site's Cartesian coords follow from its own lattice
+        # Preserved legacy behaviour (identical on main before vectorization), pinned so the vectorized fallback
+        # cannot drift, NOT a spec: the Cartesian translation plus the site's own-lattice Cartesian coords are
+        # converted to fractional coords with the structure's lattice, then reinterpreted in the site's lattice.
+        # A 1 A shift along x thus moves site 1 by (1.875, 0.5, 0.5) A.
         struct.translate_sites([0, 1], [1, 0, 0], frac_coords=False, to_unit_cell=False)
         assert_allclose(struct[0].frac_coords, [0.6, 0.25, 0.25])
         assert_allclose(struct[1].frac_coords, [(2.5 + 1) / 4, 0.5, 0.5])
