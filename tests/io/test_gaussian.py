@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 from pytest import approx
 
-from pymatgen.core.structure import Molecule
+from pymatgen.core.structure import Lattice, Molecule, Structure
 from pymatgen.electronic_structure.core import Spin
-from pymatgen.io.gaussian import GaussianInput, GaussianOutput
+from pymatgen.io.gaussian import GaussianInput, GaussianOutput, write_gaussian_vib_log
 from pymatgen.util.testing import TEST_FILES_DIR
 
 TEST_DIR = f"{TEST_FILES_DIR}/io/gaussian"
@@ -642,3 +642,27 @@ class TestGaussianInputSerialization:
         assert round_tripped.dieze_tag == "#N"
         assert round_tripped.gen_basis == "H 0\n6-31G\n****"
         assert str(round_tripped) == str(gau_inp)
+
+
+@pytest.mark.parametrize(
+    ("species", "modes", "match"),
+    [
+        (["H", "H"], [], "no modes to write"),
+        (["H"], [{"cm^-1": 100.0, "Displacements": [[1, 0, 0]]}], "1-atom"),
+        (["H", "H"], [{"cm^-1": 100.0}], "has no displacements"),
+        (["H", "H"], [{"cm^-1": 100.0, "Displacements": [[0, 0, 0]] * 2}], "all-zero displacements"),
+        (["H", "H"], [{"cm^-1": 100.0, "Displacements": [[1, 0, 0]] * 3}], "for 3 sites, but the frame has 2"),
+    ],
+)
+def test_write_gaussian_vib_log_errors(species, modes, match):
+    coords = [[0, 0, 0], [0, 0, 0.7]][: len(species)]
+    structure = Structure(Lattice.cubic(5), species, coords, properties={"vibrational_modes": modes})
+    with pytest.raises(ValueError, match=match):
+        write_gaussian_vib_log(structure, "vib.logx")
+
+
+def test_write_gaussian_vib_log_molecule():
+    mode = {"cm^-1": 100.0, "Displacements": [[1, 0, 0]] * 2}
+    molecule = Molecule(["H", "H"], [[0, 0, 0], [0, 0, 0.7]], properties={"vibrational_modes": [mode]})
+    with pytest.raises(TypeError, match="from_molecules"):
+        write_gaussian_vib_log(molecule, "vib.logx")

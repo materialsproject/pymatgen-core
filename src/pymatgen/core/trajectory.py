@@ -488,6 +488,73 @@ class Trajectory(MSONable):
         with zopen(filename, mode="wt", encoding="utf-8") as file:
             file.write(xdatcar_str)  # type:ignore[arg-type]
 
+    def write_gaussian_log(
+        self,
+        filename: PathLike = "calc.log",
+        site_property_map: dict[str, str] | None = None,
+        write_lattice: bool = True,
+        split_vib_modes: bool = False,
+    ) -> None:
+        """Write Trajectory object to a Gaussian-formatted log file.
+
+        The produced file will be readable by Gaussview. Frame energies ("energy", eV) and site forces ("forces",
+        eV/Angstrom) are converted to Gaussian's units (Hartree, Hartree/Bohr).
+
+        Vibrational modes are written from the "vibrational_modes" frame property, a list with a dict for each mode:
+            - "Displacements" (required): a displacement vector for each site, normalized before writing.
+            - "cm^-1" (optional, written as 0 if missing): the frequency in cm^-1. A frequency with a nonzero
+              imaginary part is written as minus its magnitude.
+            - "IR intensity" (optional, written as 0 if missing): in e^2/amu, converted to Gaussian's km/mol.
+        Every mode gets the symmetry label "A1", which is only a placeholder.
+
+        Args:
+            filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
+                The suffix ".logx" is recommended to distinguish from real Gaussian log files.
+            site_property_map: A mapping between implemented Gaussian properties and pymatgen properties.
+                i.e. providing {"mulliken charges": "charges"} will write the data stored in
+                `Trajectory[i].site_properties["charges"]` as Gaussian logs the Mulliken charges for each site.
+                The currently implemented property keys are "mulliken charges", "mulliken spin", "nbo charges",
+                "nbo spin", and "esp charges". Properties without a mapping are not written. All keys must map
+                to site properties of `list[float]`
+            write_lattice: Whether to write the lattice information in the log file. Setting this to false will
+                not write the lattice information in the log file, but will enable the "forces" site properties
+                to be readable by Gaussview, and the vibrational modes to be written. Ignored for trajectories
+                without a lattice.
+            split_vib_modes: Whether to write at most 3N - 3 vibrational modes per frame (N atoms), the most
+                GaussView reads from one frame, inserting a copy of the frame for each further 3N - 3 modes. Off by
+                default, so that each frame in the log file is a frame of the trajectory. Mode numbers start from 1
+                in each trajectory frame and run on through its inserted copies.
+        """
+        # Import inside function as this is an expensive import
+        # (causes import time for Trajectory to surpass threshold for 3 test setups)
+        from pymatgen.io.gaussian import _traj_to_gaussian_log
+
+        # Each frame must have an energy to be read properly by Gaussview.
+        if self.frame_properties is not None:
+            energies = [fp.get("energy") or 0 for fp in self.frame_properties]
+        else:
+            energies = [0] * len(self)
+        self.to_positions()
+        do_cell = write_lattice and self.lattice is not None
+        if do_cell and any(fp.get("vibrational_modes") for fp in self.frame_properties or []):
+            warnings.warn(
+                "Vibrational modes are not written to the log file when the lattice is written. "
+                "Call write_gaussian_log with write_lattice=False to write them.",
+                stacklevel=2,
+            )
+        n_max = 3 * len(self.species) - 3
+        if not (do_cell or split_vib_modes) and any(
+            len(fp.get("vibrational_modes") or []) > n_max for fp in self.frame_properties or []
+        ):
+            warnings.warn(
+                f"A frame has more than 3N - 3 = {n_max} vibrational modes, the most GaussView reads from one frame. "
+                "Call write_gaussian_log with split_vib_modes=True to write the rest in inserted copies of the frame.",
+                stacklevel=2,
+            )
+        lines = _traj_to_gaussian_log(self, do_cell, energies, site_property_map or {}, split_vib_modes)
+        with open(filename, "w") as file:
+            file.write(lines)
+
     def as_dict(self) -> dict:
         """Return the trajectory as a MSONable dict."""
         lat = self.lattice.tolist() if self.lattice is not None else None

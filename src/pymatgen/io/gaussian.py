@@ -13,7 +13,7 @@ from scipy.stats import norm
 from pymatgen.core import Composition, Element, Molecule
 from pymatgen.core import constants as cst
 from pymatgen.core.operations import SymmOp
-from pymatgen.core.units import Ha_to_eV
+from pymatgen.core.units import Ha_to_eV, amu_to_kg, bohr_to_ang, eV_to_Ha
 from pymatgen.electronic_structure.core import Spin
 from pymatgen.util.coord import get_angle
 from pymatgen.util.plotting import pretty_plot
@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Self
 
+    from numpy.typing import NDArray
+
+    from pymatgen.core.structure import Structure
+    from pymatgen.core.trajectory import Trajectory
     from pymatgen.util.typing import PathLike
 
 __author__ = "Shyue Ping Ong, Germain Salvato-Vallverdu, Xin Chen"
@@ -1359,6 +1363,255 @@ class GaussianOutput:
             link0_parameters=link0_parameters,
             dieze_tag=dieze_tag,
         )
+
+
+def _traj_to_gaussian_log(
+    traj: Trajectory,
+    do_cell: bool,
+    energies: list[float],
+    sp_map: dict[str, str],
+    split_vib_modes: bool = False,
+) -> str:
+    # (frame, energy, vibrational modes, number of the frame's modes before them) to write; with split_vib_modes,
+    # a frame with more than 3N - 3 modes is written once for each 3N - 3 of them
+    write_frames = []
+    for i in range(len(traj)):
+        frame = traj[i]
+        modes = [] if do_cell else frame.properties.get("vibrational_modes") or []
+        n_max = 3 * len(frame) - 3
+        if split_vib_modes and len(modes) > n_max:
+            if n_max < 1:
+                raise ValueError("Cannot split the vibrational modes of a 1-atom frame, which holds 3N - 3 = 0 modes")
+            write_frames += [(frame, energies[i], modes[j : j + n_max], j) for j in range(0, len(modes), n_max)]
+        else:
+            write_frames.append((frame, energies[i], modes, 0))
+    dump_lines = ["", " Entering Link 1 ", " ", *_log_input_orientation(traj[0], do_cell=do_cell)]
+    for step, (frame, energy, modes, idx_offset) in enumerate(write_frames, start=1):
+        dump_lines += [
+            *[*_log_input_orientation(frame, do_cell=do_cell), f"SCF Done:  E =  {energy * eV_to_Ha:.6f}  "],
+            *_log_mulliken(frame, sp_map.get("mulliken charges"), sp_map.get("mulliken spin")),
+            *_log_esp(frame, sp_map.get("esp charges")),
+            *_log_nbo(frame, sp_map.get("nbo charges"), sp_map.get("nbo spin")),
+            *(_log_vib_helper(modes, [sp.Z for sp in frame.species], idx_offset=idx_offset) if modes else []),
+            *_log_forces(frame, do_cell),
+            *["", " " + "Grad" * 18, "", f" Step number {step}", "", " " + "Grad" * 18],
+        ]
+    dump_lines[-2:-2] = [" Optimization completed.", "    -- Stationary point found."]
+    dump_lines += [*_log_input_orientation(traj[-1], do_cell=do_cell), " Normal termination of Gaussian 16"]
+    return "\n".join(dump_lines)
+
+
+def _log_input_orientation(frame: Structure | Molecule, do_cell=True) -> list[str]:
+    at_ns = frame.atomic_numbers
+    dump_lines = [
+        *[" " * 24 + "Standard orientation:" + " " * 26, " " + "-" * 69],
+        " Center     Atomic      Atomic             Coordinates (Angstroms)",
+        *[" Number     Number       Type             X           Y           Z", " " + "-" * 69],
+        *[f"{i + 1} {at_ns[i]} 0 {p[0]:.6f} {p[1]:.6f} {p[2]:.6f} " for i, p in enumerate(frame.cart_coords)],
+    ]
+    if do_cell:
+        cell = frame.lattice.matrix
+        dump_lines += [f"{i} -2 0 {v[0]:.6f} {v[1]:.6f} {v[2]:.6f} " for i, v in enumerate(cell, start=len(at_ns) + 1)]
+    dump_lines.append(" ---------------------------------------------------------------------")
+    return dump_lines
+
+
+def _log_mulliken(frame: Structure | Molecule, charge_key: str | None, spin_key: str | None) -> list[str]:
+    dump_lines = []
+    if charge_key in frame.site_properties:
+        charges = np.array(frame.site_properties[charge_key])
+        dump_lines += ["Mulliken charges:", "1"]
+        spins: NDArray | None = None
+        if spin_key in frame.site_properties:
+            spins = np.array(frame.site_properties[spin_key])
+            dump_lines[-2] = dump_lines[-2].replace(":", " and spin densities:")
+            dump_lines[-1] += " 2"
+        for i, charge in enumerate(charges):
+            spin = "" if spins is None else f"{spins[i]} "
+            dump_lines.append(f"{i + 1} {frame.species[i].symbol} {charge} {spin}")
+        spin_sum = "" if spins is None else f" {np.sum(spins)}"
+        dump_lines.append(f"Sum of Mulliken charges = {np.sum(charges)}{spin_sum}")
+    return dump_lines
+
+
+def _log_esp(frame: Structure | Molecule, charge_key: str | None) -> list[str]:
+    dump_lines = []
+    if charge_key in frame.site_properties:
+        charges = np.array(frame.site_properties[charge_key])
+        dump_lines += ["", " Charges from ESP fit", "  ESP charges:", "               1"]
+        dump_lines += [f"     {i + 1} {sp.symbol} {charges[i]:.6f}" for i, sp in enumerate(frame.species)]
+        # e*A to Debye (1 D = 1e-21 / c C*m)
+        dipole = np.sum(frame.cart_coords * charges[:, np.newaxis], axis=0) * cst.e * cst.c * 1e11
+        tot = np.linalg.norm(dipole)
+        dump_lines.append(f" Charge= {np.sum(charges)} Dipole= {' '.join(str(v) for v in dipole)} Tot=   {tot}")
+    return dump_lines
+
+
+def _log_nbo_fields(frame: Structure | Molecule, charges: NDArray, totals: NDArray | None = None) -> list[str]:
+    _totals = totals if isinstance(totals, np.ndarray) else np.zeros_like(charges)
+    dump_lines = [
+        *[" Summary of Natural Population Analysis:  ", "", " " * 39 + "Natural Population "],
+        " " * 17 + "Natural " + "-" * 47 + " ",
+        *["    Atom  No    Charge         Core      Valence    Rydberg      Total", " " + "-" * 71],
+    ]
+    for i, sp in enumerate(frame.species):
+        # Values for core, valence, and rydberg fields don't affect anything in gview.
+        dump_lines.append(f"{sp.symbol} {i + 1} {charges[i]:.6f} {0.0:.6f} {0.0:.6f} {0.0:.6f} {_totals[i]:.6f}")
+    dump_lines += [
+        *[" " + "-" * 71, f"   * Total *   {np.sum(charges):.6f} " + f"{0.0:.6f} " * 3 + f"{np.sum(_totals):.6f}"],
+    ]
+    return dump_lines
+
+
+def _log_nbo(frame: Structure | Molecule, charge_key: str | None, spin_key: str | None) -> list[str]:
+    dump_lines = []
+    if charge_key in frame.site_properties:
+        nbo_charges = np.array(frame.site_properties[charge_key])
+        dump_lines += _log_nbo_fields(frame, nbo_charges)
+        if spin_key in frame.site_properties:  # NBO spins read as difference between alpha/beta totals
+            spins = np.array(frame.site_properties[spin_key])
+            alpha_spins = np.maximum(np.zeros(len(spins)), spins)
+            beta_spins = np.abs(np.minimum(np.zeros(len(spins)), spins))
+            for spin_type, spin_arr in zip(("Alpha", "Beta"), (alpha_spins, beta_spins), strict=False):
+                dump_lines += [f" {spin_type} spin orbitals "]
+                dump_lines += _log_nbo_fields(frame, np.zeros_like(spin_arr), totals=spin_arr)
+    return dump_lines
+
+
+def _log_forces(frame: Structure | Molecule, do_cell: bool = True) -> list[str]:
+    # TODO: Find the trick for getting Gaussview to read forces on PBC calculations
+    dump_lines = []
+    if "forces" in frame.site_properties:
+        forces = np.array(frame.site_properties["forces"]) * eV_to_Ha * bohr_to_ang  # eV/A to Ha/Bohr
+        dump_lines = [
+            *["-" * 67, " Center     Atomic" + " " * 19 + "Forces (Hartrees/Bohr)"],
+            *[" Number     " + (" " * 14).join(["Number", "X", "Y", "Z"]), "-" * 67],
+        ]
+        for i, n in enumerate(frame.atomic_numbers):
+            dump_lines.append(f" {i + 1} {n}\t" + "\t".join(f"{forces[i][j]:.9f}" for j in range(3)))
+        if do_cell:
+            dump_lines += [" " * 25 + "-2" + " " * 10 + "   ".join(f"{0.0:.9f}" for j in range(3)) for i in range(3)]
+        # Gaussian's Max and RMS are over all 3N Cartesian components
+        max_f, rms_f = np.abs(forces).max(), np.sqrt(np.mean(forces**2))
+        dump_lines += [" " + "-" * 67, f" Cartesian Forces:  Max {max_f:.9f} RMS {rms_f:.9f}"]
+    return dump_lines
+
+
+def _log_vib_helper(modes: list[dict], atomic_numbers: list[int], idx_offset: int = 0):
+    frequencies = []
+    IR_intensities = []
+    disp_str = "Displacements"
+    freq_str = "cm^-1"
+    ir_str = "IR intensity"
+    nModes = len(modes)
+    nAtoms = len(atomic_numbers)
+    displacements = np.zeros((nModes, nAtoms, 3))
+    for i, mode in enumerate(modes):
+        mode_name = f"Vibrational mode {idx_offset + i + 1}"  # numbered as in the log file
+        freq = mode.get(freq_str, 0.0)
+        frequencies.append(-np.abs(freq) if np.imag(freq) != 0.0 else np.real(freq))
+        # e^2/amu to km/mol: A = N_A / (12 eps_0 c^2) * |dmu/dQ|^2
+        ir = mode.get(ir_str, 0.0) * cst.N_A * cst.e**2 / (12 * cst.epsilon_0 * cst.c**2 * amu_to_kg) / 1e3
+        IR_intensities.append(ir)
+        disp = mode.get(disp_str, [])
+        if not len(disp):
+            raise ValueError(f"{mode_name} has no displacements ({disp_str!r}): {mode}")
+        if len(disp) != nAtoms:
+            raise ValueError(f"{mode_name} has displacements for {len(disp)} sites, but the frame has {nAtoms}")
+        displacements[i] = disp
+        norm = np.linalg.norm(displacements[i])
+        if norm == 0:
+            raise ValueError(f"{mode_name} has all-zero displacements, so it cannot be normalized")
+        displacements[i] /= norm
+    # log_str = " ".join([f"{i+1}" for i in range(nModes)]) + " \n"
+    # GaussView reads the block by this header, so it stays as Gaussian prints it.
+    # TODO: write the reduced masses, force constants, Raman activities and depolarization ratios it announces, so
+    # that GaussView can show them.
+    log_lines = [
+        " Harmonic frequencies (cm**-1), IR intensities (KM/Mole), Raman scattering",
+        " activities (A**4/AMU), depolarization ratios for plane and unpolarized",
+        " incident light, reduced masses (AMU), force constants (mDyne/A),",
+        " and normal coordinates:",
+    ]
+    # nSlices = nModes // 3
+    nSlices = int(np.ceil(nModes / 3))
+    for iSlice in range(nSlices):
+        start_idx = iSlice * 3
+        end_idx = min(start_idx + 3, nModes)
+        mod_idcs = list(range(idx_offset + start_idx + 1, idx_offset + end_idx + 1))
+        displacements_slice = displacements[start_idx:end_idx, :, :]
+        freqs_slice = frequencies[start_idx:end_idx]
+        ir_intensities_slice = IR_intensities[start_idx:end_idx]
+        log_lines += _log_vib_helper_helper(
+            displacements_slice, mod_idcs, freqs_slice, ir_intensities_slice, nAtoms, atomic_numbers
+        )
+    return log_lines
+
+
+def _log_vib_helper_helper(
+    displacements_slice: NDArray[np.float64],
+    mod_idcs: list[int],
+    freqs: list[float],
+    ir_intensities: list[float],
+    nAtoms: int,
+    atomic_numbers: list[int],
+):
+    nModes = len(mod_idcs)
+    log_lines = [
+        " ".join([f"{idx}" for idx in mod_idcs]),
+        # TODO: label each mode with its irreducible representation from a symmetry analysis (PointGroupAnalyzer in
+        # pymatgen.symmetry.analyzer finds the point group, but does not assign modes to representations)
+        " ".join(["A1" for _ in range(nModes)]),  # placeholder symmetry label
+        " Frequencies -- " + " ".join([f"{f:.4f}" for f in freqs]),
+        " IR Inten    -- " + " ".join([f"{ir:.4f}" for ir in ir_intensities]),
+        "  Atom  AN " + "X Y Z " * len(mod_idcs),
+    ]
+    for iAtom in range(nAtoms):
+        idisps = displacements_slice[:, iAtom, :]
+        log_lines.append(
+            f"     {iAtom + 1}   {atomic_numbers[iAtom]} "
+            + " ".join(" ".join([f"{idisps[i][j]:.2f}" for j in range(3)]) + " " for i in range(nModes))
+        )
+    return log_lines
+
+
+def write_gaussian_vib_log(
+    structure: Structure,
+    filename: PathLike = "calc.log",
+    site_property_map: dict[str, str] | None = None,
+) -> None:
+    """Write the vibrational modes of a Structure to a Gaussian-formatted log file.
+
+    The produced file will be readable by Gaussview. The structure is written without its lattice, once for every
+    3N - 3 modes (N atoms), as `Trajectory.write_gaussian_log` does with `split_vib_modes=True`.
+
+    The modes in `structure.properties["vibrational_modes"]` take the form described in
+    `Trajectory.write_gaussian_log`: only "Displacements" is required. An "energy" in `structure.properties` (eV) is
+    written as the energy of every frame.
+
+    Args:
+        structure: Structure whose `properties["vibrational_modes"]` holds the modes to write.
+        filename: File to write. File does not need to end with '.log' to be readable by Gaussview.
+            The suffix ".logx" is recommended to distinguish from real Gaussian log files.
+        site_property_map: A mapping between implemented Gaussian properties and site properties of `structure`,
+            as in `Trajectory.write_gaussian_log`, i.e. providing {"mulliken charges": "charges"} will write
+            `structure.site_properties["charges"]` as the Mulliken charges of each site. The currently implemented
+            property keys are "mulliken charges", "mulliken spin", "nbo charges", "nbo spin", and "esp charges".
+            Properties without a mapping are not written.
+    """
+    if isinstance(structure, Molecule):
+        raise TypeError(
+            "write_gaussian_vib_log takes a Structure. For a Molecule, call Trajectory.from_molecules([molecule], "
+            "frame_properties=[molecule.properties]).write_gaussian_log(filename, split_vib_modes=True)"
+        )
+    if not structure.properties.get("vibrational_modes"):
+        raise ValueError(
+            'structure.properties["vibrational_modes"] is missing or empty, so there are no modes to write'
+        )
+    from pymatgen.core.trajectory import Trajectory
+
+    traj = Trajectory.from_structures([structure], frame_properties=[structure.properties])
+    traj.write_gaussian_log(filename, site_property_map, write_lattice=False, split_vib_modes=True)
 
 
 # ----------------------------------------------------------------------------

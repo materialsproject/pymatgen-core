@@ -479,6 +479,57 @@ class TestTrajectory(MatSciTest):
         written_traj = Trajectory.from_file(f"{self.tmp_path}/traj_test_XDATCAR")
         self._check_traj_equality(self.traj, written_traj)
 
+    def test_write_gaussian_log(self):
+        # Reading by GaussView can't be tested, so check the lines it parses
+        self.traj[:2].write_gaussian_log("struct.logx")
+        with open("struct.logx") as file:
+            text = file.read()
+        assert text.count("SCF Done:  E =  0.000000") == 2
+        assert " -2 0 " in text  # lattice vectors written
+        vib_traj = Trajectory.from_structures(
+            [self.traj[0]], frame_properties=[{"vibrational_modes": [{"cm^-1": 1.0}]}]
+        )
+        with pytest.warns(UserWarning, match="write_lattice=False"):
+            vib_traj.write_gaussian_log("vib.logx")
+
+        mol = Molecule(
+            ["O", "H", "H"],
+            [[0, 0, 0], [0, 0, 1], [0, 1, 0]],
+            site_properties={"charges": [-1.0, 0.5, 0.5], "magmom": [0.5, 0.0, 0.0], "forces": [[0, 0, 0.1]] * 3},
+        )
+        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"energy": None}, {"energy": -27.211386}])
+        traj.write_gaussian_log("mol.logx", {"mulliken charges": "charges", "mulliken spin": "magmom"})
+        with open("mol.logx") as file:
+            text = file.read()
+        assert "SCF Done:  E =  0.000000" in text
+        assert "SCF Done:  E =  -1.000000" in text  # eV to Hartree
+        assert " -2 " not in text  # no lattice for a Molecule, so no lattice lines in coordinates or forces
+        assert "1 O -1.0 0.5 \n2 H 0.5 0.0 \n" in text
+        assert "Sum of Mulliken charges = 0.0 0.5" in text
+        assert "ESP charges" not in text  # unmapped properties are not written
+        assert "Natural Population" not in text
+        assert "Max 0.001944690 RMS 0.001122768" in text  # 0.1 eV/A in Hartree/Bohr
+
+    def test_write_gaussian_log_vib_modes(self):
+        mol = Molecule(["O", "H", "H"], [[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+        modes = [{"cm^-1": 100.0 * (k + 1), "Displacements": [[1, 0, 0]] * 3} for k in range(9)]  # 9 > 3N - 3 = 6
+        traj = Trajectory.from_molecules([mol, mol], frame_properties=[{"vibrational_modes": modes}] * 2)
+        with pytest.warns(UserWarning, match="split_vib_modes=True"):  # 9 modes > 3N - 3 = 6
+            traj.write_gaussian_log("vib.logx")
+        with open("vib.logx") as file:
+            text = file.read()
+        assert text.count("Harmonic frequencies") == 2  # one block per frame
+        assert text.count("\n7 8 9\n") == 2  # mode numbers start from 1 in each frame
+        assert "\n10 11 12\n" not in text
+
+        traj.write_gaussian_log("vib_split.logx", split_vib_modes=True)
+        with open("vib_split.logx") as file:
+            text = file.read()
+        assert text.count("Harmonic frequencies") == 4  # 6 + 3 modes for each frame
+        assert "Step number 4" in text
+        assert text.count("\n7 8 9\n") == 2  # numbers run on through the inserted copies, then start again
+        assert "\n10 11 12\n" not in text
+
     def test_from_file(self):
         try:
             traj = Trajectory.from_file(f"{TEST_DIR}/LiMnO2_chgnet_relax.traj")
