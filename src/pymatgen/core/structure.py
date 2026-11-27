@@ -11,6 +11,7 @@ import inspect
 import io
 import itertools
 import math
+import operator
 import os
 import re
 import sys
@@ -49,7 +50,7 @@ from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice, get_points_in_spheres
 from pymatgen.core.operations import SymmOp
 from pymatgen.core.periodic_table import _PT_UNIT, DummySpecies, Element, Species, get_el_sp
-from pymatgen.core.sites import PeriodicSite, Site
+from pymatgen.core.sites import PeriodicSite, Site, _to_composition, _to_unit_cell
 from pymatgen.core.units import Length, Mass
 
 # Magmom and MagneticSpaceGroup are imported lazily inside
@@ -163,6 +164,44 @@ def _site_indices(sites: Sequence[Site], others: Sequence[Site]) -> list[int]:
             raise ValueError(f"{site!r} is not in others")
         indices.append(idx)
     return indices
+
+
+def _stack_coords(arrays: Sequence[NDArray[np.float64]]) -> NDArray[np.float64]:
+    """Stack per-site length-3 coordinate arrays into a new (N, 3) float64 array.
+
+    ``np.concatenate`` + ``reshape`` is ~2x faster than ``np.array`` on a list of small arrays.
+    """
+    if not arrays:
+        return np.empty((0, 3), dtype=np.float64)
+    flat = np.concatenate(arrays)
+    if flat.shape != (3 * len(arrays),):  # malformed site coords: defer to np.array semantics
+        return np.array(arrays, dtype=np.float64)
+    return flat.reshape(-1, 3).astype(np.float64, copy=False)
+
+
+# Species inputs whose Composition can be safely memoized (immutable, with complete __eq__/__hash__)
+_MEMOIZABLE_SPECIES_TYPES = (str, int, Element, Species)
+
+
+def _to_site_composition(species: SpeciesLike | CompositionLike, cache: dict) -> Composition:
+    """Memoized sites._to_composition: convert a site species spec to a validated Composition.
+
+    Args:
+        species: Species spec for one site (symbol, Z, Element/Species, dict or Composition).
+        cache: Memo of already converted specs, shared across the sites of one structure so that
+            e.g. 1000 "O" sites cost a single Composition construction.
+
+    Returns:
+        Composition: The site's species and occupancies.
+    """
+    key = (type(species), species) if type(species) in _MEMOIZABLE_SPECIES_TYPES else None
+    if key is not None and (comp := cache.get(key)) is not None:
+        return comp
+
+    comp = _to_composition(species)
+    if key is not None:
+        cache[key] = comp
+    return comp
 
 
 class Neighbor(Site):
@@ -499,9 +538,7 @@ class SiteCollection(Sequence[SiteType], ABC, Generic[SiteType]):
     @property
     def cart_coords(self) -> NDArray[np.float64]:
         """An np.array of the Cartesian coordinates of sites in the structure."""
-        if len(self):
-            return np.array([site.coords for site in self])
-        return np.empty((0, 3), dtype=np.float64)
+        return _stack_coords([site.coords for site in self])
 
     @property
     def formula(self) -> str:
@@ -1155,6 +1192,20 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
 
         self._lattice = lattice if isinstance(lattice, Lattice) else Lattice(lattice)
 
+        # Fast path: convert/wrap all coordinates in one vectorized step and validate each distinct species
+        # spec only once. Malformed coords fall back to per-site construction, which raises informative errors.
+        frac_coords: NDArray[np.float64] | None = None
+        if len(coords) > 0:
+            try:
+                coords_arr = np.array(coords, dtype=np.float64)  # always a copy, never aliases the input
+            except (TypeError, ValueError):
+                coords_arr = None
+            if coords_arr is not None and coords_arr.shape == (len(coords), 3):
+                frac_coords = self._lattice.get_fractional_coords(coords_arr) if coords_are_cartesian else coords_arr
+                if to_unit_cell:
+                    frac_coords = _to_unit_cell(frac_coords, self._lattice.pbc)
+
+        comp_cache: dict = {}
         sites: list[PeriodicSite] = []
         for idx, specie in enumerate(species):
             prop = None
@@ -1163,15 +1214,25 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
 
             label = labels[idx] if labels else None
 
-            site = PeriodicSite(
-                specie,
-                np.array(coords[idx]),
-                self._lattice,
-                to_unit_cell,
-                coords_are_cartesian=coords_are_cartesian,
-                properties=prop,
-                label=label,
-            )
+            if frac_coords is None:
+                site = PeriodicSite(
+                    specie,
+                    np.array(coords[idx]),
+                    self._lattice,
+                    to_unit_cell,
+                    coords_are_cartesian=coords_are_cartesian,
+                    properties=prop,
+                    label=label,
+                )
+            else:
+                site = PeriodicSite(
+                    _to_site_composition(specie, comp_cache),
+                    frac_coords[idx].copy(),  # each site owns its array (no shared base buffer)
+                    self._lattice,
+                    properties=prop,
+                    label=label,
+                    skip_checks=True,
+                )
             sites.append(site)
         self._sites: tuple[PeriodicSite, ...] = tuple(sites)
         if validate_proximity and not self.is_valid():
@@ -1237,28 +1298,40 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
             scale_matrix = scale_matrix * np.eye(3)  # (ruff-preview) noqa: PLR6104
         new_lattice = Lattice(np.dot(scale_matrix, self.lattice.matrix), pbc=self.lattice.pbc)
 
+        if len(self) == 0:
+            raise ValueError("You need at least 1 site to construct a Structure")
         frac_lattice = lattice_points_in_supercell(scale_matrix)
         cart_lattice: NDArray = new_lattice.get_cartesian_coords(frac_lattice)
+        n_images = len(cart_lattice)
 
-        new_sites = []
-        for site in self:
-            for vec in cart_lattice:
-                periodic_site = PeriodicSite(
-                    site.species,
-                    site.coords + vec,
-                    new_lattice,
-                    properties=site.properties,
-                    coords_are_cartesian=True,
-                    to_unit_cell=False,
-                    skip_checks=True,
-                    label=site.label,
-                )
-                new_sites.append(periodic_site)
+        # Site-major ordering: all images of site 0, then all images of site 1, ...
+        cart_coords = (self.cart_coords[:, None, :] + cart_lattice[None, :, :]).reshape(-1, 3)
+        species = [site.species for site in self for _ in range(n_images)]
+        labels = [site.label for site in self for _ in range(n_images)]
+
+        # Same semantics as from_sites: union of property keys, missing values set to None (with a warning)
+        site_props: dict[str, list] = {}
+        for idx, site in enumerate(self):
+            for key, val in site.properties.items():
+                site_props.setdefault(key, [None] * len(self))[idx] = val
+        for key, vals in site_props.items():
+            if any(val is None for val in vals):
+                warnings.warn(f"Not all sites have property {key}. Missing values are set to None.", stacklevel=2)
+            site_props[key] = [val for val in vals for _ in range(n_images)]
 
         # Number of primitive cells in the supercell is |det|; a left-handed scaling matrix must not flip the charge
         n_cells = round(abs(np.linalg.det(scale_matrix)))
         new_charge = self._charge * n_cells if self._charge is not None else None
-        return Structure.from_sites(new_sites, charge=new_charge, to_unit_cell=True).relabel_sites(ignore_uniq=True)
+        return Structure(
+            new_lattice,
+            species,
+            cart_coords,
+            charge=new_charge,
+            coords_are_cartesian=True,
+            to_unit_cell=True,
+            site_properties=site_props,
+            labels=labels,
+        ).relabel_sites(ignore_uniq=True)
 
     def __rmul__(self, scaling_matrix):
         """Similar to __mul__ to preserve commutativeness."""
@@ -1702,9 +1775,7 @@ class IStructure(SiteCollection[PeriodicSite], MSONable):
     @property
     def frac_coords(self):
         """Fractional coordinates as a Nx3 numpy array."""
-        if len(self):
-            return np.array([site.frac_coords for site in self])
-        return np.empty((0, 3), dtype=np.float64)
+        return _stack_coords([site.frac_coords for site in self])
 
     @property
     def volume(self) -> float:
@@ -4215,29 +4286,70 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """Delete a site from the Structure."""
         self._sites.__delitem__(idx)
 
+    def _set_site_coords(
+        self,
+        indices: Sequence[int],
+        frac_coords: NDArray[np.float64],
+        cart_coords: NDArray[np.float64] | None = None,
+    ) -> None:
+        """Bulk-assign coordinates to sites without per-site validation or per-site matrix products.
+
+        All sites at ``indices`` must share ``self.lattice`` (see ``_sites_share_lattice``), since both
+        coordinate sets are interpreted in it.
+
+        Args:
+            indices: Site indices to update. Must be unique.
+            frac_coords: (len(indices), 3) float64 array of new fractional coords.
+            cart_coords: Matching Cartesian coords. Computed from frac_coords with one matrix product if None.
+        """
+        if cart_coords is None:
+            cart_coords = self._lattice.get_cartesian_coords(frac_coords)
+        for idx, f_coords, c_coords in zip(indices, frac_coords, cart_coords, strict=True):
+            site = self._sites[idx]
+            # Copy the rows so each site owns its arrays rather than holding views that keep the whole
+            # (N, 3) buffer alive
+            site._frac_coords = f_coords.copy()
+            site._coords = c_coords.copy()
+
+    def _sites_share_lattice(self, indices: Iterable[int] | None = None) -> bool:
+        """Whether all sites (or those at indices) use this structure's Lattice object, which the bulk
+        coordinate paths assume. Sites can only diverge if a site's lattice was set directly.
+        """
+        sites = self._sites if indices is None else (self._sites[idx] for idx in indices)
+        return all(site._lattice is self._lattice for site in sites)
+
+    def _coords_array(self, coords: ArrayLike, kind: str) -> NDArray[np.float64]:
+        """Validate (and copy) an (N, 3) coordinate array for the frac_coords/cart_coords setters."""
+        coords = np.array(coords, dtype=np.float64)
+        if len(coords) != len(self._sites):
+            raise ValueError(
+                f"A Structure must have as many coordinates as it has sites, {len(coords)=} != {len(self._sites)=}."
+            )
+        if coords.shape != (len(self._sites), 3):
+            raise ValueError(f"{kind} coordinates are invalid - expected shape is {(len(self._sites), 3)}.")
+        return coords
+
     @IStructure.frac_coords.setter
     def frac_coords(self, fractional_coords: ArrayLike) -> None:
         """Sets the fractional coordinates of the Sites in the Structure."""
-        fractional_coords = np.asarray(fractional_coords, dtype=np.float64)
-        if len(fractional_coords) != len(self.sites):
-            raise ValueError(
-                "A Structure must have as many coordinates as it has sites, "
-                f"{len(fractional_coords)=} != {len(self.sites)=}."
-            )
-        for i, site in enumerate(self.sites):
-            site.frac_coords = np.asarray(fractional_coords[i], dtype=np.float64)
+        fractional_coords = self._coords_array(fractional_coords, "Fractional")
+        if not self._sites_share_lattice():
+            for site, f_coords in zip(self._sites, fractional_coords, strict=True):
+                site.frac_coords = f_coords
+            return
+        self._set_site_coords(range(len(self._sites)), fractional_coords)
 
     @IStructure.cart_coords.setter
     def cart_coords(self, cartesian_coords: ArrayLike) -> None:
         """Sets the cartesian coordinates of the Sites in the Structure."""
-        cartesian_coords = np.asarray(cartesian_coords, dtype=np.float64)
-        if len(cartesian_coords) != len(self.sites):
-            raise ValueError(
-                "A Structure must have as many coordinates as it has sites, "
-                f"{len(cartesian_coords)=} != {len(self.sites)=}."
-            )
-        for i, site in enumerate(self.sites):
-            site.coords = np.asarray(cartesian_coords[i], dtype=np.float64)
+        cartesian_coords = self._coords_array(cartesian_coords, "Cartesian")
+        if not self._sites_share_lattice():
+            # Each site converts with its own lattice, as before
+            for site, c_coords in zip(self._sites, cartesian_coords, strict=True):
+                site.coords = c_coords.copy()  # the coords setter does not copy; keep sites owning their arrays
+            return
+        frac_coords = self._lattice.get_fractional_coords(cartesian_coords)
+        self._set_site_coords(range(len(self._sites)), frac_coords, cartesian_coords)
 
     @property
     def lattice(self) -> Lattice:
@@ -4249,8 +4361,12 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         if not isinstance(lattice, Lattice):
             lattice = Lattice(lattice)
         self._lattice = lattice
-        for site in self:
-            site.lattice = lattice
+        # Equivalent to setting site.lattice on every site (fractional coords are kept), but with a single
+        # matrix product for all Cartesian coords instead of one per site
+        cart_coords = lattice.get_cartesian_coords(self.frac_coords)
+        for site, c_coords in zip(self._sites, cart_coords, strict=True):
+            site._lattice = lattice
+            site._coords = c_coords.copy()  # owned array, not a view into cart_coords
 
     def append(  # type:ignore[override]
         self,
@@ -4612,7 +4728,8 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         Args:
             indices: Integer or iterable of site indices on which to perform the
                 translation.
-            vector: Translation vector for sites.
+            vector: Translation vector for sites: a (3,) vector applied to every site, or a 2D array
+                with one row per site that broadcasts to (len(indices), 3).
             frac_coords (bool): Whether the vector corresponds to fractional or
                 Cartesian coordinates.
             to_unit_cell (bool): Whether the new coordinates are transformed to the unit
@@ -4623,16 +4740,42 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         """
         if not isinstance(indices, Iterable):
             indices = [indices]
+        n_sites = len(self._sites)
+        idx_list = [operator.index(idx) for idx in indices]
+        # Normalize negative indices so that duplicates are detected and IndexErrors are raised as before
+        idx_list = [idx + n_sites if -n_sites <= idx < 0 else idx for idx in idx_list]
+        if not idx_list:
+            return self
+        vectors = np.asarray(vector, dtype=np.float64)
+        if vectors.ndim == 2 and len(vectors) != len(idx_list):
+            raise ValueError(f"Got {len(vectors)} translation vectors for {len(idx_list)} sites.")
+        if len(set(idx_list)) != len(idx_list) or not self._sites_share_lattice(idx_list):
+            # Repeated indices translate the same site several times, and sites whose lattice is not the
+            # structure's must recompute their Cartesian coords from their own lattice. Apply such translations
+            # one site at a time with the pre-vectorization algorithm, which (as on main) converts a Cartesian
+            # translation to fractional coords with the structure's lattice.
+            for pos, idx in enumerate(idx_list):
+                vec = vectors[pos] if vectors.ndim == 2 else vectors
+                site = self._sites[idx]
+                if frac_coords:
+                    new_frac = site.frac_coords + vec
+                else:
+                    new_frac = self._lattice.get_fractional_coords(site.coords + vec)
+                if to_unit_cell:
+                    new_frac = _to_unit_cell(new_frac, self._lattice.pbc)
+                site.frac_coords = new_frac
+            return self
 
-        for idx in indices:
-            site = self[idx]
-            if frac_coords:
-                f_coords = site.frac_coords + vector
-            else:
-                f_coords = self._lattice.get_fractional_coords(site.coords + vector)
-            if to_unit_cell:
-                f_coords = [np.mod(f, 1) if p else f for p, f in zip(self.lattice.pbc, f_coords, strict=True)]
-            self[idx].frac_coords = f_coords
+        sites = [self._sites[idx] for idx in idx_list]
+        if frac_coords:
+            f_coords = _stack_coords([site.frac_coords for site in sites]) + vector
+        else:
+            f_coords = self._lattice.get_fractional_coords(_stack_coords([site.coords for site in sites]) + vector)
+        if f_coords.shape != (len(idx_list), 3):
+            raise ValueError(f"Translation {vector=} is invalid - expected shape is (3,).")
+        if to_unit_cell:
+            f_coords = _to_unit_cell(f_coords, self._lattice.pbc)
+        self._set_site_coords(idx_list, np.asarray(f_coords, dtype=np.float64))
 
         return self
 
@@ -4718,8 +4861,11 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
             dist = distance if min_distance is None else rng.uniform(min_distance, distance)
             return vector / vnorm * dist if vnorm != 0 else get_rand_vec()
 
-        for idx in range(len(self._sites)):
-            self.translate_sites([idx], get_rand_vec(), frac_coords=False)
+        # Draw the vectors site by site to keep the random stream (and thus seeded results) unchanged,
+        # then translate all sites at once
+        vectors = np.array([get_rand_vec() for _ in range(len(self._sites))])
+        if len(vectors):
+            self.translate_sites(range(len(self._sites)), vectors, frac_coords=False)
 
         return self
 
@@ -4757,8 +4903,7 @@ class Structure(IStructure, MutableSequence[PeriodicSite]):
         struct: Self = self if in_place else self.copy()
         supercell = struct * scaling_matrix
         if to_unit_cell:
-            for site in supercell:
-                site.to_unit_cell(in_place=True)
+            supercell.frac_coords = _to_unit_cell(supercell.frac_coords, supercell.lattice.pbc)
         struct.sites = supercell.sites
         struct.lattice = supercell.lattice
         struct._charge = supercell._charge
