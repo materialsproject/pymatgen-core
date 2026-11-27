@@ -4115,15 +4115,42 @@ class CrystalNN(NearNeighbors):
             # respect overrides of the per-site methods in subclasses
             return super().get_all_nn_info(structure)
 
+        all_nn: list[list[dict]] | list[None] = [None] * len(structure)
         if self.cation_anion:  # targets depend on the charge of each site
             site_species = [site.specie for site in structure]
             all_targets = [self._get_targets(structure, n, site_species) for n in range(len(structure))]
         else:
             all_targets = [structure.elements] * len(structure)
+            # With the same targets for every site, one tessellation of the whole structure
+            # gives the same Voronoi neighbors as one tessellation per site, at a fraction of the cost
+            vnn = VoronoiNN(
+                weight="solid_angle", targets=structure.elements, cutoff=self.search_cutoff, compute_adj_neighbors=False
+            )
+            try:
+                all_nn = vnn.get_all_nn_info(structure)
+            except RuntimeError:
+                pass  # e.g. the cutoff is too small: the per-site tessellation below enlarges it as needed
+            else:
+                # The neighbor sites of the whole-structure tessellation are shared between sites, and
+                # are PeriodicSites in the root cell or carry the distance to another site: give each
+                # entry its own PeriodicNeighbor, as returned by the per-site tessellation
+                for center, nn in zip(structure, all_nn, strict=True):
+                    for entry in nn:
+                        site = entry["site"]
+                        entry["site"] = PeriodicNeighbor(
+                            site.species,
+                            site.frac_coords,
+                            site.lattice,
+                            properties=site.properties,
+                            nn_distance=float(np.linalg.norm(site.coords - center.coords)),
+                            index=entry["site_index"],
+                            image=entry["image"],
+                            label=site.label,
+                        )
 
         return [
-            self._nn_data_to_nn_info(self._get_nn_data(structure, n, None, targets))
-            for n, targets in enumerate(all_targets)
+            self._nn_data_to_nn_info(self._get_nn_data(structure, n, None, targets, nn))
+            for n, (targets, nn) in enumerate(zip(all_targets, all_nn, strict=True))
         ]
 
     def _get_targets(self, structure: Structure, n: int, site_species: list | None = None) -> list:
@@ -4192,14 +4219,21 @@ class CrystalNN(NearNeighbors):
         """
         return self._get_nn_data(structure, n, length, self._get_targets(structure, n))
 
-    def _get_nn_data(self, structure: Structure, n: int, length: int | None, targets: list):
-        """get_nn_data with the bond targets of site n (see _get_targets) passed in."""
+    def _get_nn_data(
+        self, structure: Structure, n: int, length: int | None, targets: list, nn: list[dict] | None = None
+    ):
+        """get_nn_data with the bond targets of site n (see _get_targets) passed in, and optionally
+        its VoronoiNN neighbors (as computed below) when they are already known.
+        """
         length = length or self.fingerprint_length
 
-        # get base VoronoiNN neighbors (a new instance per site as VoronoiNN may grow its cutoff).
-        # Facet adjacency is not used here (poly_info is dropped below), so skip computing it.
-        vnn = VoronoiNN(weight="solid_angle", targets=targets, cutoff=self.search_cutoff, compute_adj_neighbors=False)
-        nn = vnn._get_nn_info(structure, n, targets)
+        if nn is None:
+            # get base VoronoiNN neighbors (a new instance per site as VoronoiNN may grow its cutoff).
+            # Facet adjacency is not used here (poly_info is dropped below), so skip computing it.
+            vnn = VoronoiNN(
+                weight="solid_angle", targets=targets, cutoff=self.search_cutoff, compute_adj_neighbors=False
+            )
+            nn = vnn._get_nn_info(structure, n, targets)
 
         # solid angle weights can be misleading in open / porous structures
         # adjust weights to correct for this behavior
