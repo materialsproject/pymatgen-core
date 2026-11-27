@@ -338,7 +338,7 @@ class Ion(Composition, MSONable, Stringify):
         oxi_states_override: dict | None = None,
         all_oxi_states: bool = False,
         max_sites: int | None = None,
-    ) -> list[dict[str, float]]:
+    ) -> tuple[dict[str, float], ...]:
         """Check if the composition is charge-balanced and returns all
         charge-balanced oxidation state combinations. Composition must have
         integer values. Note that more num_atoms in the composition gives
@@ -364,11 +364,20 @@ class Ion(Composition, MSONable, Stringify):
                 formula is greater than abs(max_sites).
 
         Returns:
-            A list of dicts - each dict reports an element symbol and average
-                oxidation state across all sites in that composition. If the
-                composition is not charge balanced, an empty list is returned.
+            A tuple of dicts - each dict reports an element symbol and average
+            oxidation state across all sites in that composition. If the
+            composition is not charge balanced, an empty tuple is returned.
+
+        Note:
+            For neutral single-element compositions, the oxidation state is
+            assumed to be zero, and oxi_states_override is not applied.
         """
-        return self._get_oxi_state_guesses(all_oxi_states, max_sites, oxi_states_override, self.charge)[0]  # type: ignore[return-value]
+        return super().oxi_state_guesses(
+            oxi_states_override=oxi_states_override,
+            target_charge=self.charge,
+            all_oxi_states=all_oxi_states,
+            max_sites=max_sites,
+        )
 
     def to_pretty_string(self) -> str:
         """Pretty string with proper superscripts."""
